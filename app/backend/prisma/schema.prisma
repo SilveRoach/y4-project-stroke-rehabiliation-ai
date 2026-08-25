@@ -1,0 +1,444 @@
+// =====================================================================
+// Stroke Rehabilitation System — Prisma schema
+// Generated from `newdb2.txt` (the current redesign, docs/04-design/).
+// Table/column names are preserved via @@map / @map so this lines up
+// 1:1 with the DBML in newdb2.txt and stays diffable against it.
+//
+// NOTE: newdb2.txt does not have user_contacts, patient_medical_history,
+// medical_history_attachments, or a `paused` plan status — those existed
+// in the prior newdb.txt/note3 design and were intentionally dropped here.
+// If that turns out to be unintentional, regenerate this file from
+// newdb.txt/note3.dbml instead.
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================================
+// ENUMS
+// =====================================================================
+
+enum UsersRole {
+  patient
+  therapist
+  admin
+
+  @@map("users_role")
+}
+
+enum UsersStatus {
+  active
+  inactive
+  suspended
+
+  @@map("users_status")
+}
+
+enum PatientsGender {
+  male
+  female
+  other
+  unknown
+
+  @@map("patients_gender")
+}
+
+enum ExerciseLibraryMovementTracking {
+  pose
+  virtual_grip
+  none
+
+  @@map("exercise_library_movement_tracking")
+}
+
+enum ExerciseLibraryDifficulty {
+  easy
+  medium
+  hard
+
+  @@map("exercise_library_difficulty")
+}
+
+enum ExerciseLibraryStatus {
+  draft
+  active
+  archived
+
+  @@map("exercise_library_status")
+}
+
+enum PatientRehabilitationPlansStatus {
+  draft
+  active
+  completed
+  cancelled
+
+  @@map("patient_rehabilitation_plans_status")
+}
+
+enum PatientTherapistAssignmentsStatus {
+  active
+  ended
+
+  @@map("patient_therapist_assignments_status")
+}
+
+enum RehabilitationScheduleDaysStatus {
+  pending
+  in_progress
+  completed
+  skipped
+  cancelled
+
+  @@map("rehabilitation_schedule_days_status")
+}
+
+enum ScheduledExercisesTargetType {
+  repetitions
+  duration
+  sets
+  distance
+  free
+
+  @@map("scheduled_exercises_target_type")
+}
+
+enum ScheduledExercisesStatus {
+  pending
+  in_progress
+  completed
+  skipped
+  cancelled
+
+  @@map("scheduled_exercises_status")
+}
+
+enum ExercisePerformanceResultsEvaluationSource {
+  ai
+  pt
+  manual
+
+  @@map("exercise_performance_results_evaluation_source")
+}
+
+enum FilesType {
+  image
+  video
+  document
+  audio
+  other
+
+  @@map("files_type")
+}
+
+// =====================================================================
+// USERS & ROLE EXTENSIONS
+// =====================================================================
+
+model User {
+  id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username             String      @unique @db.VarChar(100)
+  passwordHash         String      @map("password_hash")
+  email                String?     @db.VarChar(255)
+  phoneNumber          String?     @unique @map("phone_number") @db.VarChar(20)
+  firstName            String?     @map("first_name") @db.VarChar(100)
+  lastName             String?     @map("last_name") @db.VarChar(100)
+  role                 UsersRole
+  status               UsersStatus @default(active)
+  lastLoginAt          DateTime?   @map("last_login_at")
+  profilePictureFileId String?     @map("profile_picture_file_id") @db.Uuid
+  createdAt            DateTime    @default(now()) @map("created_at")
+  createdBy            String?     @map("created_by") @db.Uuid
+  updatedAt            DateTime?   @map("updated_at")
+  updatedBy            String?     @map("updated_by") @db.Uuid
+
+  // Self-referencing audit trail
+  createdByUser User?  @relation("UserCreatedBy", fields: [createdBy], references: [id])
+  updatedByUser User?  @relation("UserUpdatedBy", fields: [updatedBy], references: [id])
+  usersCreated  User[] @relation("UserCreatedBy")
+  usersUpdated  User[] @relation("UserUpdatedBy")
+
+  profilePicture File? @relation("UserProfilePicture", fields: [profilePictureFileId], references: [id])
+
+  // Role extensions (1:1)
+  patient   Patient?
+  therapist Therapist?
+  admin     Admin?
+
+  // Reverse relations where User is the actor (created_by/updated_by/uploaded_by/etc.
+  // on other tables) — named to match the FK they come from.
+  rehabPlanAttachmentsUploaded RehabilitationPlanAttachment[] @relation("RehabPlanAttachmentUploadedBy")
+  exerciseLibraryCreated       ExerciseLibrary[]              @relation("ExerciseLibraryCreatedBy")
+  rehabPlansCreated            PatientRehabilitationPlan[]    @relation("RehabPlanCreatedBy")
+  rehabPlansUpdated            PatientRehabilitationPlan[]    @relation("RehabPlanUpdatedBy")
+  assignmentsAssigned          PatientTherapistAssignment[]   @relation("AssignmentAssignedBy")
+  assignmentsEnded             PatientTherapistAssignment[]   @relation("AssignmentEndedBy")
+  scheduleDaysCreated          RehabilitationScheduleDay[]    @relation("ScheduleDayCreatedBy")
+  scheduleDaysUpdated          RehabilitationScheduleDay[]    @relation("ScheduleDayUpdatedBy")
+  scheduledExercisesCreated    ScheduledExercise[]            @relation("ScheduledExerciseCreatedBy")
+  scheduledExercisesUpdated    ScheduledExercise[]            @relation("ScheduledExerciseUpdatedBy")
+  filesUploaded                File[]                         @relation("FileUploadedBy")
+
+  @@map("users")
+}
+
+model Patient {
+  userId                String         @id @map("user_id") @db.Uuid
+  gender                PatientsGender @default(unknown)
+  dateOfBirth           DateTime?      @map("date_of_birth") @db.Date
+  heightCm              Decimal?       @map("height_cm") @db.Decimal(5, 2)
+  weightKg              Decimal?       @map("weight_kg") @db.Decimal(5, 2)
+  address               String?
+  emergencyContactName  String?        @map("emergency_contact_name") @db.VarChar(100)
+  emergencyContactPhone String?        @map("emergency_contact_phone") @db.VarChar(20)
+
+  user User @relation(fields: [userId], references: [id])
+
+  rehabilitationPlans  PatientRehabilitationPlan[]
+  therapistAssignments PatientTherapistAssignment[]
+
+  @@map("patients")
+}
+
+model Therapist {
+  userId            String    @id @map("user_id") @db.Uuid
+  licenseNumber     String?   @unique @map("license_number") @db.VarChar(100)
+  licenseIssuedDate DateTime? @map("license_issued_date") @db.Date
+  licenseExpiryDate DateTime? @map("license_expiry_date") @db.Date
+
+  user User @relation(fields: [userId], references: [id])
+
+  rehabilitationPlans      PatientRehabilitationPlan[]
+  patientAssignments       PatientTherapistAssignment[]
+  performanceResultsPtEval ExercisePerformanceResult[]  @relation("ResultPtEvaluatedBy")
+
+  @@map("therapists")
+}
+
+model Admin {
+  userId     String  @id @map("user_id") @db.Uuid
+  employeeId String? @unique @map("employee_id") @db.VarChar(50)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("admins")
+}
+
+// =====================================================================
+// EXERCISE LIBRARY
+// =====================================================================
+
+model ExerciseLibrary {
+  id               String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  parentExerciseId String?                         @map("parent_exercise_id") @db.Uuid
+  versionNumber    Int                             @map("version_number")
+  name             String                          @db.VarChar(150)
+  description      String?
+  movementTracking ExerciseLibraryMovementTracking @map("movement_tracking")
+  difficultyLevel  ExerciseLibraryDifficulty       @map("difficulty_level")
+  demoVideoFileId  String?                         @map("demo_video_file_id") @db.Uuid
+  baseCriteria     Json?                           @map("base_criteria")
+  status           ExerciseLibraryStatus           @default(draft)
+  createdAt        DateTime                        @default(now()) @map("created_at")
+  createdBy        String                          @map("created_by") @db.Uuid
+
+  parentExercise ExerciseLibrary?  @relation("ExerciseVersionChain", fields: [parentExerciseId], references: [id])
+  childVersions  ExerciseLibrary[] @relation("ExerciseVersionChain")
+
+  createdByUser User  @relation("ExerciseLibraryCreatedBy", fields: [createdBy], references: [id])
+  demoVideoFile File? @relation("ExerciseLibraryDemoVideo", fields: [demoVideoFileId], references: [id])
+
+  scheduledExercises ScheduledExercise[]
+
+  @@unique([parentExerciseId, versionNumber])
+  @@map("exercise_library")
+}
+
+// =====================================================================
+// REHABILITATION PLANS & SCHEDULING
+// =====================================================================
+
+model PatientRehabilitationPlan {
+  id          String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patientId   String                           @map("patient_id") @db.Uuid
+  therapistId String                           @map("therapist_id") @db.Uuid
+  name        String                           @db.VarChar(150)
+  description String?
+  startDate   DateTime?                        @map("start_date") @db.Date
+  endDate     DateTime?                        @map("end_date") @db.Date
+  status      PatientRehabilitationPlansStatus @default(draft)
+  createdAt   DateTime                         @default(now()) @map("created_at")
+  createdBy   String?                          @map("created_by") @db.Uuid
+  updatedAt   DateTime?                        @map("updated_at")
+  updatedBy   String?                          @map("updated_by") @db.Uuid
+
+  patient   Patient   @relation(fields: [patientId], references: [userId])
+  therapist Therapist @relation(fields: [therapistId], references: [userId])
+
+  createdByUser User? @relation("RehabPlanCreatedBy", fields: [createdBy], references: [id])
+  updatedByUser User? @relation("RehabPlanUpdatedBy", fields: [updatedBy], references: [id])
+
+  attachments  RehabilitationPlanAttachment[]
+  scheduleDays RehabilitationScheduleDay[]
+
+  @@map("patient_rehabilitation_plans")
+}
+
+model RehabilitationPlanAttachment {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rehabilitationPlanId String   @map("rehabilitation_plan_id") @db.Uuid
+  fileId               String   @map("file_id") @db.Uuid
+  description          String?
+  uploadedAt           DateTime @default(now()) @map("uploaded_at")
+  uploadedBy           String?  @map("uploaded_by") @db.Uuid
+
+  rehabilitationPlan PatientRehabilitationPlan @relation(fields: [rehabilitationPlanId], references: [id])
+  file               File                      @relation(fields: [fileId], references: [id])
+  uploadedByUser     User?                     @relation("RehabPlanAttachmentUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@map("rehabilitation_plan_attachments")
+}
+
+model PatientTherapistAssignment {
+  id          String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patientId   String                            @map("patient_id") @db.Uuid
+  therapistId String                            @map("therapist_id") @db.Uuid
+  status      PatientTherapistAssignmentsStatus @default(active)
+  assignedAt  DateTime                          @default(now()) @map("assigned_at")
+  assignedBy  String?                           @map("assigned_by") @db.Uuid
+  endedAt     DateTime?                         @map("ended_at")
+  endedBy     String?                           @map("ended_by") @db.Uuid
+
+  patient   Patient   @relation(fields: [patientId], references: [userId])
+  therapist Therapist @relation(fields: [therapistId], references: [userId])
+
+  assignedByUser User? @relation("AssignmentAssignedBy", fields: [assignedBy], references: [id])
+  endedByUser    User? @relation("AssignmentEndedBy", fields: [endedBy], references: [id])
+
+  // NOTE: newdb2.txt's index is `(patient_id, status) [unique]`, i.e. unique on the
+  // *pair* — not a partial unique index scoped to status = 'active' like newdb.txt had.
+  // That only blocks an exact duplicate (same patient, same status) rather than
+  // enforcing "one active assignment per patient." Preserved as written; flag if this
+  // was meant to carry over newdb.txt's stricter one-active-slot guarantee — Prisma's
+  // schema-level @@unique can't express a partial/filtered index, so that guarantee
+  // would need a raw migration (CREATE UNIQUE INDEX ... WHERE status = 'active').
+  @@unique([patientId, status])
+  @@map("patient_therapist_assignments")
+}
+
+model RehabilitationScheduleDay {
+  id                   String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rehabilitationPlanId String                           @map("rehabilitation_plan_id") @db.Uuid
+  scheduledDate        DateTime                         @map("scheduled_date") @db.Date
+  status               RehabilitationScheduleDaysStatus @default(pending)
+  therapistNote        String?                          @map("therapist_note")
+  createdAt            DateTime                         @default(now()) @map("created_at")
+  createdBy            String?                          @map("created_by") @db.Uuid
+  updatedAt            DateTime?                        @map("updated_at")
+  updatedBy            String?                          @map("updated_by") @db.Uuid
+
+  rehabilitationPlan PatientRehabilitationPlan @relation(fields: [rehabilitationPlanId], references: [id])
+
+  createdByUser User? @relation("ScheduleDayCreatedBy", fields: [createdBy], references: [id])
+  updatedByUser User? @relation("ScheduleDayUpdatedBy", fields: [updatedBy], references: [id])
+
+  scheduledExercises ScheduledExercise[]
+
+  @@unique([rehabilitationPlanId, scheduledDate])
+  @@map("rehabilitation_schedule_days")
+}
+
+model ScheduledExercise {
+  id                   String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scheduleDayId        String                       @map("schedule_day_id") @db.Uuid
+  exerciseLibraryId    String                       @map("exercise_library_id") @db.Uuid
+  orderNumber          Int?                         @map("order_number")
+  targetType           ScheduledExercisesTargetType @map("target_type")
+  targetValue          Json?                        @map("target_value")
+  therapistInstruction String?                      @map("therapist_instruction")
+  status               ScheduledExercisesStatus     @default(pending)
+  createdAt            DateTime                     @default(now()) @map("created_at")
+  createdBy            String?                      @map("created_by") @db.Uuid
+  updatedAt            DateTime?                    @map("updated_at")
+  updatedBy            String?                      @map("updated_by") @db.Uuid
+
+  scheduleDay     RehabilitationScheduleDay @relation(fields: [scheduleDayId], references: [id])
+  exerciseLibrary ExerciseLibrary           @relation(fields: [exerciseLibraryId], references: [id])
+
+  createdByUser User? @relation("ScheduledExerciseCreatedBy", fields: [createdBy], references: [id])
+  updatedByUser User? @relation("ScheduledExerciseUpdatedBy", fields: [updatedBy], references: [id])
+
+  performanceResults ExercisePerformanceResult[]
+
+  @@unique([scheduleDayId, orderNumber])
+  @@map("scheduled_exercises")
+}
+
+// =====================================================================
+// PERFORMANCE RESULTS
+// =====================================================================
+
+model ExercisePerformanceResult {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scheduledExerciseId String    @map("scheduled_exercise_id") @db.Uuid
+  attemptNumber       Int       @map("attempt_number")
+  referenceVideo      String?   @map("reference_video") @db.Uuid
+  completedAt         DateTime? @map("completed_at")
+
+  // AI Evaluation
+  aiScore       Decimal?  @map("ai_score") @db.Decimal(5, 2)
+  aiFeedback    String?   @map("ai_feedback")
+  aiMetrics     Json?     @map("ai_metrics")
+  aiEvaluatedAt DateTime? @map("ai_evaluated_at")
+
+  // PT Evaluation
+  ptScore       Decimal?  @map("pt_score") @db.Decimal(5, 2)
+  ptFeedback    String?   @map("pt_feedback")
+  ptEvaluatedBy String?   @map("pt_evaluated_by") @db.Uuid
+  ptEvaluatedAt DateTime? @map("pt_evaluated_at")
+
+  // Final Result
+  finalScore       Decimal?                                    @map("final_score") @db.Decimal(5, 2)
+  evaluationSource ExercisePerformanceResultsEvaluationSource? @map("evaluation_source")
+  performanceData  Json?                                       @map("performance_data")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  scheduledExercise  ScheduledExercise @relation(fields: [scheduledExerciseId], references: [id])
+  ptEvaluatedByUser  Therapist?        @relation("ResultPtEvaluatedBy", fields: [ptEvaluatedBy], references: [userId])
+  referenceVideoFile File?             @relation("ResultReferenceVideo", fields: [referenceVideo], references: [id])
+
+  @@unique([scheduledExerciseId, attemptNumber])
+  @@map("exercise_performance_results")
+}
+
+// =====================================================================
+// FILES
+// =====================================================================
+
+model File {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fileType     FilesType @map("file_type")
+  originalName String    @map("original_name") @db.VarChar(255)
+  storedName   String    @map("stored_name") @db.VarChar(255)
+  mimeType     String?   @map("mime_type") @db.VarChar(100)
+  fileSize     BigInt?   @map("file_size")
+  storagePath  String    @map("storage_path")
+  uploadedBy   String?   @map("uploaded_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  uploadedByUser User? @relation("FileUploadedBy", fields: [uploadedBy], references: [id])
+
+  usersAsProfilePicture       User[]                         @relation("UserProfilePicture")
+  exerciseLibraryDemoVideos   ExerciseLibrary[]              @relation("ExerciseLibraryDemoVideo")
+  rehabPlanAttachments        RehabilitationPlanAttachment[]
+  performanceResultReferences ExercisePerformanceResult[]    @relation("ResultReferenceVideo")
+
+  @@map("files")
+}

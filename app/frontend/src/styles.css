@@ -1,0 +1,4338 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap");
+
+:root {
+  --primary: #2563eb;
+  --primary-light: #eff6ff;
+  --primary-dark: #1d4ed8;
+  --teal: #14b8a6;
+  --teal-light: #f0fdfa;
+  --success: #22c55e;
+  --success-light: #f0fdf4;
+  --warning: #f59e0b;
+  --warning-light: #fffbeb;
+  --error: #ef4444;
+  --error-light: #fef2f2;
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --border: #e5e7eb;
+  --border-light: #f3f4f6;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --shadow-hover: 0 4px 24px rgba(0, 0, 0, 0.1);
+  font-family: Inter, "Noto Sans Thai", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text-primary);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+main {
+  min-height: 100vh;
+}
+
+.auth-page,
+.patient-dashboard,
+.session-shell {
+  min-height: 100vh;
+}
+
+/* Sign-in / register (LoginPage.tsx, RegisterPage.tsx) — a single floating
+   card on phones/tablets (.auth-shell stays one column, .auth-visual stays
+   hidden below 900px), growing into a two-panel shell at 900px+: a decorative
+   gradient panel (reusing the app's own primary→teal gradient, the same one
+   already used for .hero-progress-card/avatar badges elsewhere) plus a plain
+   white panel for the form. Purely a restyle — no fields, validation, or
+   navigation were added or removed from either page. */
+
+.auth-page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 20px;
+  background: linear-gradient(150deg, var(--primary) 0%, var(--primary-dark) 55%, var(--teal) 100%);
+}
+
+.auth-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: min(100%, 420px);
+}
+
+.auth-visual {
+  display: none;
+}
+
+.auth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.auth-card {
+  position: relative;
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  padding: 32px 26px;
+  border: 0;
+  border-radius: 24px;
+  background: var(--card);
+  box-shadow: var(--shadow-hover);
+}
+
+.auth-heading {
+  margin: 0 0 4px;
+  font-size: 1.35rem;
+  text-align: center;
+}
+
+.auth-brand-name {
+  margin: 0 0 2px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+.auth-subtitle {
+  margin: 0 0 20px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.auth-input-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input-icon svg {
+  position: absolute;
+  left: 15px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.auth-input-icon input {
+  padding-left: 42px;
+  border-radius: 999px;
+}
+
+.auth-card .primary-button {
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--primary), var(--teal));
+}
+
+@media (min-width: 900px) {
+  .auth-page {
+    padding: 40px;
+  }
+
+  .auth-shell {
+    grid-template-columns: 1fr 1fr;
+    width: min(100%, 960px);
+    min-height: 600px;
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: var(--shadow-hover);
+  }
+
+  .auth-visual {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 14px;
+    padding: 48px 44px;
+    overflow: hidden;
+    background: linear-gradient(160deg, var(--primary) 0%, var(--primary-dark) 55%, var(--teal) 100%);
+    color: #ffffff;
+  }
+
+  .auth-visual::after {
+    content: "";
+    position: absolute;
+    right: -120px;
+    bottom: -140px;
+    width: 320px;
+    height: 320px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .auth-visual-dots {
+    position: absolute;
+    top: 32px;
+    right: 32px;
+    width: 96px;
+    height: 96px;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.55) 1.5px, transparent 1.5px);
+    background-size: 14px 14px;
+    opacity: 0.7;
+  }
+
+  .auth-visual-icon {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .auth-visual-icon--plus {
+    top: 40px;
+    left: 40px;
+  }
+
+  .auth-visual-icon--circle {
+    bottom: 210px;
+    left: 80px;
+    width: 34px;
+    height: 34px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 50%;
+  }
+
+  .auth-visual-copy {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 10px;
+  }
+
+  .auth-visual-copy h2 {
+    margin: 0;
+    font-size: 1.9rem;
+    line-height: 1.15;
+  }
+
+  .auth-visual .auth-subtitle {
+    margin: 0;
+    max-width: 300px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.92rem;
+    text-align: left;
+    line-height: 1.5;
+  }
+
+  .auth-panel {
+    padding: 56px;
+    background: var(--card);
+  }
+
+  .auth-heading {
+    margin: 0 0 4px;
+    font-size: 1.7rem;
+    text-align: left;
+  }
+
+  .auth-brand-name {
+    text-align: left;
+  }
+
+  .auth-card {
+    width: 100%;
+    max-width: 360px;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+.auth-error-banner {
+  margin: 0;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 12px;
+  background: var(--error-light);
+  color: var(--error);
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.field-error {
+  color: var(--error);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.auth-card h1,
+.desktop-header h1,
+.session-side-panel h1 {
+  margin: 0;
+  line-height: 1.1;
+}
+
+.auth-card label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  min-height: 46px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: var(--card);
+  color: var(--text-primary);
+  outline: none;
+}
+
+input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.password-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.primary-button,
+.secondary-button,
+.icon-button,
+.link-button,
+.text-action,
+.session-icon-button,
+.sidebar-link,
+.patient-bottom-nav button {
+  border: 0;
+  border-radius: 12px;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 13px 22px;
+  background: var(--primary);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 6px 24px rgba(37, 99, 235, 0.25);
+}
+
+.primary-button:hover,
+.secondary-button:hover,
+.exercise-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-hover);
+}
+
+.primary-button:disabled,
+.link-button:disabled,
+.text-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: none;
+}
+
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  width: fit-content;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-primary);
+  padding: 9px 14px;
+  font-weight: 700;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.icon-button {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-primary);
+  padding: 8px 10px;
+}
+
+.link-button,
+.text-action {
+  background: transparent;
+  color: var(--primary);
+  padding: 0;
+  font-weight: 700;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 5px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.patient-dashboard {
+  display: grid;
+  background: var(--bg);
+}
+
+.patient-sidebar {
+  display: none;
+}
+
+.patient-workspace {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-mark span,
+.avatar-badge {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--teal));
+  color: #ffffff;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.desktop-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 72px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0 20px;
+  backdrop-filter: blur(10px);
+}
+
+.desktop-header h1 {
+  font-size: 1.15rem;
+}
+
+.patient-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.streak-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: var(--warning-light);
+  color: var(--warning);
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.today-grid {
+  display: grid;
+  gap: 18px;
+  padding: 20px 20px 100px;
+}
+
+.today-main-panel,
+.today-side-panel,
+.summary-card,
+.achievement-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.today-main-panel,
+.today-side-panel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.hero-progress-card {
+  border: 0;
+  background: linear-gradient(135deg, var(--primary), var(--teal));
+  color: #ffffff;
+}
+
+.hero-progress-card p,
+.hero-progress-card span {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.hero-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.hero-progress-row strong {
+  display: block;
+  color: #ffffff;
+  font-size: 2.45rem;
+  line-height: 1;
+}
+
+.linear-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  margin-top: 18px;
+}
+
+.linear-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #ffffff;
+}
+
+.patient-start-button {
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--primary);
+  box-shadow: none;
+}
+
+.program-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.program-heading h2,
+.summary-card h2 {
+  margin: 0;
+}
+
+.completion-pill,
+.difficulty-badge {
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.completion-pill {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.difficulty-badge.easy {
+  background: var(--success-light);
+  color: #16a34a;
+}
+
+.difficulty-badge.moderate {
+  background: var(--warning-light);
+  color: #d97706;
+}
+
+.difficulty-badge.hard {
+  background: var(--error-light);
+  color: #dc2626;
+}
+
+.exercise-list {
+  display: grid;
+  gap: 12px;
+}
+
+.exercise-card {
+  display: grid;
+  grid-template-columns: 54px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 86px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 15px;
+  background: var(--card);
+  color: inherit;
+  text-align: left;
+  box-shadow: var(--shadow-card);
+}
+
+.exercise-icon {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.exercise-icon.done {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.exercise-card strong,
+.exercise-card small {
+  display: block;
+}
+
+.exercise-card small {
+  margin-top: 3px;
+  color: var(--text-secondary);
+}
+
+.exercise-meta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  min-width: 82px;
+  text-align: right;
+}
+
+.exercise-meta > strong {
+  color: var(--success);
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.today-side-panel {
+  align-content: start;
+}
+
+.summary-card,
+.achievement-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.summary-card p,
+.achievement-card p,
+.session-side-panel p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.heatmap {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.heatmap-day {
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+}
+
+.heatmap-day.completed {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.heatmap-day.today {
+  background: rgba(37, 99, 235, 0.55);
+  border-color: rgba(37, 99, 235, 0.55);
+}
+
+.hint {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.stats-row {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.stats-row span,
+.desktop-metrics span {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.stats-row strong,
+.desktop-metrics strong {
+  color: var(--text-primary);
+  font-size: 1.4rem;
+}
+
+.achievement-card {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  background: linear-gradient(135deg, #fff7ed, #fffbeb);
+  border-color: rgba(245, 158, 11, 0.22);
+  color: var(--warning);
+}
+
+.achievement-card strong {
+  display: block;
+  color: var(--text-primary);
+}
+
+.progress-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progress-ring svg {
+  transform: rotate(-90deg);
+}
+
+.progress-ring circle {
+  fill: none;
+  stroke-width: 7;
+}
+
+.progress-ring circle:first-child {
+  stroke: var(--border-light);
+}
+
+.progress-ring circle:last-child {
+  stroke: var(--primary);
+  stroke-linecap: round;
+}
+
+.progress-ring.light circle:first-child {
+  stroke: rgba(255, 255, 255, 0.24);
+}
+
+.progress-ring.light circle:last-child {
+  stroke: #ffffff;
+}
+
+.progress-ring > strong {
+  position: absolute;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+}
+
+.progress-ring.light > strong {
+  color: #ffffff;
+}
+
+.patient-bottom-nav {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.96);
+  padding: 8px 0 18px;
+  backdrop-filter: blur(10px);
+}
+
+.patient-bottom-nav button {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 48px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.patient-bottom-nav button.active {
+  color: var(--primary);
+  font-weight: 800;
+}
+
+.session-shell {
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #0a0f1e;
+}
+
+.session-desktop-layout {
+  display: grid;
+  justify-items: center;
+  width: min(100%, 1180px);
+}
+
+.camera-stage {
+  position: relative;
+  width: min(100%, 520px);
+  min-height: min(820px, calc(100vh - 40px));
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border: 2px solid rgba(37, 99, 235, 0.38);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.12), transparent 17%),
+    linear-gradient(135deg, #0d1b2a, #1a2744);
+  box-shadow: 0 0 40px rgba(37, 99, 235, 0.15);
+}
+
+.session-topbar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px 44px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+  color: #ffffff;
+}
+
+.session-topbar div {
+  display: grid;
+  gap: 3px;
+}
+
+.session-topbar span {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.session-icon-button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.tracking-status {
+  position: absolute;
+  top: 78px;
+  left: 16px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.48);
+  color: #ffffff;
+  padding: 7px 12px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  backdrop-filter: blur(8px);
+}
+
+.tracking-status span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 1.5s ease infinite;
+}
+
+.tracking-status.good span {
+  background: var(--success);
+  box-shadow: 0 0 7px var(--success);
+}
+
+.tracking-status.fair span {
+  background: var(--warning);
+  box-shadow: 0 0 7px var(--warning);
+}
+
+.tracking-status.poor span {
+  background: var(--error);
+  box-shadow: 0 0 7px var(--error);
+}
+
+.reference-panel {
+  position: absolute;
+  top: 130px;
+  right: 16px;
+  z-index: 3;
+  display: grid;
+  gap: 6px;
+  width: 88px;
+  color: #ffffff;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+/* CAMERA_TRACKING_MOCKUP_PLAN.md §2.1 — pre-session "get positioned in frame"
+   state, shown once the camera is streaming but before the patient presses
+   Start. Sits above the plain camera feed, below where the full tracking HUD
+   (topbar aside) would render once started. */
+.session-preroll {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 18px;
+  padding: 32px;
+  text-align: center;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.05) 45%);
+}
+
+.framing-guide {
+  width: min(70%, 220px);
+  height: auto;
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.65);
+  stroke-width: 3;
+  stroke-dasharray: 8 7;
+}
+
+.session-preroll p {
+  margin: 0;
+  max-width: 260px;
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.session-preroll .primary-button {
+  min-width: 160px;
+}
+
+/* §2.2 — caption for the decorative PoseOverlay/HandOverlay, so they read as an
+   illustrative reference pose rather than a claim of real-time tracking. */
+.overlay-caption {
+  position: absolute;
+  top: 132px;
+  left: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.48);
+  color: rgba(255, 255, 255, 0.85);
+  padding: 5px 12px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+}
+
+.session-topbar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.side-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.side-tracking-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.session-progress-badge {
+  position: absolute;
+  top: 78px;
+  right: 16px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.session-progress-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.session-progress-ring > strong {
+  position: absolute;
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.session-demo-toggle {
+  position: absolute;
+  bottom: 190px;
+  right: 16px;
+  z-index: 5;
+}
+
+.session-demo-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  padding: 6px 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+
+.session-demo-toggle button.active {
+  border-color: var(--warning);
+  background: rgba(245, 158, 11, 0.22);
+  color: var(--warning);
+}
+
+/* §2.4 — now holds a scaled-down PoseOverlay/HandOverlay (.reference-thumb-svg)
+   instead of an empty gradient box, so the panel actually shows a reference
+   instead of nothing. position: relative so the absolutely-positioned mini SVGs
+   lay out inside it rather than the whole camera stage. */
+.reference-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.25), rgba(20, 184, 166, 0.16)),
+    #2b2e2b;
+}
+
+.reference-thumb-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: #60a5fa;
+  stroke-linecap: round;
+  stroke-width: 5;
+}
+
+.skeleton-overlay,
+.hand-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: #60a5fa;
+  stroke-linecap: round;
+  stroke-width: 3;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 8px rgba(37, 99, 235, 0.5));
+  /* Matches .camera-feed's own scaleX(-1) selfie flip below — previously these
+     decorative overlays weren't mirrored, so on an asymmetric layout (e.g.
+     HandOverlay's virtual-object box, offset left) the "tracked" object sat on
+     the opposite side from where a mirrored real hand would be. */
+  transform: scaleX(-1);
+}
+
+.camera-feed {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Selfie/mirror view — feels natural for a patient watching themselves, matching
+     how a phone's front camera preview normally behaves. */
+  transform: scaleX(-1);
+}
+
+.camera-state-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px;
+  color: rgba(255, 255, 255, 0.88);
+  text-align: center;
+  background: linear-gradient(135deg, #0d1b2a, #1a2744);
+}
+
+.camera-state-overlay p {
+  margin: 0;
+  max-width: 280px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.camera-state-overlay .secondary-button {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.24);
+  color: #ffffff;
+}
+
+.joint,
+.virtual-object {
+  fill: #60a5fa;
+  stroke: none;
+}
+
+.virtual-object {
+  opacity: 0.8;
+}
+
+.session-state {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.3);
+  color: #ffffff;
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.session-bottom-stack {
+  position: absolute;
+  inset: auto 14px 14px;
+  z-index: 5;
+  display: grid;
+  gap: 12px;
+}
+
+.feedback-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #ffffff;
+  backdrop-filter: blur(10px);
+}
+
+.session-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+
+.session-control-btn {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+}
+
+.session-control-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.session-control-btn.stop {
+  width: 68px;
+  height: 68px;
+  border: none;
+  background: linear-gradient(135deg, var(--error), #c53030);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.8rem;
+  box-shadow: 0 4px 24px rgba(239, 68, 68, 0.4);
+}
+
+.session-control-btn.stop:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+}
+
+.feedback-panel.warning {
+  background: rgba(120, 53, 15, 0.86);
+}
+
+.feedback-panel p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.side-name-th {
+  margin: -8px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.metric-row span {
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  padding: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.76rem;
+}
+
+.metric-row strong {
+  color: #ffffff;
+  font-size: 1.15rem;
+}
+
+.session-side-panel {
+  display: none;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (min-width: 900px) {
+  .patient-dashboard {
+    grid-template-columns: 240px minmax(0, 1fr);
+    align-items: stretch;
+    padding: 32px;
+    gap: 24px;
+  }
+
+  .patient-sidebar {
+    display: grid;
+    align-content: start;
+    gap: 28px;
+    min-height: calc(100vh - 64px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--card);
+    padding: 22px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .patient-sidebar nav {
+    display: grid;
+    gap: 8px;
+  }
+
+  .sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 700;
+  }
+
+  .sidebar-link.active {
+    background: var(--primary);
+    color: #ffffff;
+  }
+
+  .sidebar-link.logout {
+    margin-top: auto;
+    color: var(--primary);
+  }
+
+  .patient-workspace {
+    min-height: calc(100vh - 64px);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--bg);
+  }
+
+  .desktop-header {
+    height: 78px;
+    padding: 0 32px;
+  }
+
+  .desktop-header h1 {
+    font-size: 1.45rem;
+  }
+
+  .today-grid {
+    grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.75fr);
+    align-items: start;
+    padding: 28px;
+  }
+
+  .hero-progress-card {
+    grid-column: 1;
+  }
+
+  .exercise-panel {
+    grid-column: 1;
+  }
+
+  .today-side-panel {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .patient-bottom-nav {
+    display: none;
+  }
+
+  .session-shell {
+    padding: 32px;
+  }
+
+  .session-desktop-layout {
+    grid-template-columns: minmax(440px, 560px) minmax(320px, 380px);
+    align-items: stretch;
+    gap: 24px;
+  }
+
+  .camera-stage {
+    min-height: min(820px, calc(100vh - 64px));
+  }
+
+  .session-side-panel {
+    display: grid;
+    align-content: start;
+    gap: 20px;
+    min-height: min(820px, calc(100vh - 64px));
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--card);
+    padding: 24px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .desktop-metrics {
+    display: grid;
+    gap: 10px;
+  }
+
+  .session-bottom-stack {
+    inset: auto 20px 20px;
+  }
+}
+
+@media (max-width: 560px) {
+  .exercise-card {
+    grid-template-columns: 54px 1fr;
+  }
+
+  .exercise-meta {
+    grid-column: 2;
+    grid-template-columns: auto 1fr;
+    justify-items: start;
+    align-items: center;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .camera-stage {
+    min-height: 100vh;
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .session-shell {
+    padding: 0;
+  }
+}
+
+/* --- Therapist dashboard --- */
+
+.therapist-shell {
+  display: grid;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.therapist-sidebar {
+  display: none;
+}
+
+.therapist-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.therapist-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--primary), var(--teal));
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.therapist-brand strong {
+  display: block;
+  font-size: 0.88rem;
+}
+
+.therapist-brand small {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.therapist-nav {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+
+.therapist-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 9px 12px;
+  text-align: left;
+  font-weight: 400;
+  font-size: 0.845rem;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.therapist-nav-link.active {
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.therapist-nav-badge {
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--error);
+  color: #ffffff;
+  padding: 1px 6px;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.therapist-sidebar-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 10px 12px;
+}
+
+.therapist-sidebar-profile strong {
+  display: block;
+  font-size: 0.78rem;
+}
+
+.therapist-sidebar-profile small {
+  color: var(--text-secondary);
+  font-size: 0.65rem;
+}
+
+.therapist-workspace {
+  min-height: 100vh;
+}
+
+.therapist-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 16px 20px;
+  backdrop-filter: blur(10px);
+}
+
+.therapist-topbar h1 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.therapist-topbar p {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.therapist-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.therapist-bell {
+  position: relative;
+  border-radius: 10px;
+}
+
+.therapist-bell::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--error);
+  border: 1.5px solid #ffffff;
+}
+
+.therapist-topbar-profile {
+  display: none;
+  align-items: center;
+  gap: 10px;
+}
+
+.therapist-topbar-profile strong {
+  display: block;
+  font-size: 0.8rem;
+}
+
+.therapist-topbar-profile small {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.therapist-main {
+  display: grid;
+  gap: 20px;
+  padding: 20px;
+}
+
+.therapist-stat-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+}
+
+.therapist-stat-card {
+  padding: 18px;
+}
+
+.therapist-stat-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.therapist-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.accent-teal .therapist-stat-icon {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.accent-success .therapist-stat-icon {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.accent-warning .therapist-stat-icon {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.therapist-stat-change {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.therapist-stat-change.positive {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.therapist-stat-change.negative {
+  background: var(--error-light);
+  color: var(--error);
+}
+
+.therapist-stat-value {
+  margin-top: 14px;
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.therapist-stat-label {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.therapist-chart-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+}
+
+.therapist-chart-card {
+  padding: 20px;
+}
+
+.therapist-chart-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.therapist-chart-heading strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.therapist-chart-heading p {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.therapist-chart-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.therapist-chart-heading-actions .admin-role-select {
+  min-height: 34px;
+  max-width: 170px;
+  font-size: 0.78rem;
+}
+
+.therapist-chart-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  height: 200px;
+  padding: 0 24px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.therapist-chart-empty p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.therapist-table tbody tr.trend-selected td {
+  background: var(--primary-light);
+}
+
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.badge-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badge-pill.good {
+  background: var(--success-light);
+  color: #16a34a;
+}
+
+.badge-pill.fair {
+  background: var(--warning-light);
+  color: #d97706;
+}
+
+.badge-pill.poor {
+  background: var(--error-light);
+  color: #dc2626;
+}
+
+.therapist-patient-card {
+  padding: 20px;
+}
+
+.therapist-patient-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.therapist-patient-toolbar strong {
+  font-size: 0.92rem;
+}
+
+.therapist-patient-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.therapist-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.therapist-search svg {
+  position: absolute;
+  left: 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.therapist-search input {
+  min-height: 38px;
+  padding-left: 36px;
+  font-size: 0.85rem;
+}
+
+.therapist-add-patient {
+  min-height: 38px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+}
+
+.therapist-table-scroll {
+  overflow-x: auto;
+}
+
+.therapist-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.therapist-table th {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.therapist-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.therapist-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.therapist-table-patient {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.therapist-table-patient strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.therapist-table-patient small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.therapist-avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(20, 184, 166, 0.18));
+  color: var(--primary);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.therapist-avatar.large {
+  width: 56px;
+  height: 56px;
+  background: linear-gradient(135deg, var(--primary), var(--teal));
+  color: #ffffff;
+  font-size: 1.1rem;
+}
+
+.therapist-compliance-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.therapist-compliance-track {
+  flex: 1;
+  min-width: 64px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--border-light);
+}
+
+.therapist-compliance-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--success);
+}
+
+.therapist-compliance-fill.fair {
+  background: var(--warning);
+}
+
+.therapist-compliance-fill.poor {
+  background: var(--error);
+}
+
+.therapist-compliance-value {
+  min-width: 32px;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.therapist-view-button {
+  min-height: 32px;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+}
+
+.mini-progress-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini-progress-ring > strong {
+  position: absolute;
+  color: var(--text-primary);
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.mini-progress-track {
+  stroke: var(--border-light);
+}
+
+.mini-progress-fill {
+  stroke: var(--success);
+}
+
+.mini-progress-ring.fair .mini-progress-fill {
+  stroke: var(--warning);
+}
+
+.mini-progress-ring.poor .mini-progress-fill {
+  stroke: var(--error);
+}
+
+.therapist-panel-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(2px);
+}
+
+.therapist-detail-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 201;
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  width: min(100%, 400px);
+  overflow-y: auto;
+  background: var(--card);
+  padding: 24px;
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.15);
+}
+
+.therapist-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.therapist-detail-header strong {
+  font-size: 0.98rem;
+}
+
+.therapist-detail-identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.therapist-detail-identity strong {
+  display: block;
+  font-size: 1.05rem;
+}
+
+.therapist-detail-identity p {
+  margin: 2px 0 8px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.therapist-detail-nameTh {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.therapist-detail-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.therapist-detail-stats > div {
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 12px 16px;
+}
+
+.therapist-detail-stats span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.therapist-detail-stats strong {
+  font-size: 0.95rem;
+}
+
+.therapist-detail-progress strong {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+}
+
+.therapist-detail-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.therapist-detail-progress-row p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.therapist-detail-actions {
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 900px) {
+  .therapist-shell {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .therapist-sidebar {
+    display: grid;
+    grid-template-rows: auto 1fr auto auto;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    border-right: 1px solid var(--border);
+    background: var(--card);
+    padding: 20px 14px;
+  }
+
+  .therapist-brand,
+  .therapist-sidebar-profile,
+  .therapist-sidebar > .sidebar-link {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .therapist-sidebar .sidebar-link.logout {
+    margin: 8px 6px 0;
+  }
+
+  .therapist-topbar {
+    padding: 0 32px;
+    height: 64px;
+  }
+
+  .therapist-topbar-profile {
+    display: flex;
+  }
+
+  .therapist-topbar-profile > div {
+    text-align: right;
+  }
+
+  .therapist-main {
+    padding: 32px;
+  }
+
+  .therapist-stat-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .therapist-chart-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+  }
+}
+
+/* --- Admin user management (frontend-design.md §9, design draft/src/views/AdminView.tsx) ---
+   Reuses the Therapist shell/table/card structure (same underlying layout in both
+   Figma views) with the Admin Console's own purple identity (#7C3AED, matching the
+   design draft's "assigned" badge/accent color exactly) instead of Therapist's
+   blue/teal. */
+
+.admin-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, max-content));
+  justify-items: start;
+  gap: 16px;
+}
+
+.admin-stat-grid .therapist-stat-card {
+  width: 100%;
+  max-width: 320px;
+}
+
+.admin-sidebar .therapist-brand-mark,
+.admin-avatar {
+  background: linear-gradient(135deg, #7c3aed, var(--primary));
+}
+
+.admin-sidebar .therapist-nav-link.active {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+.admin-success-banner {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.admin-role-select {
+  min-height: 38px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--card);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.admin-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 201;
+  display: grid;
+  gap: 18px;
+  width: min(100%, 420px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  border-radius: 20px;
+  background: var(--card);
+  padding: 24px;
+  box-shadow: var(--shadow-hover);
+}
+
+.admin-modal-form {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-modal-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.admin-role-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-role-toggle .secondary-button {
+  flex: 1;
+}
+
+.admin-role-toggle .secondary-button.active {
+  border-color: #7c3aed;
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+/* --- Admin Dashboard (frontend-design.md §8) --- */
+
+.admin-status-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.admin-status-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.admin-status-heading strong {
+  font-size: 0.92rem;
+}
+
+.admin-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 260px));
+  gap: 12px;
+}
+
+.admin-status-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.admin-status-row strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.85rem;
+}
+
+.admin-status-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.admin-role-legend {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.admin-role-legend-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.admin-role-legend-row strong {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.admin-role-legend-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 8px;
+  border-radius: 3px;
+}
+
+.admin-quicklink-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+}
+
+.admin-quicklink-card strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.98rem;
+}
+
+.admin-quicklink-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.admin-quicklink-card .primary-button {
+  width: fit-content;
+}
+
+.admin-log-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-log-entry {
+  border-left: 3px solid var(--primary);
+  border-radius: 10px;
+  background: var(--primary-light);
+  padding: 10px 14px;
+}
+
+.admin-log-entry.warning {
+  border-left-color: var(--warning);
+  background: var(--warning-light);
+}
+
+.admin-log-entry.error {
+  border-left-color: var(--error);
+  background: var(--error-light);
+}
+
+.admin-log-entry-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.admin-log-level {
+  color: var(--text-primary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-log-entry.warning .admin-log-level {
+  color: #b45309;
+}
+
+.admin-log-entry.error .admin-log-level {
+  color: var(--error);
+}
+
+.admin-log-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.admin-log-entry p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+/* --- Exercise Library (frontend-design.md §6, revised per
+   UI_MOCKUP_PLAN_NEWDB.md §2.5 for newdb.txt's versioned exercise_library schema).
+   Reuses the therapist shell/stat-card/table idioms above; adds a card grid for
+   browsing exercises plus a create/edit form and a version-history slide-over. */
+
+.library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.library-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.library-filter-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.library-filter-chip.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.library-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  padding: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.library-card.is-archived {
+  opacity: 0.65;
+}
+
+.library-card-top {
+  display: flex;
+  gap: 12px;
+}
+
+.library-card-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.library-card-icon.tracking-virtual_grip {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.library-card-icon.tracking-none {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.library-card-title {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.library-card-sub {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.library-card-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.library-version-badge {
+  border-radius: 999px;
+  background: var(--border-light);
+  color: var(--text-secondary);
+  padding: 2px 9px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.library-status-badge {
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.library-status-badge.active {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.library-status-badge.draft {
+  background: var(--warning-light);
+  color: #b45309;
+}
+
+.library-status-badge.archived {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.library-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid var(--border-light);
+  padding-top: 10px;
+}
+
+.library-card-actions .text-action {
+  font-size: 0.8rem;
+}
+
+.library-card-actions .text-action.danger {
+  color: var(--error);
+}
+
+.library-card-history-link {
+  margin-left: auto;
+}
+
+.library-warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 12px;
+  background: var(--warning-light);
+  color: #92650c;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.library-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 201;
+  display: grid;
+  gap: 18px;
+  width: min(100%, 560px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  border-radius: 20px;
+  background: var(--card);
+  padding: 24px;
+  box-shadow: var(--shadow-hover);
+}
+
+.library-modal-form {
+  display: grid;
+  gap: 16px;
+}
+
+.library-modal-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.library-modal-form textarea {
+  min-height: 72px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: var(--card);
+  color: var(--text-primary);
+  font: inherit;
+  resize: vertical;
+}
+
+.library-toggle-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.library-segmented {
+  display: flex;
+  gap: 6px;
+}
+
+.library-segmented button {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text-secondary);
+  padding: 8px 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.library-segmented button.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.library-criteria-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.library-criteria-grid label {
+  font-size: 0.76rem;
+}
+
+.library-video-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.library-history-panel .therapist-detail-header {
+  margin-bottom: 4px;
+}
+
+.library-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.library-history-row {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.library-history-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.library-history-row-top strong {
+  font-size: 0.85rem;
+}
+
+.library-history-criteria {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.library-history-row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+@media (min-width: 720px) {
+  .library-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1180px) {
+  .library-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* --- Patient Detail (Therapist view, frontend-design.md §5, revised per
+   UI_MOCKUP_PLAN_NEWDB.md §2.3 medical history + §2.7 session review). Reuses the
+   therapist shell/topbar/sidebar and .summary-card/.badge-pill idioms above;
+   mirrors docs/04-design/mockups/patient-detail.html's layout 1:1. */
+
+.pd-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 0.82rem;
+}
+
+.pd-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.pd-header h1 {
+  margin: 0 0 3px;
+  font-size: 1.25rem;
+}
+
+.pd-header p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+/* Plan+Calendar (full-width) and Medical-history/Session-history (side-by-side)
+   are all rendered as equal-weight "blocky" cards, like the dashboard's
+   stat/chart cards, instead of bare sections — see .pd-plan-layout/.pd-bottom-grid
+   below. */
+.pd-plan-card,
+.pd-medical-card,
+.pd-session-card {
+  padding: 20px;
+}
+
+.therapist-chart-heading-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.pd-program-status {
+  font-weight: 700;
+}
+
+.pd-program-status.active {
+  color: var(--success);
+}
+
+.pd-program-status.paused {
+  color: var(--warning);
+}
+
+.pd-program-status.completed {
+  color: var(--text-secondary);
+}
+
+.pd-program-status.draft {
+  color: var(--text-secondary);
+}
+
+.pd-program-status.cancelled {
+  color: var(--error);
+}
+
+.pd-stub-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-secondary) !important;
+  cursor: not-allowed;
+  white-space: nowrap;
+}
+
+.pd-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 22px 0 10px;
+}
+
+.pd-section-heading strong {
+  font-size: 0.88rem;
+}
+
+.pd-section-heading .text-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+/* Two-column "blocky" layout: Medical History + Session History side by side,
+   mirroring the dashboard's .therapist-stat-grid/.therapist-chart-grid card rows
+   instead of a long single-column stack. The Rehab Plan card above is full-width
+   on its own (.pd-plan-card/.pd-plan-layout below), not part of this grid. */
+
+/* Full-width Rehab Plan card: calendar on the left, scrollable plan selector on
+   the right, sized like the dashboard's full-width patient table card
+   (.therapist-patient-card) rather than sitting in a two-card row with Progress.
+   Medical History + Session History still sit side by side below in
+   .pd-bottom-grid. */
+.pd-bottom-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+  margin-bottom: 16px;
+}
+
+.pd-plan-card {
+  margin-bottom: 16px;
+}
+
+.pd-plan-layout {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1fr;
+}
+
+.pd-plan-calendar-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.pd-plan-calendar-heading strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.pd-plan-calendar-heading p {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.pd-plan-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pd-plan-selector-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Scrollable list of plan rows, per the wireframe ("scrollable plan selector
+   with row of plan allowing PT to check the calendar for progress"). */
+.pd-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.pd-plan-row {
+  display: grid;
+  gap: 3px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.pd-plan-row strong {
+  font-size: 0.82rem;
+}
+
+.pd-plan-row small {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.pd-plan-row .pd-program-status {
+  font-size: 0.72rem;
+}
+
+.pd-plan-row.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+/* Progress calendar (replaces the old flat 21-day strip) — a real month-style
+   grid with weekday headers, for whichever plan is selected in .pd-plan-list. */
+.pd-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.pd-calendar-weekdays span {
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.pd-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.pd-calendar-cell {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  background: var(--border-light);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pd-calendar-cell.blank {
+  background: transparent;
+}
+
+.pd-calendar-cell.completed {
+  background: var(--success);
+  color: #ffffff;
+}
+
+.pd-calendar-cell.in_progress {
+  background: var(--warning);
+  color: #ffffff;
+}
+
+.pd-calendar-cell.skipped {
+  background: var(--error);
+  color: #ffffff;
+  opacity: 0.65;
+}
+
+.pd-calendar-cell.pending {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.pd-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.pd-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.pd-legend-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.pd-legend-dot.completed {
+  background: var(--success);
+}
+
+.pd-legend-dot.in_progress {
+  background: var(--warning);
+}
+
+.pd-legend-dot.skipped {
+  background: var(--error);
+  opacity: 0.55;
+}
+
+.pd-legend-dot.pending {
+  background: var(--border-light);
+}
+
+.pd-empty-note {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.pd-record-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+}
+
+.pd-record-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pd-record-title {
+  margin: 0 0 3px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pd-record-meta {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.pd-record-chevron {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.pd-record-badge {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.pd-record-badge.diagnosis {
+  background: var(--error-light);
+  color: var(--error);
+}
+
+.pd-record-badge.pt_assessment {
+  background: var(--warning-light);
+  color: #b45309;
+}
+
+.pd-record-badge.progress_note {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.pd-record-badge.rehab_followup {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.pd-record-badge.discharge {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.pd-record-badge.referral,
+.pd-record-badge.other {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.pd-record-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.pd-record-details strong {
+  color: var(--text-primary);
+}
+
+.pd-record-attachments-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
+}
+
+.pd-record-attachments-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.pd-record-attachments-list {
+  display: grid;
+  gap: 8px;
+}
+
+/* Latest-record preview inside the Medical History card — no border/background of
+   its own, since it already sits inside that card; the standalone .pd-record-card
+   styling (border/background) is still used for every record in the full-history
+   slide-over. */
+.pd-record-card.embedded {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.pd-medical-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.pd-history-panel {
+  width: min(100%, 480px);
+  gap: 14px;
+}
+
+.pd-more-records {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.pd-session-list {
+  border-top: 1px solid var(--border);
+}
+
+.pd-session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 0.85rem;
+}
+
+.pd-session-row small {
+  margin-left: 8px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.pd-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pd-session-score {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.pd-session-skipped {
+  color: var(--text-secondary);
+}
+
+.pd-session-source {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.pd-session-source.pt_reviewed {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.pd-show-more {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 10px;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.pd-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 201;
+  display: grid;
+  gap: 18px;
+  width: min(100%, 460px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  border-radius: 20px;
+  background: var(--card);
+  padding: 24px;
+  box-shadow: var(--shadow-hover);
+}
+
+.pd-modal-form {
+  display: grid;
+  gap: 16px;
+}
+
+.pd-modal-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.pd-modal-form textarea {
+  min-height: 64px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: var(--card);
+  color: var(--text-primary);
+  font: inherit;
+  resize: vertical;
+}
+
+.pd-modal-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+@media (min-width: 900px) {
+  .pd-plan-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 280px);
+  }
+
+  .pd-bottom-grid {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+/* --- Therapist Patients / Sessions / Settings pages (sidebar nav destinations
+   added alongside Dashboard and Patient Detail). Reuse the therapist shell and
+   existing .therapist-*, .library-*, and .pd-* idioms above rather than
+   inventing new layout primitives, matching the rest of the therapist UI. */
+
+.ts-table-empty {
+  margin: 0;
+  padding: 24px 4px;
+  text-align: center;
+}
+
+.ts-session-patient {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ts-session-patient > div {
+  display: grid;
+}
+
+.ts-session-patient span {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ts-session-patient small {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.settings-main {
+  display: flex;
+  justify-content: center;
+}
+
+.settings-card {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 480px);
+  align-self: start;
+  padding: 24px;
+}
+
+.settings-card label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.settings-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-secondary);
+}
+
+.settings-section-heading:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.settings-section-heading strong {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.settings-language-toggle {
+  max-width: 260px;
+}
+
+.settings-toggle-row {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 400 !important;
+}
+
+.settings-toggle-row input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.settings-save-button {
+  width: fit-content;
+  margin-top: 6px;
+}
+
+/* --- File Picker / Uploader (shared component, UI_MOCKUP_PLAN_NEWDB.md §2.4).
+   Mirrors docs/04-design/mockups/file-picker.html's 4 states. Used inside Patient
+   Detail's medical-history attachment rows (components/FilePicker.tsx). */
+
+.filepicker {
+  display: grid;
+  gap: 6px;
+}
+
+.filepicker-label {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.filepicker-dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  border: 1.5px dashed var(--border);
+  border-radius: 14px;
+  padding: 20px 16px;
+  text-align: center;
+  background: var(--bg);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.filepicker-dropzone.drag-over {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.filepicker-dropzone-icon {
+  color: var(--text-secondary);
+}
+
+.filepicker-dropzone-text {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.filepicker-hint {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.filepicker-error {
+  margin: 0;
+  color: var(--error);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.filepicker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+
+.filepicker-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.filepicker-thumb {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.filepicker-thumb.image {
+  background: linear-gradient(135deg, var(--primary-light), var(--teal-light));
+}
+
+.filepicker-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.filepicker-thumb.video {
+  background: linear-gradient(135deg, #2c2c2a, #565650);
+  color: #ffffff;
+}
+
+.filepicker-spin {
+  animation: filepicker-spin 0.9s linear infinite;
+}
+
+@keyframes filepicker-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.filepicker-filename {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filepicker-meta {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.filepicker-progress-track {
+  height: 4px;
+  margin-top: 5px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border-light);
+}
+
+.filepicker-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 0.1s linear;
+}
+
+.filepicker-percent {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.filepicker-action {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.filepicker-action.danger {
+  color: var(--error);
+}
+
+.filepicker-compact .filepicker-dropzone {
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.filepicker-compact-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0;
+  font-size: 0.78rem;
+}
+
+.filepicker-compact-trigger span {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+/* --- Session Result Review (UI_MOCKUP_PLAN_NEWDB.md §2.7, new page). Reuses the
+   therapist shell/topbar/sidebar, .pd-back-link/.pd-section-heading, and
+   .filepicker idioms above; mirrors
+   docs/04-design/mockups/session-result-review.html's layout — an exercise switcher
+   (when a session has more than one), an attempt-number chip row, AI-vs-PT score
+   panels side by side, and a final-decision bar. */
+
+.srr-exercise-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.srr-exercise-tab {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-secondary);
+  padding: 7px 14px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.srr-exercise-tab.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.srr-attempt-chips {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.srr-attempt-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.srr-attempt-chip.active {
+  border: 0;
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.srr-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.srr-video-col {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.srr-video-col p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.srr-video-placeholder {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 3 / 4;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #2c2c2a, #565650);
+  color: #ffffff;
+}
+
+.srr-score-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.srr-score-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 14px 16px;
+}
+
+.srr-score-panel-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.srr-score-panel-top strong {
+  font-size: 0.85rem;
+}
+
+.srr-score-value {
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.srr-score-input {
+  width: 64px;
+  min-height: 36px;
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: 800;
+  padding: 4px;
+}
+
+.srr-score-panel p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.srr-metrics-list {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid var(--border-light);
+  padding-top: 8px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.srr-metrics-list strong {
+  color: var(--text-primary);
+}
+
+.srr-score-panel textarea {
+  min-height: 64px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.82rem;
+  resize: vertical;
+}
+
+.srr-decision-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 10px 14px;
+  margin-top: 4px;
+}
+
+.srr-decision-bar span {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.srr-decision-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.srr-decision-actions button {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+}
+
+.srr-decision-actions button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.srr-current-final {
+  margin: 6px 0 0;
+  text-align: right;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.srr-current-final strong {
+  color: var(--success);
+}
+
+.srr-empty-note {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+@media (min-width: 900px) {
+  .srr-layout {
+    grid-template-columns: 220px 1fr;
+  }
+
+  .srr-score-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* --- Patient Progress / History / Settings pages (sidebar nav destinations
+   added alongside Home/Today, matching the Therapist Patients/Sessions/Settings
+   pages above). Reuse .therapist-*, .summary-card, .heatmap, .pd-session-*,
+   and .settings-* idioms rather than inventing new layout primitives — the
+   only genuinely new rules needed are the mobile bottom-nav clearance and a
+   small history-row label layout below, since .therapist-main (unlike
+   .today-grid) doesn't already reserve space for the fixed
+   .patient-bottom-nav. */
+
+.patient-page-main {
+  padding-bottom: 100px;
+}
+
+@media (min-width: 900px) {
+  .patient-page-main {
+    padding-bottom: 32px;
+  }
+}
+
+.pp-history-row-label {
+  display: grid;
+}
+
+.pp-history-row-label strong {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pp-history-row-label small {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  margin-left: 0;
+}
+
+/* Calendar cells are rendered as <button>s on the patient's own History page (so
+   completed/in-progress/skipped days are keyboard- and screen-reader-operable),
+   unlike Patient Detail's read-only <div> cells above — these reset button
+   chrome and add interactive states without touching the shared
+   .pd-calendar-cell status-color rules. */
+.pd-calendar-cell {
+  border: none;
+  font-family: inherit;
+  cursor: default;
+}
+
+.pd-calendar-cell.clickable {
+  cursor: pointer;
+}
+
+.pd-calendar-cell.clickable:hover {
+  filter: brightness(0.92);
+}
+
+.pd-calendar-cell.selected {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* .pd-calendar-grid/.pd-calendar-weekdays use `minmax(0, 1fr)` columns with
+   aspect-ratio: 1 cells, so on a phone-width container they're naturally
+   compact — but on a wide desktop .therapist-main with nothing else
+   constraining width (Patient Detail's .pd-top-grid wrapper has no matching CSS
+   rule of its own, so it doesn't act as a two-column layout either), the grid
+   stretches edge-to-edge and each square cell balloons with it. Cap it once,
+   desktop-only, rather than leaving mobile's already-correct sizing alone. */
+@media (min-width: 900px) {
+  .pd-calendar-weekdays,
+  .pd-calendar-grid {
+    max-width: 480px;
+  }
+}
+
+/* A date within the viewed month that has no scheduled day in the plan at all
+   (before it started, after it ended, or the patient just has no plan) —
+   distinct from "pending" (a real day in the plan, just not reached yet), which
+   already has its own solid-fill treatment above. Dashed/transparent reads as
+   "nothing here" rather than "day not done yet". */
+.pd-calendar-cell.no_plan {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.pd-legend-dot.no_plan {
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+
+.pp-calendar-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 4px 0 12px;
+}
+
+.pp-calendar-month-nav strong {
+  min-width: 140px;
+  text-align: center;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+/* Calendar + day-by-day side by side, desktop only — phones keep the original
+   stacked flow (calendar full width, day-by-day below it, whole page scrolls),
+   since there isn't room for two columns there. The day-by-day/day-detail panel
+   gets its own internal scroll on desktop so a long day-by-day list doesn't grow
+   taller than the calendar and leave it stranded above empty space. */
+.pp-history-layout {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 900px) {
+  .pp-history-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  /* Fixed height (not max-height) so the panel doesn't visibly grow/shrink when
+     switching between the full day-by-day list and a single day's detail, or
+     between a short plan and a long one — it's always the same box. Laid out as
+     a column flex container so only .pd-session-list (the actual row list)
+     scrolls internally; the heading and the rehab-plan <select> above it are
+     ordinary flex children that don't grow, so they stay pinned at the top
+     instead of scrolling away with the rows. */
+  .pp-history-panel {
+    display: flex;
+    flex-direction: column;
+    height: 620px;
+    overflow: hidden;
+  }
+
+  .pp-history-panel .pd-session-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .pp-history-panel .pd-empty-note {
+    flex: 1;
+  }
+}
+
+.pp-plan-select {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.pp-clickable-row {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.pp-clickable-row:hover {
+  background: var(--border-light);
+}
+
+/* --- Patient Settings page (frontend-design.md's Patient Settings, revised per
+   the "picture / Profile+assigned PT / Contact" wireframe). Phone keeps a
+   simple single-column card (same footprint as the old .settings-card, just
+   with a view/edit toggle); at the 900px breakpoint it grows into the
+   wireframe's bordered two-panel layout with an avatar circle overlapping the
+   top edge, filling the workspace instead of staying pinned to a narrow
+   centered card. */
+
+.ps-main {
+  padding-top: 44px;
+}
+
+.ps-card {
+  position: relative;
+  display: grid;
+  gap: 20px;
+  width: min(100%, 480px);
+  margin: 0 auto;
+  padding: 28px 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.ps-avatar-circle {
+  position: absolute;
+  top: -32px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border: 4px solid var(--bg);
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--teal));
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 800;
+  box-shadow: var(--shadow-card);
+}
+
+.ps-panels {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+
+.ps-panel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  padding: 16px;
+}
+
+.ps-field {
+  display: grid;
+  gap: 4px;
+}
+
+.ps-field-label {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ps-field-value {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.ps-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.ps-saved-note {
+  color: var(--success);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+@media (min-width: 900px) {
+  .ps-main {
+    padding-top: 64px;
+  }
+
+  .ps-card {
+    width: 100%;
+    max-width: none;
+    min-height: calc(100vh - 240px);
+    padding: 48px 40px 40px;
+    border-width: 2px;
+    border-radius: 24px;
+  }
+
+  .ps-avatar-circle {
+    top: -56px;
+    width: 96px;
+    height: 96px;
+    font-size: 1.15rem;
+    border-width: 5px;
+  }
+
+  .ps-panels {
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    margin-top: 20px;
+  }
+
+  .ps-panel {
+    border-width: 2px;
+    padding: 24px;
+  }
+}
+
+/* --- Program Editor (PT_EXERCISE_PATH_MOCKUP_PLAN.md §4.3). Ports
+   docs/04-design/mockups/program-editor.html: a day queue on the left, the
+   selected day's assigned exercises on the right. Reuses the therapist
+   shell/topbar/sidebar, .summary-card, .library-status-badge, and
+   .library-card-icon.tracking-* color conventions above rather than inventing a
+   new palette. */
+
+.pe-layout {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1fr;
+  padding: 20px;
+}
+
+.pe-col-label {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pe-day-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.pe-day-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+.pe-day-item small {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.pe-day-item.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.pe-day-item.active small {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.pe-day-item.completed:not(.active) {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.pe-day-item.skipped:not(.active) {
+  border-color: var(--error);
+  color: var(--error);
+  opacity: 0.75;
+}
+
+.pe-day-count {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+  padding: 1px 7px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.pe-day-item:not(.active) .pe-day-count {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.pe-day-add {
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--primary);
+  padding: 9px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.pe-exercise-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pe-exercise-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 10px 12px;
+}
+
+.pe-exercise-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.pe-exercise-icon.tracking-virtual_grip {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.pe-exercise-icon.tracking-none {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.pe-exercise-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pe-exercise-info strong {
+  display: block;
+  font-size: 0.85rem;
+}
+
+.pe-exercise-info small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.pe-exercise-note {
+  color: var(--primary) !important;
+}
+
+.pe-target-input {
+  width: 84px;
+  min-height: 36px;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.pe-exercise-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pe-exercise-actions .icon-button {
+  padding: 6px 8px;
+}
+
+.pe-add-exercise {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--primary);
+  padding: 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.pe-save-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 20px 20px;
+}
+
+.pe-picker-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pe-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.pe-picker-row:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (min-width: 900px) {
+  .pe-layout {
+    grid-template-columns: 160px 1fr;
+  }
+}
+
+/* --- Session Upload Confirm (CAMERA_TRACKING_MOCKUP_PLAN.md §6.3/§6.5). Reuses
+   .srr-layout/.srr-video-col/.srr-score-panel (Session Result Review's video+AI
+   panel idiom) plus .pd-modal-hint/.ps-saved-note — only the page shell, video
+   sizing, and the Confirm/Retry/Discard action bar are genuinely new here. */
+.sud-shell {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  min-height: 100vh;
+  padding: 20px 16px 32px;
+  background: var(--bg);
+}
+
+.sud-card {
+  display: grid;
+  gap: 18px;
+  width: min(100%, 760px);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--card);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+}
+
+.sud-header h1 {
+  margin: 4px 0 0;
+  font-size: 1.2rem;
+}
+
+.sud-video {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 14px;
+  background: #000000;
+  object-fit: cover;
+}
+
+.sud-ai-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sud-hint {
+  margin-top: 10px;
+}
+
+/* §6.5 — Confirm/Retry/Discard pinned near the bottom of the viewport on phones
+   (mirrors .session-bottom-stack's fixed-positioning intent from the camera
+   screen), an ordinary inline block on desktop once there's room beside the
+   video/score layout above it. */
+.sud-actions {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 10px;
+  padding-top: 6px;
+  background: var(--card);
+}
+
+.sud-secondary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sud-secondary-actions .secondary-button {
+  flex: 1;
+}
+
+.sud-discard {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--error) !important;
+  white-space: nowrap;
+}
+
+@media (min-width: 900px) {
+  .sud-shell {
+    padding: 40px;
+  }
+
+  .sud-card {
+    padding: 32px;
+  }
+}
