@@ -18,6 +18,11 @@ interface AuthState {
   register: (phoneNumber: string, password: string) => Promise<boolean>;
   logout: () => void;
   clearError: () => void;
+  // Patches the locally-stored user (and localStorage) after a successful
+  // profile edit — e.g. TherapistSettingsPage.tsx updating displayName after
+  // PATCH /users/:id — so the sidebar/topbar reflect the change immediately
+  // without a re-login. No-op if there's no logged-in user.
+  updateUser: (patch: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -97,9 +102,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearError = useCallback(() => setError(null), []);
 
+  const updateUser = useCallback((patch: Partial<AuthUser>) => {
+    setUser((current) => {
+      if (!current) return current;
+      const next = { ...current, ...patch };
+      localStorage.setItem(USER_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const value = useMemo<AuthState>(
-    () => ({ user, token, status, error, login, register, logout, clearError }),
-    [user, token, status, error, login, register, logout, clearError]
+    () => ({ user, token, status, error, login, register, logout, clearError, updateUser }),
+    [user, token, status, error, login, register, logout, clearError, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

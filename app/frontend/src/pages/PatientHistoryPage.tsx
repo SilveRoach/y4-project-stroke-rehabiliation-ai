@@ -30,7 +30,8 @@ const heatmapLabels: Record<HeatmapDayStatus, string> = {
   completed: "Completed",
   in_progress: "In progress",
   skipped: "Skipped",
-  pending: "Upcoming"
+  pending: "Upcoming",
+  cancelled: "Cancelled"
 };
 
 interface CalendarCell {
@@ -226,7 +227,7 @@ export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHis
                   ))}
                 </div>
                 <div className="pd-legend">
-                  {(["completed", "in_progress", "skipped", "pending"] as HeatmapDayStatus[]).map((status) => (
+                  {(["completed", "in_progress", "skipped", "pending", "cancelled"] as HeatmapDayStatus[]).map((status) => (
                     <span key={status}>
                       <span className={`pd-legend-dot ${status}`} />
                       {heatmapLabels[status]}

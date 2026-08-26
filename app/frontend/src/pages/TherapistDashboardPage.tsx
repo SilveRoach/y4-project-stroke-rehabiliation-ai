@@ -11,13 +11,20 @@ import {
   Users,
   X
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { patientProgressTrends, therapistPatients, therapistProfile, weeklySessionData } from "../data/therapistMock";
-import type { TherapistPatientSummary } from "../types";
+import {
+  ApiError,
+  getPatientProgressTrend,
+  getTherapistDashboard,
+  type TherapistDashboardData
+} from "../services/api";
+import { useAuth } from "../store/authStore";
+import type { PatientProgressTrend, TherapistPatientSummary } from "../types";
+import { initialsFromName } from "../utils/displayName";
 
 interface TherapistDashboardPageProps {
   onLogout: () => void;
@@ -28,33 +35,99 @@ interface TherapistDashboardPageProps {
   onViewFullReport: (patient: TherapistPatientSummary) => void;
 }
 
+const WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", { weekday: "long" });
+const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "long", year: "numeric" });
+
 export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport }: TherapistDashboardPageProps) {
+  const { token, user } = useAuth();
+
   const [search, setSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<TherapistPatientSummary | null>(null);
+
+  // Real dashboard data (modules/therapist/* on the backend) — replaces the
+  // former data/therapistMock.ts imports (therapistPatients, weeklySessionData,
+  // therapistProfile). Loaded once on mount / whenever the logged-in therapist
+  // changes; there's no polling or refetch-on-focus yet, so switching to another
+  // tab and back won't pick up changes made elsewhere until the page remounts.
+  const [dashboard, setDashboard] = useState<TherapistDashboardData | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    let cancelled = false;
+
+    setDashboardLoading(true);
+    setDashboardError(null);
+
+    getTherapistDashboard(token, user.id)
+      .then((data) => {
+        if (!cancelled) setDashboard(data);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDashboardError(err instanceof ApiError ? err.message : "Couldn't load the dashboard. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDashboardLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user]);
+
+  const patients = dashboard?.patients ?? [];
+
   // Drives the "Avg. Recovery Progress" chart — null until the PT picks a patient
   // (top-right selector, or clicking a row in the table below), matching the
-  // requested UX: don't plot anything until a patient/plan is chosen. Previously
-  // this chart always plotted a fixed all-patients aggregate (progressTrendData)
-  // with no selection step at all.
+  // requested UX: don't plot anything until a patient/plan is chosen.
   const [trendPatientId, setTrendPatientId] = useState<string | null>(null);
+  const [trend, setTrend] = useState<PatientProgressTrend | null>(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+
+  useEffect(() => {
+    if (!token || !trendPatientId) {
+      setTrend(null);
+      return;
+    }
+    let cancelled = false;
+    setTrendLoading(true);
+
+    getPatientProgressTrend(token, trendPatientId)
+      .then((data) => {
+        if (!cancelled) setTrend(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTrend(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTrendLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, trendPatientId]);
 
   const filteredPatients = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return therapistPatients;
-    return therapistPatients.filter(
+    if (!query) return patients;
+    return patients.filter(
       (patient) => patient.name.toLowerCase().includes(query) || patient.condition.toLowerCase().includes(query)
     );
-  }, [search]);
+  }, [search, patients]);
 
-  const activePatientCount = therapistPatients.filter((p) => p.standing === "active").length;
-  const avgCompliance = Math.round(
-    therapistPatients.reduce((sum, p) => sum + p.compliancePercent, 0) / therapistPatients.length
-  );
+  const stats = dashboard?.stats;
+  const weeklySessions = dashboard?.weeklySessions ?? [];
 
-  const trendPatient = trendPatientId ? therapistPatients.find((p) => p.id === trendPatientId) ?? null : null;
-  const trend = trendPatientId ? patientProgressTrends.find((t) => t.patientId === trendPatientId) ?? null : null;
+  const trendPatient = trendPatientId ? (patients.find((p) => p.id === trendPatientId) ?? null) : null;
   const trendDelta =
     trend && trend.points.length > 1 ? trend.points[trend.points.length - 1].score - trend.points[0].score : null;
+
+  const displayName = user?.displayName || user?.username || "Therapist";
+  const today = new Date();
 
   return (
     <section className="therapist-shell">
@@ -64,7 +137,9 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
         <header className="therapist-topbar">
           <div>
             <h1>Dashboard</h1>
-            <p>Monday, 27 July 2026</p>
+            <p>
+              {WEEKDAY_FORMATTER.format(today)}, {DATE_FORMATTER.format(today)}
+            </p>
           </div>
           <div className="therapist-topbar-actions">
             <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
@@ -72,33 +147,45 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
             </button>
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{therapistProfile.displayName}</strong>
-                <small>{therapistProfile.title}</small>
+                <strong>{displayName}</strong>
+                <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{therapistProfile.initials}</span>
+              <span className="avatar-badge">{initialsFromName(displayName)}</span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main">
+          {dashboardError && (
+            <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 16 }}>
+              <p style={{ margin: 0 }}>{dashboardError}</p>
+            </div>
+          )}
+
           <div className="therapist-stat-grid">
             <StatCard
               icon={<Users size={20} />}
               label="Active Patients"
-              value={activePatientCount}
-              change="2 this month"
-              positive
+              value={dashboardLoading ? "…" : (stats?.activePatients ?? 0)}
             />
-            <StatCard icon={<Activity size={20} />} label="Sessions Today" value={8} change="12%" positive accent="teal" />
+            <StatCard
+              icon={<Activity size={20} />}
+              label="Sessions Today"
+              value={dashboardLoading ? "…" : (stats?.sessionsToday ?? 0)}
+              accent="teal"
+            />
             <StatCard
               icon={<TrendingUp size={20} />}
               label="Avg. Compliance"
-              value={`${avgCompliance}%`}
-              change="5%"
-              positive
+              value={dashboardLoading ? "…" : `${stats?.avgCompliancePercent ?? 0}%`}
               accent="success"
             />
-            <StatCard icon={<Clock size={20} />} label="Pending Reviews" value={3} accent="warning" />
+            <StatCard
+              icon={<Clock size={20} />}
+              label="Pending Reviews"
+              value={dashboardLoading ? "…" : (stats?.pendingReviews ?? 0)}
+              accent="warning"
+            />
           </div>
 
           <div className="therapist-chart-grid">
@@ -106,7 +193,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
               <div className="therapist-chart-heading">
                 <div>
                   <strong>Avg. Recovery Progress</strong>
-                  <p>{trendPatient ? trend?.planName : "Select a patient to view their 6-week trend"}</p>
+                  <p>{trendPatient ? trend?.planName : "Select a patient to view their recovery trend"}</p>
                 </div>
                 <div className="therapist-chart-heading-actions">
                   <select
@@ -116,7 +203,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                     aria-label="Select patient for recovery progress chart"
                   >
                     <option value="">Select patient…</option>
-                    {therapistPatients.map((patient) => (
+                    {patients.map((patient) => (
                       <option key={patient.id} value={patient.id}>
                         {patient.name}
                       </option>
@@ -130,7 +217,12 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                   )}
                 </div>
               </div>
-              {trend ? (
+              {trendLoading ? (
+                <div className="therapist-chart-empty">
+                  <TrendingUp size={22} />
+                  <p>Loading trend…</p>
+                </div>
+              ) : trend && trend.points.length > 0 ? (
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={trend.points}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -139,7 +231,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                       tick={{ fontSize: 12, fill: "var(--text-secondary)" }}
                       axisLine={false}
                       tickLine={false}
-                      domain={[30, 100]}
+                      domain={[0, 100]}
                     />
                     <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid var(--border)", fontSize: 13 }} />
                     <Line
@@ -152,6 +244,11 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                     />
                   </LineChart>
                 </ResponsiveContainer>
+              ) : trendPatient ? (
+                <div className="therapist-chart-empty">
+                  <TrendingUp size={22} />
+                  <p>No scored sessions yet for this patient's plan.</p>
+                </div>
               ) : (
                 <div className="therapist-chart-empty">
                   <TrendingUp size={22} />
@@ -168,7 +265,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={weeklySessionData} barSize={24}>
+                <BarChart data={weeklySessions} barSize={24}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="day" tick={{ fontSize: 12, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 12, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} />
@@ -212,6 +309,15 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                   </tr>
                 </thead>
                 <tbody>
+                  {!dashboardLoading && filteredPatients.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
+                        {patients.length === 0
+                          ? "No patients are currently assigned to you."
+                          : "No patients match your search."}
+                      </td>
+                    </tr>
+                  )}
                   {filteredPatients.map((patient) => (
                     <tr
                       key={patient.id}

@@ -1,36 +1,38 @@
 // Admin User Management page (frontend-design.md §9, route /admin/users).
 //
-// SCOPE for this pass: the "Create account" flow is REAL — it calls the already-built
-// backend `POST /api/v1/users` (Admin-only, user-management module) via
-// `services/api.ts`'s `createUser()`. The user LIST is still mock data
-// (`data/adminMock.ts`) with newly-created accounts merged in locally, because the
-// backend's `GET /users` (api-design.md) is not implemented yet — see
-// `user.service.ts`'s scope note. "Edit" (display name/username/schema fields) is
-// client-side only for the same reason — no `PATCH /users/:id` endpoint exists yet
-// (see EditAccountModal's comment). Per-row enable/disable is a disabled placeholder
-// for the same reason (`PATCH /users/:id/status` doesn't exist yet). Admin Dashboard
-// (frontend-design.md §8 — system health panel, `/admin/dashboard`) is a separate,
-// not-yet-built page; this page only covers §9.
+// SCOPE for this pass: the "Create account" flow is REAL for all three roles —
+// Therapist, Admin, AND Patient — it calls the already-built backend
+// `POST /api/v1/users` (Admin-only, user-management module) via
+// `services/api.ts`'s `createUser()`. Therapist/Admin creation collects
+// firstName/lastName (required) and email/phoneNumber (optional); Patient
+// creation collects firstName/lastName, phone number (the login identifier,
+// same convention as self-registration), password, and optionally gender/date
+// of birth/height/weight — all matching users.*/patients.* on schema.prisma.
 //
-// A single mock Patient row was added to the table (UI_MOCKUP_PLAN_NEWDB.md §6
-// progress note, 2026-08-08) to demonstrate the Edit-popup pattern for a 3rd
-// account kind, and "Create account" now also offers a Patient role option
-// (2026-08-08). Both are **mock-only** for Patient: real patient accounts
-// self-register via `POST /auth/register` (FR-AUTH-01b, phone + password only) —
-// there is no real "admin creates a patient" endpoint, and `CreateUserPayload` is
-// intentionally still typed to `"therapist" | "admin"` only, so the Patient branch
-// of `CreateAccountModal.submit()` never calls `createUser()` at all, unlike the
-// Therapist/Admin branch which is real. Patient's fields (first/last name, gender,
-// date of birth, height, weight) come from a `patients` DBML the user supplied
-// directly in chat 2026-08-08 — not yet reflected in `schema.prisma` or
-// `newdb.txt` itself, see the plan doc's §5/§6 for the reconciliation note.
+// The account LIST is now REAL too — `GET /users` (Admin-only,
+// user-management module's new `listUsers()`) via `services/api.ts`'s
+// `getUsers()`, fetched on mount. Replaces the former `data/adminMock.ts`
+// `adminUsers` seed list entirely; a newly-created account is still prepended
+// to local state immediately after `POST /users` succeeds (rather than
+// re-fetching the whole list) for a snappier create flow.
+//
+// "Edit" is now REAL for the Patient row — `PATCH /users/:id` accepts an
+// Admin caller editing a Patient target (user-management module's
+// `updateUserProfile()`), saving firstName/lastName/phone/gender/dateOfBirth/
+// heightCm/weightKg for real. Therapist/Admin rows stay client-side only for
+// now — that branch of PATCH /users/:id doesn't accept an Admin-editing-others
+// caller yet (see EditAccountModal's comment). Per-row enable/disable is a
+// disabled placeholder for the same reason (`PATCH /users/:id/status` doesn't
+// exist yet). Admin Dashboard (frontend-design.md §8 — system health panel,
+// `/admin/dashboard`) is a separate, already-built page; this page only
+// covers §9.
 
-import { AlertCircle, Pencil, Plus, Search, Shield, Users, X } from "lucide-react";
-import { FormEvent, ReactNode, useMemo, useState } from "react";
+import { AlertCircle, Pencil, Plus, Search, Shield, User, Users, X } from "lucide-react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
-import { adminProfile, adminUsers as initialAdminUsers } from "../data/adminMock";
-import { ApiError, createUser } from "../services/api";
+import { adminProfile } from "../data/adminMock";
+import { ApiError, createUser, getUsers, updateUserProfile, type AdminUserListItem } from "../services/api";
 import { useAuth } from "../store/authStore";
 import type { AdminManagedRole, AdminUserSummary, StaffRole } from "../types";
 
@@ -42,14 +44,70 @@ interface AdminUserManagementPageProps {
 
 type RoleFilter = "all" | "patient" | StaffRole;
 
+// AdminUserListItem (services/api.ts, mirrors user.service.ts's UserListItem)
+// -> AdminUserSummary (types/index.ts, this page's local row shape). Mostly a
+// rename (displayName -> name) plus normalizing `null` to `undefined` for the
+// optional fields, same nullability gap CreateAccountModal's onCreated already
+// works around.
+function toAdminUserSummary(item: AdminUserListItem): AdminUserSummary {
+  return {
+    id: item.id,
+    name: item.displayName,
+    role: item.role,
+    username: item.username,
+    status: item.status,
+    lastLoginLabel: item.lastLoginLabel,
+    patientCount: item.patientCount,
+    licenseNumber: item.licenseNumber ?? undefined,
+    licenseIssuedLabel: item.licenseIssuedLabel ?? undefined,
+    licenseExpiryLabel: item.licenseExpiryLabel ?? undefined,
+    employeeId: item.employeeId ?? undefined,
+    firstName: item.firstName ?? undefined,
+    lastName: item.lastName ?? undefined,
+    email: item.email ?? undefined,
+    phoneNumber: item.phoneNumber ?? undefined,
+    gender: item.gender,
+    dateOfBirthLabel: item.dateOfBirthLabel ?? undefined,
+    heightCm: item.heightCm ?? undefined,
+    weightKg: item.weightKg ?? undefined
+  };
+}
+
 export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavigateSettings }: AdminUserManagementPageProps) {
   const { token } = useAuth();
-  const [users, setUsers] = useState<AdminUserSummary[]>(initialAdminUsers);
+  const [users, setUsers] = useState<AdminUserSummary[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUserSummary | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    setUsersLoading(true);
+    setUsersError(null);
+
+    getUsers(token)
+      .then(({ users: fetched }) => {
+        if (!cancelled) setUsers(fetched.map(toAdminUserSummary));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setUsersError(err instanceof ApiError ? err.message : "Couldn't load accounts. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setUsersLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -63,8 +121,10 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
 
   const therapistCount = users.filter((u) => u.role === "therapist").length;
   const adminCount = users.filter((u) => u.role === "admin").length;
+  const patientCount = users.filter((u) => u.role === "patient").length;
   const activeTherapistCount = users.filter((u) => u.role === "therapist" && u.status === "active").length;
   const activeAdminCount = users.filter((u) => u.role === "admin" && u.status === "active").length;
+  const activePatientCount = users.filter((u) => u.role === "patient" && u.status === "active").length;
 
   function roleLabel(role: AdminUserSummary["role"]): string {
     if (role === "admin") return "Admin";
@@ -123,11 +183,26 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
               positive
               accent="teal"
             />
+            <StatCard
+              icon={<User size={20} />}
+              label="Patient accounts"
+              value={patientCount}
+              change={`${activePatientCount} active`}
+              positive
+              accent="success"
+            />
           </div>
 
           {successMessage && (
             <p className="auth-error-banner admin-success-banner" role="status">
               {successMessage}
+            </p>
+          )}
+
+          {usersError && (
+            <p className="auth-error-banner" role="alert">
+              <AlertCircle size={14} style={{ display: "inline", marginRight: 6, verticalAlign: -2 }} />
+              {usersError}
             </p>
           )}
 
@@ -181,7 +256,15 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredUsers.map((user) => (
+                  {usersLoading && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
+                        Loading accounts…
+                      </td>
+                    </tr>
+                  )}
+                  {!usersLoading &&
+                    filteredUsers.map((user) => (
                     <tr key={user.id}>
                       <td>
                         <div className="therapist-table-patient">
@@ -237,11 +320,11 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                         </div>
                       </td>
                     </tr>
-                  ))}
-                  {filteredUsers.length === 0 && (
+                    ))}
+                  {!usersLoading && filteredUsers.length === 0 && (
                     <tr>
                       <td colSpan={6} style={{ textAlign: "center", padding: "24px 0" }}>
-                        No accounts match your search.
+                        {users.length === 0 ? "No accounts yet." : "No accounts match your search."}
                       </td>
                     </tr>
                   )}
@@ -270,32 +353,39 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                 licenseIssuedLabel: created.licenseIssuedLabel,
                 licenseExpiryLabel: created.licenseExpiryLabel,
                 employeeId: created.employeeId,
-                firstName: created.firstName,
-                lastName: created.lastName,
+                // AdminUserSummary types these as `string | undefined` (not
+                // `| null`) — normalize here since `created` can carry `null`
+                // for the Therapist/Admin branch (CreatedUser's fields come back
+                // nullable from Prisma via services/api.ts).
+                firstName: created.firstName ?? undefined,
+                lastName: created.lastName ?? undefined,
+                email: created.email ?? undefined,
+                phoneNumber: created.phoneNumber ?? undefined,
                 gender: created.gender,
-                dateOfBirthLabel: created.dateOfBirthLabel,
-                heightCm: created.heightCm,
-                weightKg: created.weightKg
+                dateOfBirthLabel: created.dateOfBirthLabel ?? undefined,
+                heightCm: created.heightCm ?? undefined,
+                weightKg: created.weightKg ?? undefined
               },
               ...prev
             ]);
             setShowCreateForm(false);
-            setSuccessMessage(
-              `${roleLabel(created.role)} account "${created.username}" created${created.role === "patient" ? " (mock only — no backend endpoint for admin-created patients exists)" : ""}.`
-            );
+            setSuccessMessage(`${roleLabel(created.role)} account "${created.username}" created.`);
           }}
         />
       )}
 
       {editingUser && (
         <EditAccountModal
+          token={token}
           user={editingUser}
           onClose={() => setEditingUser(null)}
-          onSave={(updated) => {
+          onSave={(updated, persisted) => {
             setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
             setEditingUser(null);
             setSuccessMessage(
-              `Account "${updated.username}" updated (local only — no PATCH /users/:id endpoint exists yet, see UI_MOCKUP_PLAN_NEWDB.md §5).`
+              persisted
+                ? `Account "${updated.username}" updated.`
+                : `Account "${updated.username}" updated (local only — no PATCH /users/:id endpoint exists yet, see UI_MOCKUP_PLAN_NEWDB.md §5).`
             );
           }}
         />
@@ -351,18 +441,23 @@ function CreateAccountModal({
     licenseIssuedLabel?: string;
     licenseExpiryLabel?: string;
     employeeId?: string;
-    firstName?: string;
-    lastName?: string;
+    // string | null (not just | undefined) because `submit()` spreads `...user`
+    // here straight from CreatedUser (services/api.ts) for every role now —
+    // Patient included — and CreatedUser's fields come back nullable from
+    // Prisma.
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
+    phoneNumber?: string | null;
     gender?: "male" | "female" | "other" | "unknown";
-    dateOfBirthLabel?: string;
-    heightCm?: number;
-    weightKg?: number;
+    dateOfBirthLabel?: string | null;
+    heightCm?: number | null;
+    weightKg?: number | null;
   }) => void;
 }) {
   const [role, setRole] = useState<AdminManagedRole>("therapist");
   const isPatient = role === "patient";
 
-  const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -370,10 +465,17 @@ function CreateAccountModal({
   const [licenseIssued, setLicenseIssued] = useState("");
   const [licenseExpiry, setLicenseExpiry] = useState("");
   const [employeeId, setEmployeeId] = useState("");
-  // Patient fields, matching the `patients` DBML the user supplied 2026-08-08 (see
-  // EditAccountModal's comment) — no single display-name column for this role.
+  // firstName/lastName: shared by every role now (users.first_name/last_name on
+  // schema.prisma covers Therapist/Admin too, not just the `patients` DBML this
+  // comment used to describe as Patient-only) — there's no single display-name
+  // column for any role, so this replaces the old Therapist/Admin-only
+  // `displayName` free-text input.
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  // Therapist/Admin only — users.email/phone_number. Optional, mirrors the same
+  // validation PATCH /users/:id already applies (see user.service.ts).
+  const [email, setEmail] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
   const [gender, setGender] = useState<"male" | "female" | "other" | "unknown">("unknown");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [heightCm, setHeightCm] = useState("");
@@ -385,62 +487,52 @@ function CreateAccountModal({
     event.preventDefault();
     setError(null);
 
-    if (isPatient) {
-      if (!firstName.trim() || !lastName.trim() || !username.trim() || password.length === 0) {
-        setError("Fill in first name, last name, phone number, and password.");
-        return;
-      }
-
-      // Patients self-register from the app with just phone + password
-      // (FR-AUTH-01b, services/api.ts's `register()`); POST /users is Admin-only
-      // and its CreateUserPayload is typed to "therapist" | "admin" only — there is
-      // no real "admin creates a patient" endpoint to call. So unlike the
-      // Therapist/Admin branch below, this never touches the network: it's a mock
-      // row only, same as everything else about this Patient row
-      // (UI_MOCKUP_PLAN_NEWDB.md §6 progress note).
-      setSubmitting(true);
-      onCreated({
-        id: `patient-${Date.now()}`,
-        role: "patient",
-        username: username.trim(),
-        displayName: `${firstName.trim()} ${lastName.trim()}`.trim(),
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        gender,
-        dateOfBirthLabel: dateOfBirth.trim() || undefined,
-        heightCm: heightCm.trim() ? Number(heightCm) : undefined,
-        weightKg: weightKg.trim() ? Number(weightKg) : undefined
-      });
-      setSubmitting(false);
-      return;
-    }
-
     if (!token) {
       setError("Your session has expired. Please log in again.");
       return;
     }
-    if (!displayName.trim() || !username.trim() || password.length === 0) {
-      setError("Fill in display name, username, and password.");
+    if (!firstName.trim() || !lastName.trim() || !username.trim() || password.length === 0) {
+      setError(
+        isPatient
+          ? "Fill in first name, last name, phone number, and password."
+          : "Fill in first name, last name, username, and password."
+      );
       return;
     }
 
     setSubmitting(true);
     try {
+      // Patient's login identifier is the phone number itself (same convention
+      // as self-registration, auth.service.ts's `register()`) — sent as
+      // `username` here, same as the Therapist/Admin branch, so the backend's
+      // single role branch in user.service.ts's `createAccount()` handles both.
       const { user } = await createUser(token, {
         role,
         username: username.trim(),
         password,
-        displayName: displayName.trim()
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: !isPatient ? email.trim() || undefined : undefined,
+        phoneNumber: !isPatient ? contactPhone.trim() || undefined : undefined,
+        gender: isPatient ? gender : undefined,
+        dateOfBirth: isPatient ? dateOfBirth.trim() || undefined : undefined,
+        heightCm: isPatient && heightCm.trim() ? Number(heightCm) : undefined,
+        weightKg: isPatient && weightKg.trim() ? Number(weightKg) : undefined
       });
-      // License/Employee ID fields aren't part of CreateUserPayload — the backend
-      // has no columns for them yet (UI_MOCKUP_PLAN_NEWDB.md §5) — so they're
-      // merged in locally rather than sent to the API call above.
+      // License/Employee ID fields still aren't part of CreateUserPayload — the
+      // backend has no columns for them yet (UI_MOCKUP_PLAN_NEWDB.md §5) — so
+      // they're merged in locally rather than sent to the API call above. Every
+      // other field (firstName/lastName/email/phoneNumber, and now
+      // gender/dateOfBirth/heightCm/weightKg for Patient) IS real: `user`
+      // already carries the server's echoed-back values (including the derived
+      // `displayName`), so no local merge is needed for them.
       onCreated({
         ...user,
         licenseNumber: role === "therapist" ? licenseNumber.trim() || undefined : undefined,
         licenseIssuedLabel: role === "therapist" ? licenseIssued.trim() || undefined : undefined,
         licenseExpiryLabel: role === "therapist" ? licenseExpiry.trim() || undefined : undefined,
-        employeeId: role === "admin" ? employeeId.trim() || undefined : undefined
+        employeeId: role === "admin" ? employeeId.trim() || undefined : undefined,
+        dateOfBirthLabel: user.dateOfBirth ?? undefined
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
@@ -495,36 +587,26 @@ function CreateAccountModal({
             </div>
           </label>
 
-          {isPatient && (
-            <p className="pd-empty-note" style={{ margin: 0 }}>
-              Patients normally self-register from the app with just a phone number and
-              password. This creates a mock account only — there's no real "admin creates
-              a patient" backend endpoint to call.
-            </p>
-          )}
-
-          {isPatient ? (
-            <div className="library-toggle-row">
-              <label>
-                First name
-                <input value={firstName} onChange={(event) => setFirstName(event.target.value)} autoComplete="given-name" />
-              </label>
-              <label>
-                Last name
-                <input value={lastName} onChange={(event) => setLastName(event.target.value)} autoComplete="family-name" />
-              </label>
-            </div>
-          ) : (
+          <div className="library-toggle-row">
             <label>
-              Display name
+              First name
               <input
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="e.g. Dr. Somsri Rattanakul"
-                autoComplete="name"
+                value={firstName}
+                onChange={(event) => setFirstName(event.target.value)}
+                placeholder={isPatient ? undefined : "e.g. Somsri"}
+                autoComplete="given-name"
               />
             </label>
-          )}
+            <label>
+              Last name
+              <input
+                value={lastName}
+                onChange={(event) => setLastName(event.target.value)}
+                placeholder={isPatient ? undefined : "e.g. Rattanakul"}
+                autoComplete="family-name"
+              />
+            </label>
+          </div>
 
           <label>
             {isPatient ? "Phone number" : "Username"}
@@ -551,6 +633,30 @@ function CreateAccountModal({
               </button>
             </span>
           </label>
+
+          {!isPatient && (
+            <div className="library-toggle-row">
+              <label>
+                Email <span className="pd-empty-note" style={{ fontWeight: 400 }}>(optional)</span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="e.g. somsri@clinic.example"
+                  autoComplete="email"
+                />
+              </label>
+              <label>
+                Phone number <span className="pd-empty-note" style={{ fontWeight: 400 }}>(optional)</span>
+                <input
+                  value={contactPhone}
+                  onChange={(event) => setContactPhone(event.target.value)}
+                  placeholder="e.g. 0891234567"
+                  autoComplete="tel"
+                />
+              </label>
+            </div>
+          )}
 
           {role === "therapist" && (
             <>
@@ -660,17 +766,27 @@ function CreateAccountModal({
 // (re-provisioning the Therapist/Admin/Patient extension row) that isn't in scope
 // here, so it's shown read-only rather than offered as a toggle like the create
 // form's. No password field — that's a separate reset-password flow, not covered.
-// **Client-side only**: `user.service.ts`'s own scope note says PATCH /users/:id
-// isn't implemented yet, so this updates local state and nothing else — same
-// pattern as every other still-mock write in this app.
+//
+// PATIENT ROW: REAL now — calls the backend `PATCH /api/v1/users/:id`
+// (user-management module's `updateUserProfile()`, now Admin-editable for a
+// Patient target) via `services/api.ts`'s `updateUserProfile()`. Saves
+// firstName/lastName/username(=phone)/gender/dateOfBirth/heightCm/weightKg for
+// real.
+//
+// THERAPIST/ADMIN ROWS: still client-side only — Admin editing a
+// Therapist/Admin account isn't wired up on the backend yet (only the Patient
+// branch of PATCH /users/:id accepts an Admin caller so far), so those two
+// branches keep updating local state only, same as before this pass.
 function EditAccountModal({
+  token,
   user,
   onClose,
   onSave
 }: {
+  token: string | null;
   user: AdminUserSummary;
   onClose: () => void;
-  onSave: (updated: AdminUserSummary) => void;
+  onSave: (updated: AdminUserSummary, persisted: boolean) => void;
 }) {
   const isPatient = user.role === "patient";
 
@@ -689,13 +805,15 @@ function EditAccountModal({
   const [dateOfBirth, setDateOfBirth] = useState(user.dateOfBirthLabel ?? "");
   const [heightCm, setHeightCm] = useState(user.heightCm?.toString() ?? "");
   const [weightKg, setWeightKg] = useState(user.weightKg?.toString() ?? "");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const roleLabel = user.role === "admin" ? "Admin" : user.role === "therapist" ? "Therapist" : "Patient";
   const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "good" : "fair";
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setError(null);
 
     if (isPatient) {
       if (!firstName.trim() || !lastName.trim() || !username.trim()) {
@@ -707,21 +825,57 @@ function EditAccountModal({
       return;
     }
 
-    onSave({
-      ...user,
-      name: isPatient ? `${firstName.trim()} ${lastName.trim()}`.trim() : displayName.trim(),
-      username: username.trim(),
-      licenseNumber: user.role === "therapist" ? licenseNumber.trim() || undefined : undefined,
-      licenseIssuedLabel: user.role === "therapist" ? licenseIssued.trim() || undefined : undefined,
-      licenseExpiryLabel: user.role === "therapist" ? licenseExpiry.trim() || undefined : undefined,
-      employeeId: user.role === "admin" ? employeeId.trim() || undefined : undefined,
-      firstName: isPatient ? firstName.trim() || undefined : undefined,
-      lastName: isPatient ? lastName.trim() || undefined : undefined,
-      gender: isPatient ? gender : undefined,
-      dateOfBirthLabel: isPatient ? dateOfBirth.trim() || undefined : undefined,
-      heightCm: isPatient && heightCm.trim() ? Number(heightCm) : undefined,
-      weightKg: isPatient && weightKg.trim() ? Number(weightKg) : undefined
-    });
+    if (isPatient) {
+      if (!token) {
+        setError("Your session has expired. Please log in again.");
+        return;
+      }
+      setSubmitting(true);
+      try {
+        const { user: updated } = await updateUserProfile(token, user.id, {
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          username: username.trim(),
+          gender,
+          dateOfBirth: dateOfBirth.trim() || undefined,
+          heightCm: heightCm.trim() ? Number(heightCm) : undefined,
+          weightKg: weightKg.trim() ? Number(weightKg) : undefined
+        });
+        onSave(
+          {
+            ...user,
+            name: updated.displayName,
+            username: updated.username,
+            firstName: updated.firstName ?? undefined,
+            lastName: updated.lastName ?? undefined,
+            gender: updated.gender,
+            dateOfBirthLabel: updated.dateOfBirth ?? undefined,
+            heightCm: updated.heightCm ?? undefined,
+            weightKg: updated.weightKg ?? undefined
+          },
+          true
+        );
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Couldn't save changes. Please try again.");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    // Therapist/Admin — still client-side only, see this component's header comment.
+    onSave(
+      {
+        ...user,
+        name: displayName.trim(),
+        username: username.trim(),
+        licenseNumber: user.role === "therapist" ? licenseNumber.trim() || undefined : undefined,
+        licenseIssuedLabel: user.role === "therapist" ? licenseIssued.trim() || undefined : undefined,
+        licenseExpiryLabel: user.role === "therapist" ? licenseExpiry.trim() || undefined : undefined,
+        employeeId: user.role === "admin" ? employeeId.trim() || undefined : undefined
+      },
+      false
+    );
   };
 
   return (
@@ -863,8 +1017,8 @@ function EditAccountModal({
             </>
           )}
 
-          <button className="primary-button full-width" type="submit">
-            Save changes
+          <button className="primary-button full-width" type="submit" disabled={submitting}>
+            {submitting ? "Saving…" : "Save changes"}
           </button>
         </form>
       </div>

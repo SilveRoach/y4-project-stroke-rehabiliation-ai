@@ -56,7 +56,8 @@ const dayStatusLabel: Record<HeatmapDayStatus, string> = {
   completed: "Completed",
   in_progress: "In progress",
   skipped: "Skipped",
-  pending: "Pending"
+  pending: "Pending",
+  cancelled: "Cancelled"
 };
 
 // Sensible starting target per target_type, matching newdb.txt's

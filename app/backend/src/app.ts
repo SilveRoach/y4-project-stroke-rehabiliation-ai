@@ -1,16 +1,23 @@
 // Express app setup — middleware registration, mounts each module's routes
-// (auth, user-management, exercise-program-library, session-results).
+// (auth, user-management, therapist, exercise-program-library, session-results,
+// admin).
 //
-// auth and user-management are now wired in. The other module routers are still NOT
-// mounted — their routes/controller/service files are still TODO stubs. The mount
-// points below are reserved so wiring a module in later is a one-line change once its
-// router exports something real.
+// All six modules are now wired in.
+//
+// NOTE: if you're seeing "Route not found" for a route that's clearly mounted
+// below, you're probably running a stale compiled build (dist/app.js can lag
+// behind this file) — see this module's own investigation notes / README for
+// the rebuild command. This file (src/app.ts) is the source of truth.
 
 import cors from "cors";
 import express, { Express, Request, Response } from "express";
 import { errorHandler, notFoundHandler } from "./common/errors";
 import { prisma } from "./config/prisma";
+import { adminRouter } from "./modules/admin/admin.routes";
 import { authRouter } from "./modules/auth/auth.routes";
+import { exerciseRouter } from "./modules/exercise-program-library/exercise.routes";
+import { sessionRouter } from "./modules/session-results/session.routes";
+import { therapistRouter } from "./modules/therapist/therapist.routes";
 import { userRouter } from "./modules/user-management/user.routes";
 
 export function createApp(): Express {
@@ -43,10 +50,10 @@ export function createApp(): Express {
 
   apiRouter.use("/auth", authRouter);
   apiRouter.use("/users", userRouter);
-
-  // Reserved mount points — uncomment each as its module is implemented:
-  // apiRouter.use("/", exerciseRouter);                     // modules/exercise-program-library/exercise.routes.ts
-  // apiRouter.use("/", sessionResultsRouter);               // modules/session-results/*.routes.ts
+  apiRouter.use("/", therapistRouter); // modules/therapist/therapist.routes.ts — /therapists/:id/*, /patients/:id/report
+  apiRouter.use("/", exerciseRouter); // modules/exercise-program-library/exercise.routes.ts — /exercises/*
+  apiRouter.use("/", sessionRouter); // modules/session-results/session.routes.ts — /therapists/:id/sessions, /patients/:id/today
+  apiRouter.use("/", adminRouter); // modules/admin/admin.routes.ts — /admin/dashboard
 
   app.use("/api/v1", apiRouter);
 

@@ -23,9 +23,10 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
   }
 }
 
-// RBAC guard — use after requireAuth. Not wired into any route yet since no
-// role-restricted routes exist in this module; kept here so user-management/
-// exercise-program-library/session-results modules can reuse it directly.
+// RBAC guard — use after requireAuth. Already wired into
+// modules/therapist/therapist.routes.ts and
+// modules/exercise-program-library/exercise.routes.ts; kept exported here so
+// user-management/session-results can reuse it too as they're built out.
 export function requireRole(...roles: JwtPayload["role"][]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) {

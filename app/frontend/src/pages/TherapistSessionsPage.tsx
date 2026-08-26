@@ -1,16 +1,26 @@
 import { ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { therapistProfile } from "../data/therapistMock";
-import { therapistSessionLog } from "../data/therapistSessionsMock";
-import type { EvaluationSource } from "../types";
+import { ApiError, getTherapistSessions } from "../services/api";
+import { useAuth } from "../store/authStore";
+import type { EvaluationSource, TherapistSessionLogEntry } from "../types";
+import { initialsFromName } from "../utils/displayName";
 
 // Sidebar "Sessions" page — a cross-patient session log, filterable by evaluation
 // source (§2.7's ai_score/pt_score split). The per-entry "Review" action is the
 // same stub as Patient Detail's session history: Session Result Review
 // (UI_MOCKUP_PLAN_NEWDB.md §2.7) exists only as a static mockup
 // (session-result-review.html) so far, not a real React page yet.
+//
+// Backed by GET /therapists/:id/sessions (modules/session-results/*) — replaces
+// the former data/therapistSessionsMock.ts import (therapistSessionLog) and
+// data/therapistMock.ts's therapistProfile, same "wire it to the real backend"
+// pass already done for TherapistDashboardPage.tsx / TherapistPatientsPage.tsx /
+// TherapistSettingsPage.tsx. See session.service.ts's own comments for the
+// schema gaps this works around (no dedicated training_sessions table — "session"
+// here means one rehabilitation_schedule_days row — and the evaluationSource
+// ai/pt/manual -> ai/pt_reviewed mapping).
 
 interface TherapistSessionsPageProps {
   onLogout: () => void;
@@ -26,11 +36,42 @@ const filterOptions: Array<{ key: SourceFilter; label: string }> = [
 ];
 
 export function TherapistSessionsPage({ onLogout, onNavigate }: TherapistSessionsPageProps) {
+  const { token, user } = useAuth();
+
   const [filter, setFilter] = useState<SourceFilter>("all");
 
-  const visibleSessions = therapistSessionLog.filter(
-    (session) => filter === "all" || session.evaluationSource === filter
-  );
+  const [sessions, setSessions] = useState<TherapistSessionLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    let cancelled = false;
+
+    setLoading(true);
+    setError(null);
+
+    getTherapistSessions(token, user.id)
+      .then((data) => {
+        if (!cancelled) setSessions(data.sessions);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "Couldn't load your session log. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user]);
+
+  const visibleSessions = sessions.filter((session) => filter === "all" || session.evaluationSource === filter);
+
+  const displayName = user?.displayName || user?.username || "Therapist";
 
   return (
     <section className="therapist-shell">
@@ -45,15 +86,21 @@ export function TherapistSessionsPage({ onLogout, onNavigate }: TherapistSession
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{therapistProfile.displayName}</strong>
-                <small>{therapistProfile.title}</small>
+                <strong>{displayName}</strong>
+                <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{therapistProfile.initials}</span>
+              <span className="avatar-badge">{initialsFromName(displayName)}</span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main">
+          {error && (
+            <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 16 }}>
+              <p style={{ margin: 0 }}>{error}</p>
+            </div>
+          )}
+
           <div className="summary-card therapist-patient-card">
             <div className="therapist-patient-toolbar">
               <strong>Session log</strong>
@@ -72,35 +119,45 @@ export function TherapistSessionsPage({ onLogout, onNavigate }: TherapistSession
             </div>
 
             <div className="pd-session-list">
-              {visibleSessions.map((session) => (
-                <div key={session.id} className="pd-session-row">
-                  <div className="ts-session-patient">
-                    <span className="therapist-avatar">{session.patientAvatarInitials}</span>
-                    <div>
-                      <span>{session.patientName}</span>
-                      <small>
-                        {session.dateLabel} &middot; {session.dayLabel}
-                      </small>
+              {loading ? (
+                <p className="pd-empty-note">Loading…</p>
+              ) : (
+                <>
+                  {visibleSessions.map((session) => (
+                    <div key={session.id} className="pd-session-row">
+                      <div className="ts-session-patient">
+                        <span className="therapist-avatar">{session.patientAvatarInitials}</span>
+                        <div>
+                          <span>{session.patientName}</span>
+                          <small>
+                            {session.dateLabel} &middot; {session.dayLabel}
+                          </small>
+                        </div>
+                      </div>
+                      <div className="pd-session-actions">
+                        {session.outcome === "skipped" ? (
+                          <span className="pd-session-skipped">Skipped</span>
+                        ) : (
+                          <span className="pd-session-score">Avg {session.avgScore}</span>
+                        )}
+                        {session.evaluationSource && (
+                          <span className={`pd-session-source ${session.evaluationSource}`}>
+                            {session.evaluationSource === "ai" ? "AI-scored" : "PT-reviewed"}
+                          </span>
+                        )}
+                        <span className="text-action pd-stub-link" title="Session Result Review page not built yet">
+                          Review <ChevronRight size={12} />
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="pd-session-actions">
-                    {session.outcome === "skipped" ? (
-                      <span className="pd-session-skipped">Skipped</span>
-                    ) : (
-                      <span className="pd-session-score">Avg {session.avgScore}</span>
-                    )}
-                    {session.evaluationSource && (
-                      <span className={`pd-session-source ${session.evaluationSource}`}>
-                        {session.evaluationSource === "ai" ? "AI-scored" : "PT-reviewed"}
-                      </span>
-                    )}
-                    <span className="text-action pd-stub-link" title="Session Result Review page not built yet">
-                      Review <ChevronRight size={12} />
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {visibleSessions.length === 0 && <p className="pd-empty-note">No sessions match this filter.</p>}
+                  ))}
+                  {visibleSessions.length === 0 && (
+                    <p className="pd-empty-note">
+                      {sessions.length === 0 ? "No sessions logged yet for your caseload." : "No sessions match this filter."}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </main>

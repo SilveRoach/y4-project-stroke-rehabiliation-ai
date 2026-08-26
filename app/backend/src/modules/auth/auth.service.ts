@@ -6,6 +6,7 @@ import {
   UnauthenticatedError,
   ValidationError,
 } from "../../common/errors";
+import { displayName as formatDisplayName } from "../../common/formatting";
 import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
 import { JwtPayload } from "../../types";
@@ -27,6 +28,10 @@ export interface AuthResult {
         id: string;
         role: "therapist" | "admin";
         username: string;
+        // First+last name if set, else falls back to username — see
+        // common/formatting.ts's displayName(). Lets the Therapist dashboard's
+        // topbar/sidebar show a real name instead of always the raw username.
+        displayName: string;
       };
 }
 
@@ -178,6 +183,17 @@ export async function login(
       role: "patient",
     });
 
+    // Record this login for the Admin account list's "Last login" column
+    // (user.service.ts's listUsers()) — previously users.last_login_at was
+    // never written anywhere, so every account would show "Never" forever.
+    // Fire-and-forget-ish: awaited so a failure surfaces as a 500 rather than
+    // silently skipping the update, but it's after the credential check so it
+    // can't be used to probe valid phone numbers/usernames.
+    await prisma.user.update({
+      where: { id: patientUser.id },
+      data: { lastLoginAt: new Date() },
+    });
+
     return {
       token,
       user: {
@@ -230,12 +246,19 @@ export async function login(
     role: user.role,
   });
 
+  // Same last-login bookkeeping as the patient branch above.
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastLoginAt: new Date() },
+  });
+
   return {
     token,
     user: {
       id: user.id,
       role: user.role,
       username: user.username,
+      displayName: formatDisplayName(user),
     },
   };
 }

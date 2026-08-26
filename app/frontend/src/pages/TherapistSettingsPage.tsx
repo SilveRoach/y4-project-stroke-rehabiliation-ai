@@ -1,23 +1,35 @@
 import { Pencil, Phone, Save, ShieldCheck, User, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { therapistProfile } from "../data/therapistMock";
+import { ApiError, getUserProfile, updateUserProfile, type UpdateProfilePayload, type UserProfile } from "../services/api";
+import { useAuth } from "../store/authStore";
+import { initialsFromName } from "../utils/displayName";
 
 // Sidebar "Settings" page — profile + license + contact info, built on
 // pages/PatientSettingsPage.tsx's view/edit-toggle layout (avatar circle over a
 // bordered two-panel card) but adapted to the `therapists` table's own schema
-// instead of `patients`': license_number/license_issued_date/license_expiry_date
-// replace "assigned PT"/"date of birth", and there's no assigned-PT-style
-// read-only relationship field since a therapist doesn't have one. Same stub
-// reasoning as before (UI_MOCKUP_PLAN_NEWDB.md §2.1): no `users`/`user_contacts`/
-// `therapists` profile-edit endpoint exists yet, so every field is local
-// component state only — saving updates nothing beyond this page's own render.
-// Notifications/Language/Security (this page's old contents) were dropped in
-// favor of matching the Patient Settings layout exactly; they weren't backed by
-// any schema table anyway (no `notification_preferences`/`language` column
-// exists on `users` or `therapists`).
+// instead of `patients`'.
+//
+// Backed by modules/user-management/*'s new GET/PATCH /users/:id — replaces the
+// former data/therapistMock.ts (therapistProfile) import and local-only form
+// state, same "wire it to the real backend" pass already done for
+// TherapistDashboardPage.tsx / TherapistPatientsPage.tsx / ExerciseLibraryPage.tsx.
+// See services/api.ts's UserProfile/updateUserProfile and
+// user.service.ts's own comments for the schema gaps this works around:
+//   - No `address` column exists on `users`/`therapists` (only `patients.address`
+//     does) and no job-title column exists anywhere — the original mock form's
+//     "Clinic address" and "Title" fields are dropped entirely rather than kept
+//     as dead, never-persisted inputs.
+//   - "Display name" is now two real fields (First name / Last name) matching
+//     `users.first_name`/`users.last_name`, instead of one freeform field that
+//     had nowhere real to save to.
+//   - "Therapist since" now reads the real `users.created_at` instead of a
+//     hardcoded mock date.
+//   - There's no self-service password-change route documented in
+//     api-design.md (only an Admin-triggered reset-password flow) — this page
+//     doesn't offer one.
 
 interface TherapistSettingsPageProps {
   onLogout: () => void;
@@ -25,22 +37,41 @@ interface TherapistSettingsPageProps {
 }
 
 interface TherapistProfileForm {
-  displayName: string;
-  title: string;
+  firstName: string;
+  lastName: string;
   licenseNumber: string;
   licenseIssuedDate: string;
   licenseExpiryDate: string;
   email: string;
   phoneNumber: string;
-  address: string;
 }
 
-// Account creation date (`therapists.created_at`) — read-only, system-set, so it
-// lives outside `form` next to the license-expiry check below rather than as an
-// editable field. Mock value only: no `therapists.created_at` is wired up yet.
-const PROFILE_CREATED_ISO = "2023-02-10";
+function emptyForm(): TherapistProfileForm {
+  return {
+    firstName: "",
+    lastName: "",
+    licenseNumber: "",
+    licenseIssuedDate: "",
+    licenseExpiryDate: "",
+    email: "",
+    phoneNumber: ""
+  };
+}
+
+function formFromProfile(profile: UserProfile): TherapistProfileForm {
+  return {
+    firstName: profile.firstName ?? "",
+    lastName: profile.lastName ?? "",
+    licenseNumber: profile.licenseNumber ?? "",
+    licenseIssuedDate: profile.licenseIssuedDate ?? "",
+    licenseExpiryDate: profile.licenseExpiryDate ?? "",
+    email: profile.email ?? "",
+    phoneNumber: profile.phoneNumber ?? ""
+  };
+}
 
 function formatDateLabel(iso: string): string {
+  if (!iso) return "Not set";
   return new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
@@ -49,21 +80,47 @@ function formatDateLabel(iso: string): string {
 }
 
 export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSettingsPageProps) {
-  const [form, setForm] = useState<TherapistProfileForm>({
-    displayName: therapistProfile.displayName,
-    title: therapistProfile.title,
-    licenseNumber: "PT-48213-BKK",
-    licenseIssuedDate: "2014-06-01",
-    licenseExpiryDate: "2027-06-01",
-    email: "pattarapong.t@rehabclinic.example",
-    phoneNumber: "0812345678",
-    address: "Bangkok Rehabilitation Center, 45 Phahonyothin Rd, Bangkok 10400"
-  });
+  const { token, user, updateUser } = useAuth();
+
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [form, setForm] = useState<TherapistProfileForm>(emptyForm());
   const [isEditing, setIsEditing] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Snapshot taken when edit mode starts, restored on "Discard changes" — lets
   // fields be edited freely without a cancel undoing more than this pass.
   const beforeEditRef = useRef(form);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    let cancelled = false;
+
+    setLoading(true);
+    setLoadError(null);
+
+    getUserProfile(token, user.id)
+      .then((data) => {
+        if (cancelled) return;
+        setProfile(data.user);
+        setForm(formFromProfile(data.user));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLoadError(err instanceof ApiError ? err.message : "Couldn't load your profile. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user]);
 
   const updateField = (key: keyof TherapistProfileForm) => (event: { target: { value: string } }) => {
     setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -72,23 +129,49 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
   const startEditing = () => {
     beforeEditRef.current = form;
     setSaved(false);
+    setSaveError(null);
     setIsEditing(true);
   };
 
   const discardChanges = () => {
     setForm(beforeEditRef.current);
     setIsEditing(false);
+    setSaveError(null);
   };
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    // Stub: no profile-edit endpoint exists yet — this only updates local state
-    // (and the "Saved" confirmation resets after a moment) so the form is
-    // demoable end to end without pretending a backend call happened.
-    setIsEditing(false);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2500);
+    if (!token || !user) return;
+
+    const payload: UpdateProfilePayload = {
+      firstName: form.firstName,
+      lastName: form.lastName,
+      email: form.email,
+      phoneNumber: form.phoneNumber,
+      licenseNumber: form.licenseNumber,
+      licenseIssuedDate: form.licenseIssuedDate,
+      licenseExpiryDate: form.licenseExpiryDate
+    };
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const result = await updateUserProfile(token, user.id, payload);
+      setProfile(result.user);
+      setForm(formFromProfile(result.user));
+      // Keeps the sidebar/topbar's name in sync without a re-login.
+      updateUser({ displayName: result.user.displayName });
+      setIsEditing(false);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : "Couldn't save your profile. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const displayName = profile?.displayName || user?.displayName || user?.username || "Therapist";
 
   return (
     <section className="therapist-shell">
@@ -103,107 +186,116 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{form.displayName}</strong>
-                <small>{form.title}</small>
+                <strong>{displayName}</strong>
+                <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{therapistProfile.initials}</span>
+              <span className="avatar-badge">{initialsFromName(displayName)}</span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main settings-main ps-main">
-          <form className="ps-card" onSubmit={handleSubmit}>
-            <div className="ps-avatar-circle">{therapistProfile.initials}</div>
-
-            <div className="ps-panels">
-              <section className="ps-panel">
-                <div className="settings-section-heading">
-                  <User size={15} /> <strong>Profile</strong>
-                </div>
-                <SettingsField
-                  label="Display name"
-                  value={form.displayName}
-                  editing={isEditing}
-                  onChange={updateField("displayName")}
-                />
-                <SettingsField label="Title" value={form.title} editing={isEditing} onChange={updateField("title")} />
-                <div className="settings-section-heading">
-                  <ShieldCheck size={15} /> <strong>License</strong>
-                </div>
-                <SettingsField
-                  label="License number"
-                  value={form.licenseNumber}
-                  editing={isEditing}
-                  onChange={updateField("licenseNumber")}
-                />
-                <SettingsField
-                  label="License issued"
-                  type="date"
-                  value={form.licenseIssuedDate}
-                  editing={isEditing}
-                  onChange={updateField("licenseIssuedDate")}
-                  displayValue={formatDateLabel(form.licenseIssuedDate)}
-                />
-                <SettingsField
-                  label="License expires"
-                  type="date"
-                  value={form.licenseExpiryDate}
-                  editing={isEditing}
-                  onChange={updateField("licenseExpiryDate")}
-                  displayValue={formatDateLabel(form.licenseExpiryDate)}
-                />
-                <div className="ps-field">
-                  <span className="ps-field-label">Therapist since</span>
-                  <p className="ps-field-value">{formatDateLabel(PROFILE_CREATED_ISO)}</p>
-                </div>
-              </section>
-
-              <section className="ps-panel">
-                <div className="settings-section-heading">
-                  <Phone size={15} /> <strong>Contact Information</strong>
-                </div>
-                <SettingsField
-                  label="Email address"
-                  type="email"
-                  value={form.email}
-                  editing={isEditing}
-                  onChange={updateField("email")}
-                />
-                <SettingsField
-                  label="Phone number"
-                  value={form.phoneNumber}
-                  editing={isEditing}
-                  onChange={updateField("phoneNumber")}
-                />
-                <SettingsField
-                  label="Clinic address"
-                  value={form.address}
-                  editing={isEditing}
-                  onChange={updateField("address")}
-                />
-              </section>
+          {(loadError || saveError) && (
+            <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 16 }}>
+              <p style={{ margin: 0 }}>{loadError ?? saveError}</p>
             </div>
+          )}
 
-            <div className="ps-edit-actions">
-              {isEditing ? (
-                <>
-                  <button type="button" className="secondary-button" onClick={discardChanges}>
-                    <X size={14} /> Discard changes
-                  </button>
-                  <button type="submit" className="primary-button">
-                    <Save size={14} /> Save changes
-                  </button>
-                </>
-              ) : (
-                <>
-                  {saved && <span className="ps-saved-note">Saved</span>}
-                  <button type="button" className="primary-button" onClick={startEditing}>
-                    <Pencil size={14} /> Edit profile
-                  </button>
-                </>
-              )}
-            </div>
-          </form>
+          {loading ? (
+            <p className="pd-empty-note">Loading…</p>
+          ) : (
+            <form className="ps-card" onSubmit={handleSubmit}>
+              <div className="ps-avatar-circle">{initialsFromName(displayName)}</div>
+
+              <div className="ps-panels">
+                <section className="ps-panel">
+                  <div className="settings-section-heading">
+                    <User size={15} /> <strong>Profile</strong>
+                  </div>
+                  <SettingsField
+                    label="First name"
+                    value={form.firstName}
+                    editing={isEditing}
+                    onChange={updateField("firstName")}
+                  />
+                  <SettingsField
+                    label="Last name"
+                    value={form.lastName}
+                    editing={isEditing}
+                    onChange={updateField("lastName")}
+                  />
+                  <div className="settings-section-heading">
+                    <ShieldCheck size={15} /> <strong>License</strong>
+                  </div>
+                  <SettingsField
+                    label="License number"
+                    value={form.licenseNumber}
+                    editing={isEditing}
+                    onChange={updateField("licenseNumber")}
+                  />
+                  <SettingsField
+                    label="License issued"
+                    type="date"
+                    value={form.licenseIssuedDate}
+                    editing={isEditing}
+                    onChange={updateField("licenseIssuedDate")}
+                    displayValue={formatDateLabel(form.licenseIssuedDate)}
+                  />
+                  <SettingsField
+                    label="License expires"
+                    type="date"
+                    value={form.licenseExpiryDate}
+                    editing={isEditing}
+                    onChange={updateField("licenseExpiryDate")}
+                    displayValue={formatDateLabel(form.licenseExpiryDate)}
+                  />
+                  <div className="ps-field">
+                    <span className="ps-field-label">Therapist since</span>
+                    <p className="ps-field-value">{profile?.createdAtLabel ?? "—"}</p>
+                  </div>
+                </section>
+
+                <section className="ps-panel">
+                  <div className="settings-section-heading">
+                    <Phone size={15} /> <strong>Contact Information</strong>
+                  </div>
+                  <SettingsField
+                    label="Email address"
+                    type="email"
+                    value={form.email}
+                    editing={isEditing}
+                    onChange={updateField("email")}
+                  />
+                  <SettingsField
+                    label="Phone number"
+                    value={form.phoneNumber}
+                    editing={isEditing}
+                    onChange={updateField("phoneNumber")}
+                  />
+                </section>
+              </div>
+
+              <div className="ps-edit-actions">
+                {isEditing ? (
+                  <>
+                    <button type="button" className="secondary-button" onClick={discardChanges} disabled={saving}>
+                      <X size={14} /> Discard changes
+                    </button>
+                    <button type="submit" className="primary-button" disabled={saving}>
+                      <Save size={14} /> {saving ? "Saving…" : "Save changes"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {saved && <span className="ps-saved-note">Saved</span>}
+                    <button type="button" className="primary-button" onClick={startEditing}>
+                      <Pencil size={14} /> Edit profile
+                    </button>
+                  </>
+                )}
+              </div>
+            </form>
+          )}
         </main>
       </div>
     </section>
@@ -231,7 +323,7 @@ function SettingsField({
       {editing ? (
         <input type={type} value={value} onChange={onChange} />
       ) : (
-        <p className="ps-field-value">{displayValue ?? value}</p>
+        <p className="ps-field-value">{displayValue ?? (value || "—")}</p>
       )}
     </div>
   );

@@ -1343,6 +1343,16 @@ input:focus {
     grid-column: 1;
   }
 
+  .exercise-panel .exercise-instruction-video,
+  .exercise-panel .exercise-instruction-video-placeholder {
+  width: 80%;
+  margin-inline: auto;
+}
+
+  .pei-details-panel {
+    grid-column: 1;
+  }
+
   .today-side-panel {
     grid-column: 2;
     grid-row: 1 / span 2;
@@ -2927,6 +2937,19 @@ input:focus {
   color: var(--text-secondary);
 }
 
+.pd-calendar-cell.cancelled {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--text-secondary) 0,
+    var(--text-secondary) 2px,
+    transparent 2px,
+    transparent 6px
+  );
+  background-color: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
 .pd-legend {
   display: flex;
   flex-wrap: wrap;
@@ -2964,6 +2987,17 @@ input:focus {
 
 .pd-legend-dot.pending {
   background: var(--border-light);
+}
+
+.pd-legend-dot.cancelled {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--text-secondary) 0,
+    var(--text-secondary) 1.5px,
+    transparent 1.5px,
+    transparent 4px
+  );
+  border: 1px solid var(--border);
 }
 
 .pd-empty-note {
@@ -4335,4 +4369,127 @@ input:focus {
   .sud-card {
     padding: 32px;
   }
+}
+
+.exercise-instruction-video {
+  width: 100%;
+  max-height: 420px;
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+
+/* Placeholder shown in place of the video whenever there isn't one to play
+   (loading, error, or none assigned) — a proper box the same size/shape the real
+   video would occupy, with the existing VideoOff icon + message centered inside
+   it, instead of the bare inline .pd-empty-note text this used to fall back to. */
+.exercise-instruction-video-placeholder {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  aspect-ratio: 16 / 9;
+  max-height: 420px;
+  border: 1.5px dashed var(--border);
+  border-radius: 14px;
+  padding: 24px;
+  text-align: center;
+  background: #e5e7eb;
+  color: var(--text-secondary);
+}
+
+.exercise-instruction-video-placeholder svg {
+  color: var(--text-secondary);
+}
+
+.exercise-instruction-video-placeholder span {
+  max-width: 320px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* --- Patient Exercise Instruction page: "get ready" camera panel (right column,
+   PC layout). Mirrors the wireframe's right-hand box — a camera preview area
+   (placeholder only for this pass; no getUserMedia wired up yet — see
+   PatientExerciseInstructionPage.tsx's comment on why), a device-check row (UI
+   stubs only, real enumerateDevices()/switching + a mic-level meter are a later
+   pass), and Start Exercise sitting at the bottom of the same box. Reuses
+   .today-main-panel/.summary-card's existing bordered-card look (via
+   .pei-details-panel/.pei-camera-card) rather than inventing a new card shell. */
+
+.pei-camera-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 520px;
+}
+
+.pei-camera-card-header p {
+  margin: 0 0 2px;
+}
+
+.pei-camera-card-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.pei-camera-preview {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  flex: 1;
+  min-height: 220px;
+  border: 1.5px dashed var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  background: var(--bg);
+  color: var(--text-secondary);
+}
+
+.pei-camera-preview svg {
+  color: var(--text-secondary);
+}
+
+.pei-camera-preview p {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.pei-camera-preview span {
+  max-width: 240px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.pei-device-row {
+  display: flex;
+  gap: 8px;
+}
+
+.pei-device-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: not-allowed;
+}
+
+.pei-device-hint {
+  margin: -8px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.pei-start-button {
+  margin-top: auto;
 }

@@ -1,11 +1,20 @@
 import { AlertTriangle, Ban, Bell, Dumbbell, Hand, Plus, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { FilePicker } from "../components/FilePicker";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { exerciseLibrary as seedExerciseLibrary } from "../data/exerciseLibraryMock";
-import { therapistProfile } from "../data/therapistMock";
+import {
+  ApiError,
+  archiveExercise,
+  createExercise,
+  createExerciseVersion,
+  getExerciseLibrary,
+  updateExerciseDraft,
+  type ExerciseInputPayload
+} from "../services/api";
+import { useAuth } from "../store/authStore";
+import { initialsFromName } from "../utils/displayName";
 import type {
   ExerciseBaseCriteria,
   ExerciseLibraryDifficulty,
@@ -22,16 +31,29 @@ import type {
 // listing every row under the same parent_exercise_id, editing an ACTIVE exercise
 // creates a new draft version (BR-6 propagation warning) rather than mutating the
 // row in place, and the base-criteria form branches by movement_tracking instead of
-// one generic JSON field. Demo video now uses the real FilePicker component
-// (components/FilePicker.tsx) instead of the mockup's dashed-box placeholder — same
-// caveat as everywhere else FilePicker is used: no upload backend exists, so a
-// chosen file is a client-side object URL for this session only, not persisted.
+// one generic JSON field.
 //
-// Real, client-side only (same pattern as PatientDetailPage's "Add record"): create/
-// edit/archive all mutate local component state seeded from
-// data/exerciseLibraryMock.ts. No exercise_library backend endpoint exists yet, so
-// nothing survives a page reload — flagged here rather than silently presented as
-// persisted.
+// Backed by modules/exercise-program-library/* on the backend — replaces the
+// former data/exerciseLibraryMock.ts and data/therapistMock.ts (therapistProfile)
+// imports, same "wire it to the real backend" pass already done for
+// TherapistDashboardPage.tsx / TherapistPatientsPage.tsx. See
+// services/api.ts's Exercise Library section and exercise.service.ts's own
+// comments for the schema gaps this works around:
+//   - No nameTh column — the version-history mock had Thai names, real rows never
+//     will, so `nameTh` is simply never rendered here (dropped from this page
+//     entirely rather than always showing an empty string).
+//   - No file-upload backend anywhere in this codebase — the demo-video
+//     FilePicker below still works for picking a *local* preview during this
+//     browser session (same caveat FilePicker.tsx already documents for every
+//     other page that uses it), but nothing is sent to the backend for it: the
+//     create/edit/version calls never include a file reference, so
+//     `hasDemoVideo` on a freshly created/edited real exercise will always come
+//     back `false` from the server on next load, even if a file was picked in
+//     this session. Flagged rather than silently pretending the picked file
+//     persisted.
+//   - Editing a still-`draft` exercise's fields in place goes to
+//     `PATCH /exercises/:id`, an endpoint added beyond api-design.md — see that
+//     file's own header comment.
 
 interface ExerciseLibraryPageProps {
   onLogout: () => void;
@@ -72,62 +94,70 @@ function statusLabel(status: ExerciseLibraryStatus): string {
 }
 
 export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPageProps) {
-  const [exercises, setExercises] = useState<ExerciseLibraryItem[]>(seedExerciseLibrary);
+  const { token, user } = useAuth();
+
+  const [exercises, setExercises] = useState<ExerciseLibraryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [editingExercise, setEditingExercise] = useState<ExerciseLibraryItem | "new" | null>(null);
   const [historyExercise, setHistoryExercise] = useState<ExerciseLibraryItem | null>(null);
+
+  // `reloadToken` just forces the effect below to re-run after a mutation
+  // (create/edit/archive) — simpler than duplicating the fetch/cancellation
+  // logic in a second, separately-invoked loadExercises() function.
+  const [reloadToken, setReloadToken] = useState(0);
+  const refetch = () => setReloadToken((value) => value + 1);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    let cancelled = false;
+
+    setLoading(true);
+    setError(null);
+
+    getExerciseLibrary(token)
+      .then((data) => {
+        if (!cancelled) setExercises(data.exercises);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "Couldn't load the exercise library. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user, reloadToken]);
 
   const filteredExercises = useMemo(() => {
     if (statusFilter === "all") return exercises;
     return exercises.filter((exercise) => exercise.status === statusFilter);
   }, [exercises, statusFilter]);
 
-  const handleArchive = (exerciseId: string) => {
-    setExercises((current) =>
-      current.map((exercise) =>
-        exercise.id === exerciseId
-          ? {
-              ...exercise,
-              status: "archived",
-              versions: exercise.versions.map((version) =>
-                version.id === exerciseId ? { ...version, status: "archived" } : version
-              )
-            }
-          : exercise
-      )
-    );
-  };
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
-  const handleSaveNew = (item: ExerciseLibraryItem) => {
-    setExercises((current) => [item, ...current]);
-    setEditingExercise(null);
-  };
-
-  const handleSaveEdit = (updated: ExerciseLibraryItem, createdNewVersion: boolean) => {
-    if (!createdNewVersion) {
-      // Draft → editing in place is safe; nothing has ever gone live.
-      setExercises((current) => current.map((exercise) => (exercise.id === updated.id ? updated : exercise)));
-    } else {
-      // Active → the old row is archived, and a new draft version takes its place
-      // in the grid, matching the mockup's "Save as v4 · draft" + propagation
-      // warning (BR-6): exercise_library rows are immutable-per-version by design.
-      setExercises((current) => {
-        const withOldArchived = current.map((exercise) =>
-          exercise.parentExerciseId === updated.parentExerciseId && exercise.status === "active"
-            ? {
-                ...exercise,
-                status: "archived" as ExerciseLibraryStatus,
-                versions: exercise.versions.map((v) =>
-                  v.id === exercise.id ? { ...v, status: "archived" as ExerciseLibraryStatus } : v
-                )
-              }
-            : exercise
-        );
-        return [updated, ...withOldArchived];
-      });
+  const handleArchive = async (exerciseId: string) => {
+    if (!token) return;
+    setArchivingId(exerciseId);
+    setArchiveError(null);
+    try {
+      await archiveExercise(token, exerciseId);
+      refetch();
+    } catch (err) {
+      setArchiveError(err instanceof ApiError ? err.message : "Couldn't archive this exercise. Please try again.");
+    } finally {
+      setArchivingId(null);
     }
-    setEditingExercise(null);
   };
+
+  const displayName = user?.displayName || user?.username || "Therapist";
 
   return (
     <section className="therapist-shell">
@@ -137,7 +167,7 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
         <header className="therapist-topbar">
           <div>
             <h1>Exercise Library</h1>
-            <p>{exercises.length} exercises</p>
+            <p>{loading ? "Loading…" : `${exercises.length} exercises`}</p>
           </div>
           <div className="therapist-topbar-actions">
             <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
@@ -145,15 +175,21 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
             </button>
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{therapistProfile.displayName}</strong>
-                <small>{therapistProfile.title}</small>
+                <strong>{displayName}</strong>
+                <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{therapistProfile.initials}</span>
+              <span className="avatar-badge">{initialsFromName(displayName)}</span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main">
+          {(error || archiveError) && (
+            <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 16 }}>
+              <p style={{ margin: 0 }}>{error ?? archiveError}</p>
+            </div>
+          )}
+
           <div className="summary-card">
             <div className="library-toolbar">
               <div className="library-filter-chips">
@@ -174,8 +210,10 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
             </div>
           </div>
 
-          {filteredExercises.length === 0 ? (
-            <p className="pd-empty-note">No exercises match this filter.</p>
+          {!loading && filteredExercises.length === 0 ? (
+            <p className="pd-empty-note">
+              {exercises.length === 0 ? "No exercises have been created yet." : "No exercises match this filter."}
+            </p>
           ) : (
             <div className="library-grid">
               {filteredExercises.map((exercise) => {
@@ -220,8 +258,13 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
                           <button type="button" className="text-action" onClick={() => setEditingExercise(exercise)}>
                             Edit
                           </button>
-                          <button type="button" className="text-action danger" onClick={() => handleArchive(exercise.id)}>
-                            Archive
+                          <button
+                            type="button"
+                            className="text-action danger"
+                            disabled={archivingId === exercise.id}
+                            onClick={() => handleArchive(exercise.id)}
+                          >
+                            {archivingId === exercise.id ? "Archiving…" : "Archive"}
                           </button>
                         </>
                       )}
@@ -238,8 +281,10 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
         <ExerciseFormModal
           exercise={editingExercise === "new" ? null : editingExercise}
           onClose={() => setEditingExercise(null)}
-          onSaveNew={handleSaveNew}
-          onSaveEdit={handleSaveEdit}
+          onSaved={() => {
+            setEditingExercise(null);
+            refetch();
+          }}
         />
       )}
 
@@ -291,11 +336,15 @@ function describeCriteria(criteria: ExerciseBaseCriteria): string {
 interface ExerciseFormModalProps {
   exercise: ExerciseLibraryItem | null;
   onClose: () => void;
-  onSaveNew: (item: ExerciseLibraryItem) => void;
-  onSaveEdit: (item: ExerciseLibraryItem, createdNewVersion: boolean) => void;
+  // Replaces the old onSaveNew/onSaveEdit pair — now there's exactly one
+  // "the backend call succeeded, go refetch the list" signal, since the page
+  // owns the authoritative post-save state (the server response), not a
+  // locally-constructed ExerciseLibraryItem.
+  onSaved: () => void;
 }
 
-function ExerciseFormModal({ exercise, onClose, onSaveNew, onSaveEdit }: ExerciseFormModalProps) {
+function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProps) {
+  const { token } = useAuth();
   const isEditingActive = exercise?.status === "active";
 
   const [name, setName] = useState(exercise?.name ?? "");
@@ -306,6 +355,8 @@ function ExerciseFormModal({ exercise, onClose, onSaveNew, onSaveEdit }: Exercis
   const [difficultyLevel, setDifficultyLevel] = useState<ExerciseLibraryDifficulty>(
     exercise?.difficultyLevel ?? "medium"
   );
+  // Local preview only — see this file's header comment: no upload backend
+  // exists, so picking a file here never reaches the server.
   const [demoFile, setDemoFile] = useState<PickedFile | null>(null);
   const [targetAngleDeg, setTargetAngleDeg] = useState(exercise?.baseCriteria.targetAngleDeg?.toString() ?? "90");
   const [targetGripStrength, setTargetGripStrength] = useState(
@@ -314,9 +365,12 @@ function ExerciseFormModal({ exercise, onClose, onSaveNew, onSaveEdit }: Exercis
   const [repetitions, setRepetitions] = useState(exercise?.baseCriteria.repetitions?.toString() ?? "10");
   const [holdSeconds, setHoldSeconds] = useState(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
 
-  const handleSubmit = (event: FormEvent) => {
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !token) return;
 
     const baseCriteria: ExerciseBaseCriteria = {};
     if (movementTracking === "pose") {
@@ -331,60 +385,34 @@ function ExerciseFormModal({ exercise, onClose, onSaveNew, onSaveEdit }: Exercis
       baseCriteria.repetitions = Number(repetitions) || undefined;
     }
 
-    if (!exercise) {
-      // New exercise family — starts its own parent_exercise_id at v1/draft.
-      const id = `ex-new-${Date.now()}`;
-      onSaveNew({
-        id,
-        parentExerciseId: id,
-        versionNumber: 1,
-        name: name.trim(),
-        description: description.trim(),
-        movementTracking,
-        difficultyLevel,
-        hasDemoVideo: demoFile !== null,
-        baseCriteria,
-        status: "draft",
-        createdAtLabel: "Just now",
-        createdByName: therapistProfile.displayName,
-        versions: [
-          {
-            id,
-            versionNumber: 1,
-            status: "draft",
-            baseCriteria,
-            createdAtLabel: "Just now"
-          }
-        ]
-      });
-      return;
-    }
-
-    const createdNewVersion = isEditingActive;
-    const nextVersionNumber = createdNewVersion ? exercise.versionNumber + 1 : exercise.versionNumber;
-    const nextId = createdNewVersion ? `${exercise.parentExerciseId}-v${nextVersionNumber}` : exercise.id;
-    const nextStatus: ExerciseLibraryStatus = createdNewVersion ? "draft" : exercise.status;
-
-    const updated: ExerciseLibraryItem = {
-      ...exercise,
-      id: nextId,
-      versionNumber: nextVersionNumber,
+    const payload: ExerciseInputPayload = {
       name: name.trim(),
       description: description.trim(),
       movementTracking,
       difficultyLevel,
-      hasDemoVideo: demoFile !== null || exercise.hasDemoVideo,
-      baseCriteria,
-      status: nextStatus,
-      versions: createdNewVersion
-        ? [
-            { id: nextId, versionNumber: nextVersionNumber, status: "draft", baseCriteria, createdAtLabel: "Just now" },
-            ...exercise.versions
-          ]
-        : exercise.versions.map((v) => (v.id === exercise.id ? { ...v, baseCriteria } : v))
+      baseCriteria
     };
 
-    onSaveEdit(updated, createdNewVersion);
+    setSaving(true);
+    setFormError(null);
+    try {
+      if (!exercise) {
+        // New exercise family — starts its own family id at v1/draft.
+        await createExercise(token, payload);
+      } else if (isEditingActive) {
+        // Active -> editing creates a new draft version (BR-6); the backend
+        // archives the previously-active row in the same transaction.
+        await createExerciseVersion(token, exercise.id, payload);
+      } else {
+        // Draft -> safe to edit in place; nothing has ever gone live.
+        await updateExerciseDraft(token, exercise.id, payload);
+      }
+      onSaved();
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : "Couldn't save this exercise. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -405,6 +433,12 @@ function ExerciseFormModal({ exercise, onClose, onSaveNew, onSaveEdit }: Exercis
               Editing an active exercise creates a new version. This will update the exercise everywhere it&apos;s
               currently used (BR-6).
             </span>
+          </div>
+        )}
+
+        {formError && (
+          <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", margin: "0 20px 12px" }}>
+            <p style={{ margin: 0 }}>{formError}</p>
           </div>
         )}
 
@@ -512,8 +546,14 @@ function ExerciseFormModal({ exercise, onClose, onSaveNew, onSaveEdit }: Exercis
             </div>
           </div>
 
-          <button type="submit" className="primary-button full-width">
-            {exercise ? (isEditingActive ? `Save as v${exercise.versionNumber + 1} \u00b7 draft` : "Save changes") : "Save as v1 \u00b7 draft"}
+          <button type="submit" className="primary-button full-width" disabled={saving}>
+            {saving
+              ? "Saving…"
+              : exercise
+                ? isEditingActive
+                  ? `Save as v${exercise.versionNumber + 1} \u00b7 draft`
+                  : "Save changes"
+                : "Save as v1 \u00b7 draft"}
           </button>
         </form>
       </div>

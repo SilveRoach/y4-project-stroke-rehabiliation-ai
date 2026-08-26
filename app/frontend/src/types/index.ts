@@ -97,12 +97,12 @@ export interface AdminProfile {
 
 export type StaffRole = "therapist" | "admin";
 
-// Widened beyond StaffRole to also cover a mock Patient row in the Staff accounts
-// table (UI_MOCKUP_PLAN_NEWDB.md §6 progress note, 2026-08-08) — Patients aren't
-// created via this page's "Create account" flow (they self-register, FR-AUTH-01b),
-// but the table/Edit-popup pattern built for Therapist/Admin generalizes cleanly to
-// showing and editing one, so a single mock patient row demonstrates the pattern
-// for a 3rd account kind without a separate page.
+// Widened beyond StaffRole to also cover Patient rows in the Staff accounts table
+// (UI_MOCKUP_PLAN_NEWDB.md §6). Patients normally self-register (FR-AUTH-01b), but
+// an admin can also create one directly through this page's "Create account" flow
+// now (POST /users, user.service.ts's `createAccount()` patient branch) — same
+// table/Edit-popup pattern already built for Therapist/Admin, generalized to a 3rd
+// account kind without a separate page.
 export type AdminManagedRole = "patient" | StaffRole;
 
 export interface AdminUserSummary {
@@ -128,6 +128,13 @@ export interface AdminUserSummary {
   licenseIssuedLabel?: string;
   licenseExpiryLabel?: string;
   employeeId?: string;
+  // Therapist/Admin only, matching users.email/phone_number on schema.prisma
+  // (real fields, sent to and returned from POST /users — unlike
+  // licenseNumber/employeeId above, which still aren't persisted). Not used
+  // for Patient rows: `username` already carries the phone-as-login-identifier
+  // for that role, so a second phoneNumber field would be redundant there.
+  email?: string;
+  phoneNumber?: string;
   // Patient-only, matching the `patients` DBML the user supplied 2026-08-08
   // (supersedes the earlier date_of_birth/affected_side guess, which was sourced
   // from the OLD schema.prisma's Patient model before this DBML was shared).
@@ -274,7 +281,7 @@ export interface MedicalHistoryRecord {
   attachments: PickedFile[];
 }
 
-export type HeatmapDayStatus = "completed" | "in_progress" | "skipped" | "pending";
+export type HeatmapDayStatus = "completed" | "in_progress" | "skipped" | "pending" | "cancelled";
 
 export type SessionOutcome = "completed" | "skipped";
 

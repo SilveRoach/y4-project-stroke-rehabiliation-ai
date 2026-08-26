@@ -14,20 +14,29 @@ import type { FormEvent } from "react";
 import { FilePicker } from "../components/FilePicker";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { therapistProfile } from "../data/therapistMock";
+import { ApiError, getTherapistSessions } from "../services/api";
+import { useAuth } from "../store/authStore";
 import type {
   HeatmapDayStatus,
   MedicalHistoryRecord,
   MedicalRecordType,
-  PatientDetailProfile,
   PatientRehabPlan,
   PickedFile,
   RehabPlanStatus,
-  SessionHistoryEntry
+  SessionHistoryEntry,
+  TherapistPatientSummary
 } from "../types";
+import { initialsFromName } from "../utils/displayName";
 
 interface PatientDetailPageProps {
-  profile: PatientDetailProfile;
+  // Real TherapistPatientSummary — the same object TherapistDashboardPage.tsx /
+  // TherapistPatientsPage.tsx already fetch from GET /therapists/:id/patients
+  // (services/api.ts's getTherapistPatients) and hand to onViewFullReport /
+  // onViewPatient. Replaces the old mock-shaped PatientDetailProfile
+  // (data/patientDetailMock.ts's getPatientDetailProfile), whose sex/
+  // affectedSide/patientCode fields had no backing column anywhere in
+  // schema.prisma — see the fallback constants below this component.
+  patient: TherapistPatientSummary;
   onBack: () => void;
   onLogout: () => void;
   onNavigate: (label: TherapistNavLabel) => void;
@@ -55,9 +64,16 @@ const heatmapLabels: Record<HeatmapDayStatus, string> = {
   completed: "Completed",
   in_progress: "In progress",
   skipped: "Skipped",
-  pending: "Pending"
+  pending: "Pending",
+  cancelled: "Cancelled"
 };
 
+// Mismatch flagged, not changed: schema.prisma's PatientRehabilitationPlansStatus
+// enum (and api-design.md's PATCH /plans/:id/status note) has no "paused" value
+// — only draft/active/completed/cancelled; "cancel is the only way to stop one
+// short." Left as-is because Plans still have no backend endpoint at all (see
+// the `plans` state above), so nothing here is persisted yet; whoever wires
+// POST /plans up will need to drop/remap this option then.
 const planStatusLabels: Record<RehabPlanStatus, string> = {
   draft: "Draft",
   active: "Active",
@@ -77,8 +93,8 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // Lays a plan's heatmap out as a real Sun-first calendar grid (leading/trailing
 // blank cells padding each week row) instead of a flat strip, so it reads like an
 // actual calendar rather than an abstract heatmap. Falls back to date-less cells
-// when there's no real startDateLabel to anchor on (the generic fallback profile
-// in data/patientDetailMock.ts, or a freshly-created plan mid-edit).
+// when there's no real startDateLabel to anchor on (e.g. a freshly-created plan
+// mid-edit in PlanModal, before Start date is filled in).
 function buildCalendarCells(plan: PatientRehabPlan): CalendarCell[] {
   if (!ISO_DATE_RE.test(plan.startDateLabel)) {
     return plan.heatmap.map((status, index) => ({ key: `d${index}`, status, dateNumber: null }));
@@ -137,7 +153,7 @@ function daysBetweenInclusive(startLabel: string, endLabel: string): number {
 }
 
 export function PatientDetailPage({
-  profile,
+  patient,
   onBack,
   onLogout,
   onNavigate,
@@ -145,14 +161,82 @@ export function PatientDetailPage({
   onOpenProgramEditor,
   pendingPlanUpdate
 }: PatientDetailPageProps) {
-  const [medicalHistory, setMedicalHistory] = useState<MedicalHistoryRecord[]>(profile.medicalHistory);
+  const { token, user } = useAuth();
+  const therapistDisplayName = user?.displayName || user?.username || "Therapist";
+
+  // patients.gender / date_of_birth aren't exposed by any endpoint a therapist is
+  // authorized to call (GET /users/:id is "Self, or Admin" only — see
+  // user.controller.ts's getUserProfileHandler), and schema.prisma's Patient
+  // model has no affected-side column at all (dropped from the newdb.txt design
+  // — see schema.prisma's own header note). Rather than invent values, these
+  // stay fixed fallbacks; "None" already renders as "Affected side not
+  // recorded" below, same as the old mock's own generic fallback profile did.
+  const sex: "Male" | "Female" | "Other" = "Other";
+  const affectedSide: "Left" | "Right" | "Both" | "None" = "None";
+  // patients.user_id is a UUID, not a "#P-0142"-style code — there's no
+  // patient_code column anywhere in schema.prisma. Derived a short display code
+  // from the id instead of fabricating one.
+  const patientCode = `#${patient.id.slice(0, 8).toUpperCase()}`;
+
+  const [medicalHistory, setMedicalHistory] = useState<MedicalHistoryRecord[]>([]);
   const [showAddRecordModal, setShowAddRecordModal] = useState(false);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
-  const [plans, setPlans] = useState<PatientRehabPlan[]>(profile.plans);
+  // No patient_rehabilitation_plans backend endpoint exists yet (api-design.md
+  // documents POST /plans / GET /patients/:id/plans, but no "plans" module has
+  // actually been implemented — see backend/src/modules), so this starts empty
+  // rather than seeding a fabricated calendar/heatmap. Create/edit below remains
+  // real, client-side-only state, same as before (see handleSavePlan's comment).
+  const [plans, setPlans] = useState<PatientRehabPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(
     plans.find((plan) => plan.status === "active")?.id ?? plans[0]?.id ?? null
   );
   const [showPlanModal, setShowPlanModal] = useState(false);
+
+  // Real session history — GET /therapists/:id/sessions (modules/session-results/*),
+  // the same endpoint/service TherapistSessionsPage.tsx already uses, reused here
+  // instead of adding a new per-patient route. That endpoint already scopes its
+  // results to patients currently assigned to the calling (self) therapist, so
+  // filtering its result down to this one patient client-side isn't relying on
+  // the UI alone for authorization — a therapist can never receive another
+  // therapist's patient sessions from this call in the first place.
+  const [sessionHistory, setSessionHistory] = useState<SessionHistoryEntry[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    let cancelled = false;
+
+    setSessionsLoading(true);
+    setSessionsError(null);
+
+    getTherapistSessions(token, user.id)
+      .then((data) => {
+        if (!cancelled) setSessionHistory(data.sessions.filter((session) => session.patientId === patient.id));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setSessionsError(err instanceof ApiError ? err.message : "Couldn't load session history. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSessionsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user, patient.id]);
+
+  // No medical-history backend exists against the current schema — newdb2.txt's
+  // redesign dropped patient_medical_history / medical_history_attachments
+  // entirely (see schema.prisma's header note), even though api-design.md still
+  // documents GET/POST /patients/:id/medical-history from the prior design.
+  // earlierMedicalHistoryCount/hasEarlierSessions have no real source either (no
+  // pagination endpoint for either resource yet), so both are fixed at 0/false
+  // rather than a fabricated count.
+  const earlierMedicalHistoryCount = 0;
+  const hasEarlierSessions = false;
 
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? plans[0] ?? null;
   const calendarCells = selectedPlan ? buildCalendarCells(selectedPlan) : [];
@@ -209,7 +293,7 @@ export function PatientDetailPage({
         <header className="therapist-topbar">
           <div>
             <h1>Patient Detail</h1>
-            <p>{profile.patientCode}</p>
+            <p>{patientCode}</p>
           </div>
           <div className="therapist-topbar-actions">
             <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
@@ -217,10 +301,10 @@ export function PatientDetailPage({
             </button>
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{therapistProfile.displayName}</strong>
-                <small>{therapistProfile.title}</small>
+                <strong>{therapistDisplayName}</strong>
+                <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{therapistProfile.initials}</span>
+              <span className="avatar-badge">{initialsFromName(therapistDisplayName)}</span>
             </div>
           </div>
         </header>
@@ -233,13 +317,13 @@ export function PatientDetailPage({
           {/* 1. Patient header */}
           <div className="pd-header">
             <div>
-              <h1>{profile.name}</h1>
+              <h1>{patient.name}</h1>
               <p>
-                {profile.sex} &middot; Age {profile.age} &middot;{" "}
-                {profile.affectedSide === "None"
+                {sex} &middot; Age {patient.age} &middot;{" "}
+                {affectedSide === "None"
                   ? "Affected side not recorded"
-                  : `${profile.affectedSide} side affected`}{" "}
-                &middot; Patient ID {profile.patientCode}
+                  : `${affectedSide} side affected`}{" "}
+                &middot; Patient ID {patientCode}
               </p>
             </div>
             {/* Stub: no reporting backend exists yet (session-results/logging still
@@ -289,7 +373,7 @@ export function PatientDetailPage({
                     ))}
                   </div>
                   <div className="pd-legend">
-                    {(["completed", "in_progress", "skipped", "pending"] as HeatmapDayStatus[]).map((status) => (
+                    {(["completed", "in_progress", "skipped", "pending", "cancelled"] as HeatmapDayStatus[]).map((status) => (
                       <span key={status}>
                         <span className={`pd-legend-dot ${status}`} />
                         {heatmapLabels[status]}
@@ -381,7 +465,7 @@ export function PatientDetailPage({
                   />
                   <div className="pd-medical-card-footer">
                     <button type="button" className="text-action" onClick={() => setShowHistoryPanel(true)}>
-                      View full history ({medicalHistory.length + profile.earlierMedicalHistoryCount})
+                      View full history ({medicalHistory.length + earlierMedicalHistoryCount})
                       <ChevronRight size={13} />
                     </button>
                   </div>
@@ -394,17 +478,27 @@ export function PatientDetailPage({
                 <div>
                   <strong>Session history</strong>
                   <p>
-                    {profile.sessionHistory.length} session{profile.sessionHistory.length === 1 ? "" : "s"} recorded
+                    {sessionsLoading
+                      ? "Loading\u2026"
+                      : `${sessionHistory.length} session${sessionHistory.length === 1 ? "" : "s"} recorded`}
                   </p>
                 </div>
               </div>
 
-              {profile.sessionHistory.length === 0 ? (
+              {sessionsError && (
+                <p className="pd-empty-note" role="alert">
+                  {sessionsError}
+                </p>
+              )}
+
+              {sessionsLoading ? (
+                <p className="pd-empty-note">Loading session history\u2026</p>
+              ) : sessionHistory.length === 0 ? (
                 <p className="pd-empty-note">No sessions recorded yet.</p>
               ) : (
                 <>
                   <div className="pd-session-list">
-                    {profile.sessionHistory.map((session) => (
+                    {sessionHistory.map((session) => (
                       <div key={session.id} className="pd-session-row">
                         <div>
                           <span>
@@ -436,7 +530,7 @@ export function PatientDetailPage({
                   {/* Stub: no earlier-session pagination endpoint exists yet — kept
                       as inert text matching the mockup rather than a toggle with
                       nothing to reveal. */}
-                  {profile.hasEarlierSessions && <p className="pd-show-more">Show earlier sessions</p>}
+                  {hasEarlierSessions && <p className="pd-show-more">Show earlier sessions</p>}
                 </>
               )}
             </div>
@@ -445,7 +539,11 @@ export function PatientDetailPage({
       </div>
 
       {showAddRecordModal && (
-        <AddRecordModal onClose={() => setShowAddRecordModal(false)} onSubmit={handleAddRecord} />
+        <AddRecordModal
+          onClose={() => setShowAddRecordModal(false)}
+          onSubmit={handleAddRecord}
+          recordedByLabel={therapistDisplayName}
+        />
       )}
 
       {showPlanModal && (
@@ -455,7 +553,7 @@ export function PatientDetailPage({
       {showHistoryPanel && (
         <MedicalHistoryPanel
           records={medicalHistory}
-          earlierCount={profile.earlierMedicalHistoryCount}
+          earlierCount={earlierMedicalHistoryCount}
           onClose={() => setShowHistoryPanel(false)}
           onAttachFile={handleAttachFile}
           onRemoveAttachment={handleRemoveAttachment}
@@ -570,10 +668,12 @@ function MedicalHistoryPanel({
 
 function AddRecordModal({
   onClose,
-  onSubmit
+  onSubmit,
+  recordedByLabel
 }: {
   onClose: () => void;
   onSubmit: (record: MedicalHistoryRecord) => void;
+  recordedByLabel: string;
 }) {
   const [recordType, setRecordType] = useState<MedicalRecordType>("progress_note");
   const [title, setTitle] = useState("");
@@ -589,7 +689,7 @@ function AddRecordModal({
       recordType,
       title: title.trim(),
       dateLabel: dateLabel.trim(),
-      recordedByLabel: therapistProfile.displayName,
+      recordedByLabel,
       details: notes.trim() ? [{ label: "Notes", value: notes.trim() }] : undefined,
       attachments: []
     });

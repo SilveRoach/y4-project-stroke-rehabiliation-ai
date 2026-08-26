@@ -17,7 +17,7 @@ export type CameraStatus =
   | "error";
 
 export interface UseCameraResult {
-  videoRef: RefObject<HTMLVideoElement>;
+  videoRef: RefObject<HTMLVideoElement | null>;
   status: CameraStatus;
   errorMessage: string | null;
   retry: () => void;

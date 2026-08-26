@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { PatientNavLabel } from "./components/PatientSidebar";
 import type { TherapistNavLabel } from "./components/TherapistSidebar";
-import { getPatientDetailProfile } from "./data/patientDetailMock";
 import { patientProgram } from "./data/patientMock";
 import { patientRehabPlans } from "./data/patientRehabPlanMock";
 import { getSessionReview } from "./data/sessionReviewMock";
@@ -12,6 +11,7 @@ import { AdminUserManagementPage } from "./pages/AdminUserManagementPage";
 import { ExerciseLibraryPage } from "./pages/ExerciseLibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PatientDetailPage } from "./pages/PatientDetailPage";
+import { PatientExerciseInstructionPage } from "./pages/PatientExerciseInstructionPage";
 import { PatientHistoryPage } from "./pages/PatientHistoryPage";
 import { PatientProgressPage } from "./pages/PatientProgressPage";
 import { PatientSessionPage } from "./pages/PatientSessionPage";
@@ -26,11 +26,9 @@ import { TherapistPatientsPage } from "./pages/TherapistPatientsPage";
 import { TherapistSessionsPage } from "./pages/TherapistSessionsPage";
 import { TherapistSettingsPage } from "./pages/TherapistSettingsPage";
 import { AuthProvider, useAuth } from "./store/authStore";
+import type { PatientTodayExercise } from "./services/api";
 import {
-  getTodayExerciseGroups,
-  findTodayScheduledExercise,
-  markScheduledExerciseCompleted,
-  shimScheduledExerciseToPatientExercise
+  markScheduledExerciseCompleted
 } from "./utils/patientToday";
 import type {
   PatientExercise,
@@ -45,6 +43,7 @@ type View =
   | "login"
   | "register"
   | "today"
+  | "exercise-instruction"
   | "progress"
   | "history"
   | "patient-settings"
@@ -101,6 +100,7 @@ function AppShell() {
   // only assigned at confirm time — a Retry/Discard never increments it).
   const [pendingAttempt, setPendingAttempt] = useState<PendingSessionAttempt | null>(null);
   const [attemptCounts, setAttemptCounts] = useState<Record<string, number>>({});
+  const [selectedScheduledExercise, setSelectedScheduledExercise] = useState<PatientTodayExercise | null>(null);
 
   // PATIENT_TODAY_MOCKUP_PLAN.md §2.3, Option B: Home's onStartSession still only
   // ever hands back a ScheduledExercise id (see utils/patientToday.ts's
@@ -112,13 +112,29 @@ function AppShell() {
     () => patientProgram.exercises[1] ?? patientProgram.exercises[0]
   );
 
-  const openSession = (exerciseId?: string) => {
-    const groups = getTodayExerciseGroups(rehabPlans);
-    const scheduled = findTodayScheduledExercise(groups, exerciseId);
-    if (scheduled) {
-      setActiveExercise(shimScheduledExerciseToPatientExercise(scheduled));
+  const openSession = (exercise?: PatientTodayExercise) => {
+    if (exercise) {
+      setActiveExercise({
+        id: exercise.id,
+        name: exercise.exerciseName,
+        trackingType: exercise.movementTracking === "none" ? "both" : exercise.movementTracking,
+        targetLabel: exercise.targetValueLabel,
+        status: exercise.status === "completed" ? "done" : exercise.status === "in_progress" ? "in_progress" : "not_started",
+        feedback: exercise.therapistInstruction ?? "Follow your therapist's prescribed instructions.",
+        progressLabel: exercise.targetValueLabel,
+        durationMinutes: 0,
+        sets: 0,
+        reps: 0,
+        difficulty: exercise.difficultyLevel === "medium" ? "Moderate" : exercise.difficultyLevel === "easy" ? "Easy" : "Hard"
+      });
     }
     setView("session");
+  };
+
+  const openExerciseInstruction = (exercise?: PatientTodayExercise) => {
+    if (!exercise) return;
+    setSelectedScheduledExercise(exercise);
+    setView("exercise-instruction");
   };
 
   // §6.3 — mock AI score/feedback/metrics generated right after a recording
@@ -254,14 +270,24 @@ function AppShell() {
       {view === "register" && <RegisterPage onLogin={() => setView("login")} />}
       {view === "today" && (
         <PatientTodayPage
-          program={patientProgram}
-          plans={rehabPlans}
           onLogout={() => {
             logout();
             setView("login");
           }}
           onNavigate={handlePatientNavigate}
-          onStartSession={openSession}
+          onOpenInstruction={openExerciseInstruction}
+        />
+      )}
+      {view === "exercise-instruction" && selectedScheduledExercise && (
+        <PatientExerciseInstructionPage
+          scheduledExerciseId={selectedScheduledExercise.id}
+          onBack={() => setView("today")}
+          onStartExercise={() => openSession(selectedScheduledExercise)}
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
+          onNavigate={handlePatientNavigate}
         />
       )}
       {view === "progress" && (
@@ -321,32 +347,59 @@ function AppShell() {
       )}
       {view === "therapist-dashboard" && (
         <TherapistDashboardPage
-          onLogout={() => setView("login")}
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
           onNavigate={handleTherapistNavigate}
           onViewFullReport={openPatientDetail}
         />
       )}
       {view === "therapist-patients" && (
         <TherapistPatientsPage
-          onLogout={() => setView("login")}
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
           onNavigate={handleTherapistNavigate}
           onViewPatient={openPatientDetail}
         />
       )}
       {view === "therapist-library" && (
-        <ExerciseLibraryPage onLogout={() => setView("login")} onNavigate={handleTherapistNavigate} />
+        <ExerciseLibraryPage
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
+          onNavigate={handleTherapistNavigate}
+        />
       )}
       {view === "therapist-sessions" && (
-        <TherapistSessionsPage onLogout={() => setView("login")} onNavigate={handleTherapistNavigate} />
+        <TherapistSessionsPage
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
+          onNavigate={handleTherapistNavigate}
+        />
       )}
       {view === "therapist-settings" && (
-        <TherapistSettingsPage onLogout={() => setView("login")} onNavigate={handleTherapistNavigate} />
+        <TherapistSettingsPage
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
+          onNavigate={handleTherapistNavigate}
+        />
       )}
       {view === "patient-detail" && detailPatient && (
         <PatientDetailPage
-          profile={getPatientDetailProfile(detailPatient)}
+          patient={detailPatient}
           onBack={() => setView("therapist-dashboard")}
-          onLogout={() => setView("login")}
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
           onNavigate={handleTherapistNavigate}
           onReviewSession={openSessionReview}
           onOpenProgramEditor={openProgramEditor}
@@ -360,7 +413,10 @@ function AppShell() {
           patientName={detailPatient.name}
           onSave={handleSaveProgramEditorPlan}
           onBack={() => setView("patient-detail")}
-          onLogout={() => setView("login")}
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
           onNavigate={handleTherapistNavigate}
         />
       )}
@@ -368,7 +424,10 @@ function AppShell() {
         <SessionResultReviewPage
           review={getSessionReview(reviewSession, detailPatient.name)}
           onBack={() => setView("patient-detail")}
-          onLogout={() => setView("login")}
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
           onNavigate={handleTherapistNavigate}
         />
       )}
