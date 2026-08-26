@@ -1595,6 +1595,7 @@ input:focus {
 
 .therapist-main {
   display: grid;
+  align-content: start;
   gap: 20px;
   padding: 20px;
 }
@@ -1767,6 +1768,7 @@ input:focus {
 
 .therapist-patient-card {
   padding: 20px;
+  align-content: start;
 }
 
 .therapist-patient-toolbar {
@@ -2207,6 +2209,85 @@ input:focus {
   border-color: #7c3aed;
   background: #f5f3ff;
   color: #7c3aed;
+}
+
+/* --- Assign Patient modal ("Add Patient" button, Therapist Dashboard +
+   Patients pages) — components/AssignPatientModal.tsx. Reuses .admin-modal's
+   shell/scrim but widens it since each row needs room for a name + assignment
+   status + a status pill + an action button/badge. */
+
+.admin-modal.assign-patient-modal {
+  width: min(100%, 560px);
+}
+
+.assign-patient-subtitle {
+  margin: -6px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.assign-patient-search {
+  width: 100%;
+}
+
+.assign-patient-search input {
+  width: 100%;
+}
+
+.assign-patient-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.assign-patient-empty {
+  padding: 20px 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.assign-patient-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.assign-patient-row-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.assign-patient-row-info strong {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.assign-patient-row-info small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.assign-patient-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assign-patient-row-actions .primary-button,
+.assign-patient-row-actions .secondary-button {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
 }
 
 /* --- Admin Dashboard (frontend-design.md §8) --- */

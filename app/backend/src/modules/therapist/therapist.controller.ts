@@ -69,3 +69,43 @@ export async function getPatientReportHandler(req: Request, res: Response, next:
     next(err);
   }
 }
+
+// --- New: GET /patients — list all patients (active + disabled) ----------------
+export async function listAllPatientsHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user) throw new UnauthenticatedError();
+    // Any authenticated user may search/list patients in the current app flow.
+    const q = typeof req.query.q === "string" && req.query.q.trim().length > 0 ? req.query.q.trim() : undefined;
+    const patients = await therapistService.listAllPatients(q);
+    res.json({ patients });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Helper to read a string field from request body
+function requireBodyStringField(req: Request, field: string): string {
+  const value = (req.body as Record<string, unknown> | null)?.[field];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new ValidationError(`"${field}" is required in the request body.`);
+  }
+  return value.trim();
+}
+
+// --- New: POST /therapists/:id/patients — assign a patient to the therapist -----
+export async function assignPatientHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const therapistId = requireParam(req, "id");
+    requireSelfTherapistOrAdmin(req, therapistId);
+    if (!req.user) throw new UnauthenticatedError();
+
+    const patientId = requireBodyStringField(req, "patientId");
+
+    const assigned = await therapistService.assignPatient(therapistId, patientId, req.user.sub);
+
+    // Return the newly-built TherapistPatientSummary for the assigned patient
+    res.status(201).json({ patient: assigned });
+  } catch (err) {
+    next(err);
+  }
+}

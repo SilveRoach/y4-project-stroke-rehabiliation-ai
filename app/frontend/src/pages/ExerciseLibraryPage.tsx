@@ -1,4 +1,4 @@
-import { AlertTriangle, Ban, Bell, Dumbbell, Hand, Plus, X } from "lucide-react";
+import { AlertTriangle, Ban, Bell, CheckCircle2, Dumbbell, Eye, Hand, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { FilePicker } from "../components/FilePicker";
@@ -10,6 +10,7 @@ import {
   createExercise,
   createExerciseVersion,
   getExerciseLibrary,
+  publishExercise,
   updateExerciseDraft,
   type ExerciseInputPayload
 } from "../services/api";
@@ -103,6 +104,10 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [editingExercise, setEditingExercise] = useState<ExerciseLibraryItem | "new" | null>(null);
   const [historyExercise, setHistoryExercise] = useState<ExerciseLibraryItem | null>(null);
+  // Read-only detail view (separate from Edit) — lets the therapist inspect an
+  // exercise's full details, including archived ones, without opening the form
+  // and risking an accidental edit/version-bump.
+  const [viewingExercise, setViewingExercise] = useState<ExerciseLibraryItem | null>(null);
 
   // `reloadToken` just forces the effect below to re-run after a mutation
   // (create/edit/archive) — simpler than duplicating the fetch/cancellation
@@ -251,6 +256,10 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
                     </div>
 
                     <div className="library-card-actions">
+                      <button type="button" className="text-action" onClick={() => setViewingExercise(exercise)}>
+                        <Eye size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                        View
+                      </button>
                       {exercise.status === "archived" ? (
                         <span style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>Kept for history &middot; read-only</span>
                       ) : (
@@ -291,6 +300,29 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
       {historyExercise && (
         <ExerciseHistoryPanel exercise={historyExercise} onClose={() => setHistoryExercise(null)} />
       )}
+
+      {viewingExercise && (
+        <ExerciseDetailPanel
+          exercise={viewingExercise}
+          onClose={() => setViewingExercise(null)}
+          onEdit={
+            viewingExercise.status !== "archived"
+              ? () => {
+                  setEditingExercise(viewingExercise);
+                  setViewingExercise(null);
+                }
+              : undefined
+          }
+          onViewHistory={
+            viewingExercise.versions.length > 1
+              ? () => {
+                  setHistoryExercise(viewingExercise);
+                  setViewingExercise(null);
+                }
+              : undefined
+          }
+        />
+      )}
     </section>
   );
 }
@@ -318,6 +350,90 @@ function ExerciseHistoryPanel({ exercise, onClose }: { exercise: ExerciseLibrary
               <p className="pd-record-meta">{version.createdAtLabel}</p>
             </div>
           ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+interface ExerciseDetailPanelProps {
+  exercise: ExerciseLibraryItem;
+  onClose: () => void;
+  // Undefined when the exercise is archived (read-only, no edit path) or, for
+  // History, when there's only one version to look at.
+  onEdit?: () => void;
+  onViewHistory?: () => void;
+}
+
+// Read-only "View" detail panel (UI_MOCKUP_PLAN_NEWDB.md §2.5's card grid never
+// had a way to inspect a full exercise — including an archived one — without
+// opening the Edit form, which risks an accidental draft edit or, worse, an
+// accidental version bump on an active row. This panel never mutates anything;
+// it only offers to hand off into Edit/History.
+function ExerciseDetailPanel({ exercise, onClose, onEdit, onViewHistory }: ExerciseDetailPanelProps) {
+  const Icon = trackingIcon[exercise.movementTracking];
+
+  return (
+    <>
+      <div className="therapist-panel-scrim" onClick={onClose} />
+      <div className="therapist-detail-panel library-history-panel" role="dialog" aria-label={`View ${exercise.name}`}>
+        <div className="therapist-detail-header">
+          <strong>{exercise.name}</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="library-history-list">
+          <div className="library-history-row">
+            <div className="library-history-row-top">
+              <span className="library-card-icon" style={{ width: 36, height: 36 }}>
+                <Icon size={18} />
+              </span>
+              <div className="library-card-badges">
+                <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
+                <span className="library-version-badge">v{exercise.versionNumber}</span>
+              </div>
+            </div>
+            <p className="library-history-criteria">
+              {trackingLabels[exercise.movementTracking]} &middot; {difficultyLabels[exercise.difficultyLevel]}
+            </p>
+          </div>
+
+          <div className="library-history-row">
+            <strong style={{ fontSize: "0.82rem" }}>Description</strong>
+            <p className="library-history-criteria">{exercise.description || "No description provided."}</p>
+          </div>
+
+          <div className="library-history-row">
+            <strong style={{ fontSize: "0.82rem" }}>Base criteria</strong>
+            <p className="library-history-criteria">{describeCriteria(exercise.baseCriteria)}</p>
+          </div>
+
+          <div className="library-history-row">
+            <strong style={{ fontSize: "0.82rem" }}>Demo video</strong>
+            <p className="library-history-criteria">{exercise.hasDemoVideo ? "Attached" : "None attached"}</p>
+          </div>
+
+          <div className="library-history-row">
+            <strong style={{ fontSize: "0.82rem" }}>Created</strong>
+            <p className="library-history-criteria">
+              {exercise.createdAtLabel} by {exercise.createdByName}
+            </p>
+          </div>
+        </div>
+
+        <div className="library-history-row-actions">
+          {onEdit && (
+            <button type="button" className="primary-button" onClick={onEdit}>
+              Edit
+            </button>
+          )}
+          {onViewHistory && (
+            <button type="button" className="text-action" onClick={onViewHistory}>
+              View history
+            </button>
+          )}
         </div>
       </div>
     </>
@@ -367,6 +483,42 @@ function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProp
 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Status-change actions (Publish / Archive) are separate from the Save
+  // button above: they don't touch any of the field state in this form, they
+  // just move `exercise.status` directly via their own dedicated routes
+  // (PATCH .../publish, PATCH .../archive) — same split as the page-level
+  // handleArchive() uses for the card grid's own Archive button.
+  const [statusAction, setStatusAction] = useState<"publish" | "archive" | null>(null);
+  const [statusActionError, setStatusActionError] = useState<string | null>(null);
+
+  const handlePublish = async () => {
+    if (!exercise || !token) return;
+    setStatusAction("publish");
+    setStatusActionError(null);
+    try {
+      await publishExercise(token, exercise.id);
+      onSaved();
+    } catch (err) {
+      setStatusActionError(err instanceof ApiError ? err.message : "Couldn't publish this exercise. Please try again.");
+    } finally {
+      setStatusAction(null);
+    }
+  };
+
+  const handleArchiveFromModal = async () => {
+    if (!exercise || !token) return;
+    setStatusAction("archive");
+    setStatusActionError(null);
+    try {
+      await archiveExercise(token, exercise.id);
+      onSaved();
+    } catch (err) {
+      setStatusActionError(err instanceof ApiError ? err.message : "Couldn't archive this exercise. Please try again.");
+    } finally {
+      setStatusAction(null);
+    }
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -433,6 +585,44 @@ function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProp
               Editing an active exercise creates a new version. This will update the exercise everywhere it&apos;s
               currently used (BR-6).
             </span>
+          </div>
+        )}
+
+        {exercise && (
+          <div className="library-history-row" style={{ margin: "0 20px" }}>
+            <div className="library-history-row-top">
+              <span>
+                Current status: <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
+              </span>
+            </div>
+            {statusActionError && (
+              <p className="library-history-criteria" style={{ color: "var(--danger, #d33)" }}>
+                {statusActionError}
+              </p>
+            )}
+            {exercise.status !== "archived" && (
+              <div className="library-history-row-actions">
+                {exercise.status === "draft" && (
+                  <button
+                    type="button"
+                    className="text-action"
+                    disabled={statusAction !== null}
+                    onClick={handlePublish}
+                  >
+                    <CheckCircle2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                    {statusAction === "publish" ? "Publishing…" : "Publish now"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="text-action danger"
+                  disabled={statusAction !== null}
+                  onClick={handleArchiveFromModal}
+                >
+                  {statusAction === "archive" ? "Archiving…" : "Archive"}
+                </button>
+              </div>
+            )}
           </div>
         )}
 

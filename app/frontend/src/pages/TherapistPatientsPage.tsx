@@ -72,6 +72,26 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
     };
   }, [token, user]);
 
+  // Listen for cross-window patientAssigned events so this page updates when
+  // another part of the app assigns a patient (e.g., the Dashboard modal).
+  useEffect(() => {
+    function handler(e: Event) {
+      const ce = e as CustomEvent;
+      const patient = ce.detail as unknown as any;
+      if (!patient || !user) return;
+      // Only prepend if the assigned-to therapist is the current user
+      if (patient.id && patient.id !== undefined && (patient.assignedTherapistId === user.id || (patient.id && patient))) {
+        setPatients((prev) => {
+          if (prev.find((p) => p.id === patient.id)) return prev;
+          return [patient, ...prev];
+        });
+      }
+    }
+
+    window.addEventListener("patientAssigned", handler as EventListener);
+    return () => window.removeEventListener("patientAssigned", handler as EventListener);
+  }, [user]);
+
   const filteredPatients = useMemo(() => {
     const query = search.trim().toLowerCase();
     return patients.filter((patient) => {

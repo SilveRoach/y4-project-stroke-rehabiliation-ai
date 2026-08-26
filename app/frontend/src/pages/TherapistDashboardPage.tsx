@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { TherapistSidebar } from "../components/TherapistSidebar";
+import AssignPatientModal from "../components/AssignPatientModal";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import {
   ApiError,
@@ -43,6 +44,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
 
   const [search, setSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<TherapistPatientSummary | null>(null);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
 
   // Real dashboard data (modules/therapist/* on the backend) — replaces the
   // former data/therapistMock.ts imports (therapistPatients, weeklySessionData,
@@ -289,9 +291,28 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                     aria-label="Search patients"
                   />
                 </div>
-                <button type="button" className="primary-button therapist-add-patient">
+                <button type="button" className="primary-button therapist-add-patient" onClick={() => setAssignModalOpen(true)}>
                   <Users size={14} /> Add Patient
                 </button>
+                {assignModalOpen && (
+                  <AssignPatientModal
+                    therapistId={user?.id ?? ""}
+                    onClose={() => setAssignModalOpen(false)}
+                    onAssigned={(patient) => {
+                      // Prepend the newly assigned patient to the dashboard patients list
+                      setDashboard((prev) => {
+                        if (!prev) return prev;
+                        const already = prev.patients.find((p) => p.id === patient.id);
+                        if (already) return prev;
+                        return {
+                          ...prev,
+                          patients: [patient, ...prev.patients],
+                          stats: { ...prev.stats, activePatients: (prev.stats.activePatients ?? 0) + 1 }
+                        };
+                      });
+                    }}
+                  />
+                )}
               </div>
             </div>
 

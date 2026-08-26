@@ -11,6 +11,16 @@ export interface PatientUser {
   role: "patient";
 }
 
+// Lightweight patient list item returned by GET /patients
+export interface PatientListItem {
+  id: string;
+  displayName: string;
+  phoneNumber?: string | null;
+  status: "active" | "inactive" | "suspended";
+  assignedTherapistId?: string | null;
+  assignedTherapistName?: string | null;
+}
+
 export interface PatientExercise {
   id: string;
   name: string;

@@ -240,6 +240,35 @@ export function getPatientProgressTrend(token: string, patientId: string): Promi
   });
 }
 
+// --- Patient search / assignment ------------------------------------------------
+export interface PatientListItem {
+  id: string;
+  displayName: string;
+  phoneNumber?: string | null;
+  status: "active" | "inactive" | "suspended";
+  assignedTherapistId?: string | null;
+  assignedTherapistName?: string | null;
+}
+
+export function searchPatients(token: string, query?: string): Promise<{ patients: PatientListItem[] }> {
+  const qs = query && query.trim().length > 0 ? `?q=${encodeURIComponent(query.trim())}` : "";
+  return apiRequest<{ patients: PatientListItem[] }>(`/patients${qs}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export function assignPatient(
+  token: string,
+  therapistId: string,
+  patientId: string
+): Promise<{ patient: TherapistPatientSummary }> {
+  return apiRequest<{ patient: TherapistPatientSummary }>(`/therapists/${therapistId}/patients`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ patientId })
+  });
+}
+
 // --- Exercise Library (frontend-design.md §6, revised per
 // UI_MOCKUP_PLAN_NEWDB.md §2.5) ---
 // Backed by modules/exercise-program-library/* on the backend — replaces the
@@ -301,6 +330,14 @@ export function createExerciseVersion(
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload)
+  });
+}
+
+// Publish an exercise (makes a draft active). Returns the canonical exercise row.
+export function publishExercise(token: string, exerciseId: string): Promise<{ exercise: ExerciseLibraryItem }> {
+  return apiRequest<{ exercise: ExerciseLibraryItem }>(`/exercises/${exerciseId}/publish`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
   });
 }
 

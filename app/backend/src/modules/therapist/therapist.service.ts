@@ -26,7 +26,7 @@
 //     axes (assignment vs. recent compliance) that happen to share the word
 //     "active". Flagging this explicitly since the two are easy to conflate.
 
-import { ForbiddenError, NotFoundError } from "../../common/errors";
+import { ForbiddenError, NotFoundError, ConflictError } from "../../common/errors";
 import { ageFromDate, displayName, initialsFromName, relativeDateLabel, weekdayShortLabel } from "../../common/formatting";
 import { prisma } from "../../config/prisma";
 
@@ -181,6 +181,50 @@ export async function getTherapistPatients(therapistId: string): Promise<Therapi
   return assignments.map((assignment) => buildPatientSummary(assignment.patient));
 }
 
+// --- New: GET /patients (search/list all patients, active + disabled) --------
+// Returns a lightweight patient list including assignment status (active assignment -> therapist id & name)
+export interface PatientListItem {
+  id: string;
+  displayName: string;
+  phoneNumber?: string | null;
+  status: "active" | "inactive" | "suspended";
+  assignedTherapistId?: string | null;
+  assignedTherapistName?: string | null;
+}
+
+export async function listAllPatients(q?: string): Promise<PatientListItem[]> {
+  // Fetch every patient row, include active assignment if any
+  const patients = await prisma.patient.findMany({
+    include: {
+      user: true,
+      therapistAssignments: {
+        where: { status: "active" },
+        include: { therapist: { include: { user: true } } }
+      }
+    }
+  });
+
+  const normalized = patients.map((p) => {
+    const assigned = p.therapistAssignments && p.therapistAssignments.length > 0 ? p.therapistAssignments[0] : null;
+    const displayNameStr = displayName({ firstName: p.user.firstName, lastName: p.user.lastName, username: p.user.username });
+
+    return {
+      id: p.userId,
+      displayName: displayNameStr,
+      phoneNumber: p.user.phoneNumber ?? null,
+      status: p.user.status as "active" | "inactive" | "suspended",
+      assignedTherapistId: assigned ? assigned.therapistId : null,
+      assignedTherapistName: assigned ? displayName(assigned.therapist.user) : null
+    } as PatientListItem;
+  });
+
+  if (q && q.trim().length > 0) {
+    const ql = q.trim().toLowerCase();
+    return normalized.filter((p) => p.displayName.toLowerCase().includes(ql) || (p.phoneNumber && p.phoneNumber.includes(ql)));
+  }
+  return normalized;
+}
+
 // --- GET /therapists/:id/dashboard ------------------------------------------
 
 const WEEKLY_CHART_DAYS = 7;
@@ -194,6 +238,52 @@ export async function getTherapistDashboard(therapistId: string): Promise<Therap
   const weeklySessions = await computeWeeklySessions(patientIds);
 
   return { stats, weeklySessions, patients };
+}
+
+// --- New: assignPatient — creates an active assignment for a patient ---------
+// Ensures no other active assignment exists for the patient; returns the newly
+// built TherapistPatientSummary for the assigned patient so callers can update UI.
+export async function assignPatient(therapistId: string, patientId: string, assignedById: string): Promise<TherapistPatientSummary> {
+  // Check for an existing *active* assignment for this patient
+  const existing = await prisma.patientTherapistAssignment.findFirst({ where: { patientId, status: "active" } });
+  if (existing) {
+    throw new ConflictError("This patient is already assigned to a therapist.");
+  }
+
+  // Create the assignment row
+  await prisma.patientTherapistAssignment.create({
+    data: {
+      patientId,
+      therapistId,
+      status: "active",
+      assignedBy: assignedById
+    }
+  });
+
+  // Fetch the patient's data in the same shape that buildPatientSummary expects
+  const patient = await prisma.patient.findUnique({
+    where: { userId: patientId },
+    include: {
+      user: true,
+      rehabilitationPlans: {
+        orderBy: { createdAt: "desc" as const },
+        include: {
+          scheduleDays: {
+            orderBy: { scheduledDate: "asc" as const },
+            include: {
+              scheduledExercises: {
+                include: { performanceResults: true }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!patient) throw new NotFoundError("Patient not found.");
+  // Build and return the TherapistPatientSummary the frontend expects
+  return buildPatientSummary(patient as AssignedPatient);
 }
 
 async function computeDashboardStats(
