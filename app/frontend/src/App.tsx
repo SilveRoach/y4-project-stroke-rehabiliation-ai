@@ -410,6 +410,7 @@ function AppShell() {
       {view === "program-editor" && editingPlan && detailPatient && (
         <ProgramEditorPage
           plan={editingPlan}
+          patientId={detailPatient.id}
           patientName={detailPatient.name}
           onSave={handleSaveProgramEditorPlan}
           onBack={() => setView("patient-detail")}

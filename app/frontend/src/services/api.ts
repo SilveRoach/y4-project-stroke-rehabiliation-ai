@@ -577,3 +577,80 @@ export function getAdminDashboard(token: string): Promise<AdminDashboardData> {
     headers: { Authorization: `Bearer ${token}` }
   });
 }
+
+// --- Patient rehabilitation plans (Patient Detail page) ---------------------
+// GET /patients/:patientId/plans
+export function getPatientPlans(token: string, patientId: string): Promise<{ plans: any[] }> {
+  return apiRequest<{ plans: any[] }>(`/patients/${patientId}/plans`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+// POST /patients/:patientId/plans
+export function createPatientPlan(
+  token: string,
+  patientId: string,
+  payload: { name: string; description?: string; startDate?: string; endDate?: string; days?: any[] }
+): Promise<{ plan: any }> {
+  return apiRequest<{ plan: any }>(`/patients/${patientId}/plans`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+// PATCH /plans/:planId
+export function patchPlan(
+  token: string,
+  planId: string,
+  payload: { name?: string; description?: string; startDate?: string | null; endDate?: string | null; status?: string }
+): Promise<{ plan: any }> {
+  return apiRequest<{ plan: any }>(`/plans/${planId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+// POST /plans/:planId/schedule-days
+export function createScheduleDay(
+  token: string,
+  planId: string,
+  scheduledDate: string,
+  therapistNote?: string
+): Promise<{ day: any }> {
+  return apiRequest<{ day: any }>(`/plans/${planId}/schedule-days`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ scheduledDate, therapistNote })
+  });
+}
+
+// POST /schedule-days/:dayId/exercises
+export function createScheduledExercise(
+  token: string,
+  dayId: string,
+  payload: { exerciseLibraryId: string; orderNumber?: number; targetType?: string; targetValue?: any; therapistInstruction?: string }
+): Promise<{ scheduledExercise: any }> {
+  return apiRequest<{ scheduledExercise: any }>(`/schedule-days/${dayId}/exercises`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function patchScheduleDay(token: string, dayId: string, payload: { therapistNote?: string; status?: string }) {
+  return apiRequest<{ day: any }>(`/schedule-days/${dayId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function patchScheduledExerciseStatus(token: string, exerciseId: string, payload: { status: string; performance?: any }) {
+  return apiRequest<any>(`/scheduled-exercises/${exerciseId}/status`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}

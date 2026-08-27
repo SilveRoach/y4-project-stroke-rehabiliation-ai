@@ -1,0 +1,24 @@
+import { Router } from "express";
+import * as controller from "./rehab.controller";
+import { requireAuth, requireRole } from "../../middleware/auth.middleware";
+
+export const rehabPlansRouter = Router();
+
+// Patient-scoped plans
+rehabPlansRouter.get("/patients/:patientId/plans", requireAuth, controller.getPatientPlans);
+rehabPlansRouter.post("/patients/:patientId/plans", requireAuth, requireRole("therapist"), controller.createPlan);
+
+// Plan-level operations
+rehabPlansRouter.get("/plans/:planId", requireAuth, controller.getPlan);
+rehabPlansRouter.patch("/plans/:planId", requireAuth, requireRole("therapist"), controller.patchPlan);
+rehabPlansRouter.patch("/plans/:planId/status", requireAuth, requireRole("therapist"), controller.patchPlanStatus);
+
+// Schedule days
+rehabPlansRouter.post("/plans/:planId/schedule-days", requireAuth, requireRole("therapist"), controller.postScheduleDay);
+rehabPlansRouter.patch("/schedule-days/:dayId", requireAuth, requireRole("therapist"), controller.patchScheduleDay);
+
+// Scheduled exercises
+rehabPlansRouter.post("/schedule-days/:dayId/exercises", requireAuth, requireRole("therapist"), controller.postScheduledExercise);
+rehabPlansRouter.patch("/scheduled-exercises/:exerciseId/status", requireAuth, requireRole("therapist"), controller.patchScheduledExerciseStatus);
+
+export default rehabPlansRouter;

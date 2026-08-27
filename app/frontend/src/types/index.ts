@@ -355,6 +355,7 @@ export interface ScheduledExercise {
 }
 
 export interface ScheduleDay {
+  id?: string;
   dateLabel?: string; // ISO date if the plan is date-anchored
   status: HeatmapDayStatus; // reuse existing enum (completed/in_progress/skipped/pending)
   therapistNote?: string;

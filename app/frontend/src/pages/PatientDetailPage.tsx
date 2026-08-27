@@ -5,23 +5,18 @@ import {
   ChevronRight,
   ClipboardList,
   FileText,
-  Paperclip,
   Plus,
   X
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { FilePicker } from "../components/FilePicker";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { ApiError, getTherapistSessions } from "../services/api";
+import { ApiError, getTherapistSessions, getPatientPlans, createPatientPlan, patchPlan, createScheduleDay, createScheduledExercise, patchScheduleDay, patchScheduledExerciseStatus } from "../services/api";
 import { useAuth } from "../store/authStore";
 import type {
   HeatmapDayStatus,
-  MedicalHistoryRecord,
-  MedicalRecordType,
   PatientRehabPlan,
-  PickedFile,
   RehabPlanStatus,
   SessionHistoryEntry,
   TherapistPatientSummary
@@ -50,15 +45,6 @@ interface PatientDetailPageProps {
   pendingPlanUpdate?: PatientRehabPlan | null;
 }
 
-const recordTypeLabels: Record<MedicalRecordType, string> = {
-  diagnosis: "Diagnosis",
-  pt_assessment: "PT Assessment",
-  progress_note: "Progress Note",
-  rehab_followup: "Rehab Follow-up",
-  discharge: "Discharge",
-  referral: "Referral",
-  other: "Other"
-};
 
 const heatmapLabels: Record<HeatmapDayStatus, string> = {
   completed: "Completed",
@@ -152,6 +138,113 @@ function daysBetweenInclusive(startLabel: string, endLabel: string): number {
   return Math.min(60, Math.max(1, diffDays));
 }
 
+// Small reusable helper component: day detail panel that calls real APIs and
+// refreshes plans via the parent-provided callback. Kept intentionally compact
+// to minimize changes to the rest of the page.
+function DayDetailPanel({
+  token,
+  patientId,
+  plan,
+  dayIndex,
+  onRefresh
+}: {
+  token: string | null | undefined;
+  patientId: string;
+  plan: PatientRehabPlan;
+  dayIndex: number;
+  onRefresh: () => Promise<void>;
+}) {
+  if (!plan || dayIndex == null || !plan.days || dayIndex < 0 || dayIndex >= plan.days.length) return null;
+  const day = plan.days[dayIndex];
+
+  return (
+    <div className="pd-day-detail">
+      <h4>Day details</h4>
+      <p>
+        Date: {day.dateLabel ?? "(no date)"} &middot; Status: {day.status}
+      </p>
+      <p>Note: {day.therapistNote ?? "(none)"}</p>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={async () => {
+            if (!token) return alert("Not authenticated");
+            const note = window.prompt("Edit therapist note:", day.therapistNote ?? "");
+            if (note === null) return;
+            try {
+              await patchScheduleDay(token, day.id!, { therapistNote: note === "" ? undefined : note });
+              await onRefresh();
+            } catch (err) {
+              alert(err instanceof ApiError ? err.message : String(err));
+            }
+          }}
+        >
+          Edit note
+        </button>
+
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={async () => {
+            if (!token) return alert("Not authenticated");
+            if (!day.id) return alert("Day has no id");
+            const exerciseLibraryId = window.prompt("Enter exercise library id:");
+            if (!exerciseLibraryId) return;
+            const orderString = window.prompt("Optional order number (leave empty to auto-assign):");
+            const orderNumber = orderString ? Number(orderString) : undefined;
+            try {
+              await createScheduledExercise(token, day.id, { exerciseLibraryId, orderNumber });
+              await onRefresh();
+            } catch (err) {
+              alert(err instanceof ApiError ? err.message : String(err));
+            }
+          }}
+        >
+          Add exercise to this day
+        </button>
+      </div>
+
+      <div className="pd-day-exercises">
+        <h5>Exercises</h5>
+        {(!day.exercises || day.exercises.length === 0) ? (
+          <p className="pd-empty-note">No exercises assigned to this day.</p>
+        ) : (
+          <ul>
+            {day.exercises.map((ex) => (
+              <li key={ex.id} className="pd-day-exercise-row">
+                <div>
+                  <strong>{ex.exerciseName}</strong>
+                  <small>{ex.targetValueLabel}</small>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <span className={`pd-ex-status ${ex.status}`}>{ex.status}</span>
+                  <button
+                    type="button"
+                    className="text-action"
+                    onClick={async () => {
+                      if (!token) return alert("Not authenticated");
+                      try {
+                        await patchScheduledExerciseStatus(token, ex.id, { status: "completed" });
+                        await onRefresh();
+                      } catch (err) {
+                        alert(err instanceof ApiError ? err.message : String(err));
+                      }
+                    }}
+                  >
+                    Mark completed
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function PatientDetailPage({
   patient,
   onBack,
@@ -178,19 +271,85 @@ export function PatientDetailPage({
   // from the id instead of fabricating one.
   const patientCode = `#${patient.id.slice(0, 8).toUpperCase()}`;
 
-  const [medicalHistory, setMedicalHistory] = useState<MedicalHistoryRecord[]>([]);
-  const [showAddRecordModal, setShowAddRecordModal] = useState(false);
-  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   // No patient_rehabilitation_plans backend endpoint exists yet (api-design.md
   // documents POST /plans / GET /patients/:id/plans, but no "plans" module has
   // actually been implemented — see backend/src/modules), so this starts empty
   // rather than seeding a fabricated calendar/heatmap. Create/edit below remains
   // real, client-side-only state, same as before (see handleSavePlan's comment).
   const [plans, setPlans] = useState<PatientRehabPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [plansError, setPlansError] = useState<string | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(
     plans.find((plan) => plan.status === "active")?.id ?? plans[0]?.id ?? null
   );
   const [showPlanModal, setShowPlanModal] = useState(false);
+  const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
+
+  function handleSelectDay(key: string) {
+    if (!selectedPlan) return;
+    if (!key.startsWith("day-")) return;
+    const idx = Number(key.split("-")[1]);
+    if (!Number.isFinite(idx)) return;
+    if (!selectedPlan.days || idx < 0 || idx >= selectedPlan.days.length) return;
+    setSelectedDayIndex(idx);
+  }
+
+  // Helper: map server response shape to client PatientRehabPlan consistently
+  const mapServerPlans = (serverPlans: any[]): PatientRehabPlan[] => {
+    return serverPlans.map((sp: any) => {
+      const start = sp.startDate ? sp.startDate.slice?.(0, 10) ?? new Date(sp.startDate).toISOString().slice(0, 10) : "";
+      const end = sp.endDate ? sp.endDate.slice?.(0, 10) ?? new Date(sp.endDate).toISOString().slice(0, 10) : "";
+      const days = (sp.scheduleDays || []).map((sd: any) => ({
+        id: sd.id,
+        dateLabel: sd.scheduledDate ? (sd.scheduledDate.slice?.(0, 10) ?? new Date(sd.scheduledDate).toISOString().slice(0, 10)) : undefined,
+        status: sd.status,
+        therapistNote: sd.therapistNote ?? undefined,
+        exercises: (sd.scheduledExercises || []).map((ex: any) => ({
+          id: ex.id,
+          exerciseLibraryId: ex.exerciseLibraryId,
+          exerciseName: ex.exerciseLibrary?.name ?? ex.exerciseName ?? (ex.exerciseLibraryId ?? ""),
+          versionLabel: ex.exerciseLibrary?.versionNumber != null ? `v${ex.exerciseLibrary.versionNumber}` : (ex.versionLabel ?? undefined),
+          movementTracking: ex.exerciseLibrary?.movementTracking ?? ex.movementTracking ?? "none",
+          orderNumber: ex.orderNumber ?? 0,
+          targetType: ex.targetType ?? "free",
+          targetValueLabel: ex.targetValue ? String(ex.targetValue) : "",
+          difficultyLevel: ex.exerciseLibrary?.difficultyLevel ?? ex.difficultyLevel ?? undefined,
+          therapistInstruction: ex.therapistInstruction ?? undefined,
+          status: ex.status ?? "pending"
+        }))
+      }));
+      const heatmap = (sp.scheduleDays || []).map((sd: any) => sd.status as HeatmapDayStatus);
+      return {
+        id: sp.id,
+        name: sp.name,
+        description: sp.description ?? undefined,
+        status: sp.status,
+        startDateLabel: start,
+        endDateLabel: end || undefined,
+        heatmap,
+        days
+      } as PatientRehabPlan;
+    });
+  };
+
+  // Refresh plans from the server and update local state. Keeps selectedPlanId
+  // stable if possible.
+  const refreshPlans = async () => {
+    if (!token || !patient.id) return;
+    setPlansLoading(true);
+    setPlansError(null);
+    try {
+      const res = await getPatientPlans(token, patient.id);
+      const serverPlans = res.plans || [];
+      const mapped = mapServerPlans(serverPlans);
+      setPlans(mapped);
+      setSelectedPlanId((current) => (current && mapped.some((p) => p.id === current) ? current : (mapped.find((p) => p.status === "active")?.id ?? mapped[0]?.id ?? null)));
+    } catch (err) {
+      setPlansError(err instanceof ApiError ? err.message : "Could not load plans");
+    } finally {
+      setPlansLoading(false);
+    }
+  };
 
   // Real session history — GET /therapists/:id/sessions (modules/session-results/*),
   // the same endpoint/service TherapistSessionsPage.tsx already uses, reused here
@@ -232,10 +391,8 @@ export function PatientDetailPage({
   // redesign dropped patient_medical_history / medical_history_attachments
   // entirely (see schema.prisma's header note), even though api-design.md still
   // documents GET/POST /patients/:id/medical-history from the prior design.
-  // earlierMedicalHistoryCount/hasEarlierSessions have no real source either (no
-  // pagination endpoint for either resource yet), so both are fixed at 0/false
-  // rather than a fabricated count.
-  const earlierMedicalHistoryCount = 0;
+  // hasEarlierSessions has no real source yet (no pagination endpoint for
+  // session/medical resources), so keep it fixed at false rather than fabricating data.
   const hasEarlierSessions = false;
 
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? plans[0] ?? null;
@@ -249,41 +406,108 @@ export function PatientDetailPage({
     setPlans((current) => current.map((plan) => (plan.id === pendingPlanUpdate.id ? pendingPlanUpdate : plan)));
   }, [pendingPlanUpdate]);
 
-  // Real, client-side: no patient_rehabilitation_plans backend endpoint exists yet
-  // (see PlanModal's hint text), so creating/editing a plan only lives in this
-  // browser tab — but the shape matches the real table exactly.
-  const handleSavePlan = (plan: PatientRehabPlan, mode: "edit" | "create") => {
-    setPlans((current) => (mode === "create" ? [plan, ...current] : current.map((p) => (p.id === plan.id ? plan : p))));
-    setSelectedPlanId(plan.id);
-    setShowPlanModal(false);
-  };
-
-  const handleAddRecord = (record: MedicalHistoryRecord) => {
-    setMedicalHistory((current) => [record, ...current]);
-    setShowAddRecordModal(false);
-  };
-
-  const handleAttachFile = (recordId: string, file: PickedFile) => {
-    setMedicalHistory((current) =>
-      current.map((record) =>
-        record.id === recordId ? { ...record, attachments: [...record.attachments, file] } : record
-      )
-    );
-  };
-
-  const handleRemoveAttachment = (recordId: string, fileId: string) => {
-    setMedicalHistory((current) =>
-      current.map((record) => {
-        if (record.id !== recordId) return record;
-        // Real (session-uploaded) attachments hold a blob: object URL that should be
-        // released; pre-seeded mock attachments use a data:/"#" previewUrl, which
-        // revokeObjectURL simply no-ops on — safe either way.
-        const removed = record.attachments.find((attachment) => attachment.id === fileId);
-        if (removed) URL.revokeObjectURL(removed.previewUrl);
-        return { ...record, attachments: record.attachments.filter((attachment) => attachment.id !== fileId) };
+  // Load plans from backend
+  useEffect(() => {
+    if (!token || !patient.id) return;
+    let cancelled = false;
+    setPlansLoading(true);
+    setPlansError(null);
+    refreshPlans()
+      .catch((err) => {
+        if (!cancelled) setPlansError(err instanceof ApiError ? err.message : "Could not load plans");
       })
-    );
+      .finally(() => {
+        if (!cancelled) setPlansLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, patient.id]);
+
+  // Save plan via backend calls; maps client plan shape to API payloads and
+  // updates local state from server response.
+  const handleSavePlan = async (plan: PatientRehabPlan, mode: "edit" | "create") => {
+    if (!token) {
+      alert("Not authenticated");
+      return;
+    }
+
+    try {
+      if (mode === "create") {
+        // create on server
+        const payload: any = {
+          name: plan.name,
+          description: plan.description,
+          startDate: plan.startDateLabel || undefined,
+          endDate: plan.endDateLabel || undefined
+        };
+        const res = await createPatientPlan(token, patient.id, payload);
+        const mapped = mapServerPlans([res.plan])[0];
+
+        setPlans((current) => [mapped, ...current]);
+        setSelectedPlanId(mapped.id);
+      } else {
+        // edit existing
+        const payload: any = {
+          name: plan.name,
+          description: plan.description ?? null,
+          startDate: plan.startDateLabel || null,
+          endDate: plan.endDateLabel || null,
+          status: plan.status
+        };
+        const res = await patchPlan(token, plan.id, payload);
+        const mapped = mapServerPlans([res.plan])[0];
+
+        setPlans((current) => current.map((p) => (p.id === mapped.id ? mapped : p)));
+        setSelectedPlanId(mapped.id);
+      }
+    } catch (err) {
+      // surface error to therapist; controllers throw ApiError via apiRequest
+      const message = err instanceof ApiError ? err.message : String(err);
+      // keep simple UX: show alert for now
+      alert(`Could not save plan: ${message}`);
+      return;
+    } finally {
+      setShowPlanModal(false);
+    }
   };
+
+  // Add a new schedule day to the selected plan (prompts for date & optional note)
+  const handleAddScheduleDay = async () => {
+    if (!token) return alert("Not authenticated");
+    if (!selectedPlan) return alert("No plan selected");
+    const date = window.prompt("Enter scheduled date (YYYY-MM-DD):");
+    if (!date) return;
+    if (!ISO_DATE_RE.test(date)) return alert("Invalid date format");
+    const note = window.prompt("Optional therapist note:") || undefined;
+    try {
+      await createScheduleDay(token, selectedPlan.id, date, note);
+      await refreshPlans();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : String(err));
+    }
+  };
+
+  // Add a scheduled exercise to the first day of the selected plan (simple flow)
+  const handleAddExerciseToFirstDay = async () => {
+    if (!token) return alert("Not authenticated");
+    if (!selectedPlan || !selectedPlan.days || selectedPlan.days.length === 0) return alert("Selected plan has no days");
+    const firstDay = selectedPlan.days[0];
+    if (!firstDay.id) return alert("Selected day has no id");
+    const exerciseLibraryId = window.prompt("Enter exercise library id:");
+    if (!exerciseLibraryId) return;
+    const orderString = window.prompt("Optional order number (leave empty to auto-assign):");
+    const orderNumber = orderString ? Number(orderString) : undefined;
+    try {
+      const dayId = firstDay.id;
+      await createScheduledExercise(token, dayId, { exerciseLibraryId, orderNumber });
+      await refreshPlans();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : String(err));
+    }
+  };
+
 
   return (
     <section className="therapist-shell">
@@ -380,7 +604,11 @@ export function PatientDetailPage({
                       </span>
                     ))}
                   </div>
-                </div>
+
+                  {/* Day detail panel (wired to real API) */}
+                  {selectedPlan && selectedDayIndex !== null && (
+                    <DayDetailPanel token={token} patientId={patient.id} plan={selectedPlan} dayIndex={selectedDayIndex} onRefresh={refreshPlans} />
+                  )}                </div>
 
                 <div className="pd-plan-selector">
                   <p className="pd-plan-selector-label">Rehab plans</p>
@@ -421,6 +649,20 @@ export function PatientDetailPage({
                   >
                     <Calendar size={14} /> Edit schedule / exercises
                   </button>
+                  <button
+                    type="button"
+                    className="secondary-button full-width"
+                    onClick={handleAddScheduleDay}
+                  >
+                    <Plus size={14} /> Add schedule day
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button full-width"
+                    onClick={handleAddExerciseToFirstDay}
+                  >
+                    <Plus size={14} /> Add exercise to first day
+                  </button>
                 </div>
               </div>
             ) : (
@@ -440,38 +682,6 @@ export function PatientDetailPage({
               single-column stack, which made the page feel dense before you'd
               even reached Session history. */}
           <div className="pd-bottom-grid">
-            <div className="summary-card pd-medical-card">
-              <div className="therapist-chart-heading">
-                <div>
-                  <strong>Medical history</strong>
-                  <p>Most recent record</p>
-                </div>
-                <div className="therapist-chart-heading-actions">
-                  <button type="button" className="text-action" onClick={() => setShowAddRecordModal(true)}>
-                    <Plus size={14} /> Add record
-                  </button>
-                </div>
-              </div>
-
-              {medicalHistory.length === 0 ? (
-                <p className="pd-empty-note">No medical history records yet.</p>
-              ) : (
-                <>
-                  <MedicalRecordCard
-                    record={medicalHistory[0]}
-                    embedded
-                    onAttachFile={handleAttachFile}
-                    onRemoveAttachment={handleRemoveAttachment}
-                  />
-                  <div className="pd-medical-card-footer">
-                    <button type="button" className="text-action" onClick={() => setShowHistoryPanel(true)}>
-                      View full history ({medicalHistory.length + earlierMedicalHistoryCount})
-                      <ChevronRight size={13} />
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
 
             <div className="summary-card pd-session-card">
               <div className="therapist-chart-heading">
@@ -538,224 +748,15 @@ export function PatientDetailPage({
         </main>
       </div>
 
-      {showAddRecordModal && (
-        <AddRecordModal
-          onClose={() => setShowAddRecordModal(false)}
-          onSubmit={handleAddRecord}
-          recordedByLabel={therapistDisplayName}
-        />
-      )}
-
       {showPlanModal && (
         <PlanModal selectedPlan={selectedPlan} onClose={() => setShowPlanModal(false)} onSave={handleSavePlan} />
-      )}
-
-      {showHistoryPanel && (
-        <MedicalHistoryPanel
-          records={medicalHistory}
-          earlierCount={earlierMedicalHistoryCount}
-          onClose={() => setShowHistoryPanel(false)}
-          onAttachFile={handleAttachFile}
-          onRemoveAttachment={handleRemoveAttachment}
-        />
       )}
     </section>
   );
 }
 
-function MedicalRecordCard({
-  record,
-  onAttachFile,
-  onRemoveAttachment,
-  embedded
-}: {
-  record: MedicalHistoryRecord;
-  onAttachFile: (recordId: string, file: PickedFile) => void;
-  onRemoveAttachment: (recordId: string, fileId: string) => void;
-  // True when shown as the "latest record" preview inside the Medical History
-  // card (no border of its own); false/undefined for every record in the full
-  // history slide-over, which still look like distinct cards.
-  embedded?: boolean;
-}) {
-  return (
-    <div className={`pd-record-card ${embedded ? "embedded" : ""}`}>
-      <div className="pd-record-top">
-        <div>
-          <p className="pd-record-title">
-            <span className={`pd-record-badge ${record.recordType}`}>{recordTypeLabels[record.recordType]}</span>
-            &nbsp;{record.title}
-          </p>
-          <p className="pd-record-meta">
-            {record.dateLabel} &middot; recorded by {record.recordedByLabel}
-          </p>
-        </div>
-        <ChevronRight size={15} className="pd-record-chevron" />
-      </div>
 
-      {record.details && record.details.length > 0 && (
-        <div className="pd-record-details">
-          {record.details.map((detail) => (
-            <span key={detail.label}>
-              {detail.label}: <strong>{detail.value}</strong>
-            </span>
-          ))}
-        </div>
-      )}
 
-      <div className="pd-record-attachments-section">
-        <p className="pd-record-attachments-label">
-          <Paperclip size={12} /> Attachments
-        </p>
-        <div className="pd-record-attachments-list">
-          {record.attachments.map((file) => (
-            <FilePicker
-              key={file.id}
-              value={file}
-              compact
-              onAttach={() => {}}
-              onRemove={() => onRemoveAttachment(record.id, file.id)}
-            />
-          ))}
-          <FilePicker key={`${record.id}-add`} value={null} compact onAttach={(file) => onAttachFile(record.id, file)} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MedicalHistoryPanel({
-  records,
-  earlierCount,
-  onClose,
-  onAttachFile,
-  onRemoveAttachment
-}: {
-  records: MedicalHistoryRecord[];
-  earlierCount: number;
-  onClose: () => void;
-  onAttachFile: (recordId: string, file: PickedFile) => void;
-  onRemoveAttachment: (recordId: string, fileId: string) => void;
-}) {
-  return (
-    <>
-      <div className="therapist-panel-scrim" onClick={onClose} />
-      <aside className="therapist-detail-panel pd-history-panel" aria-label="Full medical history">
-        <div className="therapist-detail-header">
-          <strong>Medical history — all records</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </button>
-        </div>
-
-        {records.map((record) => (
-          <MedicalRecordCard
-            key={record.id}
-            record={record}
-            onAttachFile={onAttachFile}
-            onRemoveAttachment={onRemoveAttachment}
-          />
-        ))}
-
-        {earlierCount > 0 && (
-          <div className="pd-more-records">
-            + {earlierCount} earlier record{earlierCount === 1 ? "" : "s"} not loaded yet
-          </div>
-        )}
-      </aside>
-    </>
-  );
-}
-
-function AddRecordModal({
-  onClose,
-  onSubmit,
-  recordedByLabel
-}: {
-  onClose: () => void;
-  onSubmit: (record: MedicalHistoryRecord) => void;
-  recordedByLabel: string;
-}) {
-  const [recordType, setRecordType] = useState<MedicalRecordType>("progress_note");
-  const [title, setTitle] = useState("");
-  const [dateLabel, setDateLabel] = useState("");
-  const [notes, setNotes] = useState("");
-
-  const handleSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!title.trim() || !dateLabel.trim()) return;
-
-    onSubmit({
-      id: `mh-${Date.now()}`,
-      recordType,
-      title: title.trim(),
-      dateLabel: dateLabel.trim(),
-      recordedByLabel,
-      details: notes.trim() ? [{ label: "Notes", value: notes.trim() }] : undefined,
-      attachments: []
-    });
-  };
-
-  return (
-    <>
-      <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="pd-modal" role="dialog" aria-label="Add medical history record">
-        <div className="therapist-detail-header">
-          <strong>Add medical history record</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </button>
-        </div>
-
-        <form className="pd-modal-form" onSubmit={handleSubmit}>
-          <label>
-            Record type
-            <select
-              className="admin-role-select"
-              value={recordType}
-              onChange={(event) => setRecordType(event.target.value as MedicalRecordType)}
-            >
-              {Object.entries(recordTypeLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Title
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="e.g. Follow-up mobility check"
-              required
-            />
-          </label>
-
-          <label>
-            Date
-            <input type="date" value={dateLabel} onChange={(event) => setDateLabel(event.target.value)} required />
-          </label>
-
-          <label>
-            Notes (optional)
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
-          </label>
-
-          <p className="pd-modal-hint">
-            <Calendar size={12} /> Structured assessment fields (muscle strength, balance score, etc.) aren&apos;t
-            wired up yet — this saves a basic record locally per UI_MOCKUP_PLAN_NEWDB.md §2.3. Attachments can be
-            added from the record card once it&apos;s saved, via the file picker.
-          </p>
-
-          <button type="submit" className="primary-button full-width">
-            Save record
-          </button>
-        </form>
-      </div>
-    </>
-  );
-}
 
 function PlanModal({
   selectedPlan,
@@ -885,7 +886,7 @@ function PlanModal({
               value={status}
               onChange={(event) => setStatus(event.target.value as RehabPlanStatus)}
             >
-              {(Object.keys(planStatusLabels) as RehabPlanStatus[]).map((value) => (
+              {(["draft", "active", "completed", "cancelled"] as RehabPlanStatus[]).map((value) => (
                 <option key={value} value={value}>
                   {planStatusLabels[value]}
                 </option>

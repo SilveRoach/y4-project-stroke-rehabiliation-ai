@@ -19,6 +19,7 @@ import { exerciseRouter } from "./modules/exercise-program-library/exercise.rout
 import { sessionRouter } from "./modules/session-results/session.routes";
 import { therapistRouter } from "./modules/therapist/therapist.routes";
 import { userRouter } from "./modules/user-management/user.routes";
+import rehabPlansRouter from "./modules/rehabilitation-plans/rehab.routes";
 
 export function createApp(): Express {
   const app = express();
@@ -53,6 +54,7 @@ export function createApp(): Express {
   apiRouter.use("/", therapistRouter); // modules/therapist/therapist.routes.ts — /therapists/:id/*, /patients/:id/report
   apiRouter.use("/", exerciseRouter); // modules/exercise-program-library/exercise.routes.ts — /exercises/*
   apiRouter.use("/", sessionRouter); // modules/session-results/session.routes.ts — /therapists/:id/sessions, /patients/:id/today
+  apiRouter.use("/", rehabPlansRouter); // modules/rehab-plans/rehab.routes.ts — /patients/:id/plans and plan operations
   apiRouter.use("/", adminRouter); // modules/admin/admin.routes.ts — /admin/dashboard
 
   app.use("/api/v1", apiRouter);

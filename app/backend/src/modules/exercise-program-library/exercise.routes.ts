@@ -33,9 +33,11 @@ exerciseRouter.post("/exercises", requireAuth, requireRole("therapist"), createE
 // draft exercise's fields in place (no version bump), which
 // ExerciseLibraryPage.tsx's existing UI already assumed was possible before
 // this pass wired it to a real backend. See exercise.service.ts's gap #4
-// comment for the full reasoning.
 exerciseRouter.patch("/exercises/:id", requireAuth, requireRole("therapist"), updateExerciseDraftHandler);
+exerciseRouter.put("/exercises/:id", requireAuth, requireRole("therapist"), updateExerciseDraftHandler);
 
 exerciseRouter.post("/exercises/:id/versions", requireAuth, requireRole("therapist"), createExerciseVersionHandler);
 exerciseRouter.patch("/exercises/:id/publish", requireAuth, requireRole("therapist"), publishExerciseHandler);
+exerciseRouter.post("/exercises/:id/publish", requireAuth, requireRole("therapist"), publishExerciseHandler);
 exerciseRouter.patch("/exercises/:id/archive", requireAuth, requireRole("therapist"), archiveExerciseHandler);
+exerciseRouter.post("/exercises/:id/archive", requireAuth, requireRole("therapist"), archiveExerciseHandler);
