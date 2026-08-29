@@ -185,15 +185,10 @@ function sanitizeInput(input: ExerciseInput): Required<Pick<ExerciseInput, "name
 }
 
 // --- GET /exercises -----------------------------------------------------------
-// "Therapist (own), Admin" per api-design.md — Admin sees every therapist's
-// library; a Therapist only ever sees families they created (see gap #1: since
-// only the owning therapist can ever version their own exercise, every row in a
-// family shares the same createdBy, so filtering the flat row set by createdBy
-// before grouping is equivalent to filtering by family ownership).
-
+// Every therapist and admin can view all exercises across the library.
+// Grouped into families by familyRootId (parent_exercise_id or id).
 export async function getExerciseLibrary(requester: { id: string; role: string }): Promise<ExerciseLibraryItemDto[]> {
-  const where = requester.role === "admin" ? {} : { createdBy: requester.id };
-  const rows = await prisma.exerciseLibrary.findMany({ where, include: WITH_CREATOR });
+  const rows = await prisma.exerciseLibrary.findMany({ include: WITH_CREATOR });
 
   const families = new Map<string, NonNullable<ExerciseRow>[]>();
   for (const row of rows) {
@@ -217,17 +212,13 @@ export async function getExerciseLibrary(requester: { id: string; role: string }
 }
 
 // --- GET /exercises/:id --------------------------------------------------------
-
+// Any authenticated therapist or admin can view any exercise in the library.
 export async function getExerciseById(
   requester: { id: string; role: string },
   id: string
 ): Promise<ExerciseLibraryItemDto> {
   const row = await fetchRowById(id);
   if (!row) throw new NotFoundError("Exercise not found.");
-
-  if (requester.role !== "admin" && row.createdBy !== requester.id) {
-    throw new ForbiddenError("You can only view your own exercises.");
-  }
 
   const family = await fetchFamily(familyRootId(row));
   return buildItem(family);

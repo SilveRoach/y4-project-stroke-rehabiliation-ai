@@ -16,16 +16,32 @@ const planIncludeWithDaysAndExercises = {
     include: {
       scheduledExercises: {
         orderBy: { orderNumber: "asc" as const },
-        include: { exerciseLibrary: true }
+        include: { exerciseLibrary: true, performanceResults: true }
       }
     }
   },
-  attachments: true
+  attachments: {
+    include: {
+      file: true
+    }
+  }
 };
 
-export async function getPatientPlans(patientId: string) {
+export async function getPatientPlans(patientId: string, actorId: string, actorRole: string) {
   const patient = await prisma.patient.findUnique({ where: { userId: patientId } });
   if (!patient) throw new NotFoundError("Patient not found.");
+
+  // Authorization: patients may only read their own plans.
+  // Therapists must be actively assigned to the patient. Admins are unrestricted.
+  if (actorRole === "patient" && actorId !== patientId) {
+    throw new ForbiddenError("You can only view your own rehabilitation plans.");
+  }
+  if (actorRole === "therapist") {
+    const assignment = await prisma.patientTherapistAssignment.findFirst({
+      where: { patientId, therapistId: actorId, status: "active" }
+    });
+    if (!assignment) throw new ForbiddenError("You are not assigned to this patient.");
+  }
 
   const plans = await prisma.patientRehabilitationPlan.findMany({
     where: { patientId },
@@ -46,6 +62,7 @@ export async function createPlan(
     startDate?: string;
     endDate?: string;
     days?: Array<{ scheduledDate: string; therapistNote?: string; exercises?: any[] }>;
+    attachments?: Array<{ fileId: string; description?: string }>;
   }
 ) {
   if (!payload.name || !payload.name.trim()) throw new ValidationError("Plan name is required.");
@@ -118,6 +135,19 @@ export async function createPlan(
             });
           }
         }
+      }
+    }
+
+    if (payload.attachments && payload.attachments.length > 0) {
+      for (const att of payload.attachments) {
+        await tx.rehabilitationPlanAttachment.create({
+          data: {
+            rehabilitationPlanId: plan.id,
+            fileId: att.fileId,
+            description: att.description?.trim() || null,
+            uploadedBy: actorId
+          }
+        });
       }
     }
 
@@ -250,7 +280,7 @@ export async function createScheduleDay(actorId: string, planId: string, schedul
       include: {
         scheduledExercises: {
           orderBy: { orderNumber: "asc" },
-          include: { exerciseLibrary: true }
+          include: { exerciseLibrary: true, performanceResults: true }
         }
       }
     });
@@ -284,7 +314,7 @@ export async function updateScheduleDay(actorId: string, dayId: string, patch: {
     include: {
       scheduledExercises: {
         orderBy: { orderNumber: "asc" },
-        include: { exerciseLibrary: true }
+        include: { exerciseLibrary: true, performanceResults: true }
       }
     }
   });
@@ -309,7 +339,7 @@ export async function createScheduledExercise(actorId: string, dayId: string, pa
         therapistInstruction: payload.therapistInstruction ?? null,
         createdBy: actorId
       },
-      include: { exerciseLibrary: true }
+      include: { exerciseLibrary: true, performanceResults: true }
     });
     return ex;
   } catch (err) {
@@ -328,7 +358,7 @@ export async function updateScheduledExerciseStatus(actorId: string, exerciseId:
     const updatedEx = await tx.scheduledExercise.update({
       where: { id: exerciseId },
       data: { status: patch.status as any, updatedBy: actorId, updatedAt: new Date() },
-      include: { exerciseLibrary: true }
+      include: { exerciseLibrary: true, performanceResults: true }
     });
 
     let createdResult = null;
@@ -366,3 +396,83 @@ export async function updateScheduledExerciseStatus(actorId: string, exerciseId:
 
   return result;
 }
+
+export async function getPatientAttachments(patientId: string) {
+  const patient = await prisma.patient.findUnique({ where: { userId: patientId } });
+  if (!patient) throw new NotFoundError("Patient not found.");
+
+  const planAttachments = await prisma.rehabilitationPlanAttachment.findMany({
+    where: {
+      rehabilitationPlan: { patientId }
+    },
+    include: {
+      file: true,
+      rehabilitationPlan: {
+        select: { id: true, name: true, status: true }
+      }
+    },
+    orderBy: { uploadedAt: "desc" }
+  });
+
+  const patientFiles = await prisma.file.findMany({
+    where: {
+      uploadedBy: patientId
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+  return {
+    attachments: planAttachments,
+    files: patientFiles
+  };
+}
+
+export async function addPlanAttachment(
+  actorId: string,
+  planId: string,
+  payload: { fileId: string; description?: string }
+) {
+  if (!payload.fileId) throw new ValidationError("fileId is required.");
+
+  const plan = await prisma.patientRehabilitationPlan.findUnique({ where: { id: planId } });
+  if (!plan) throw new NotFoundError("Plan not found.");
+
+  const file = await prisma.file.findUnique({ where: { id: payload.fileId } });
+  if (!file) throw new NotFoundError("File not found.");
+
+  const attachment = await prisma.rehabilitationPlanAttachment.create({
+    data: {
+      rehabilitationPlanId: planId,
+      fileId: payload.fileId,
+      description: payload.description?.trim() || null,
+      uploadedBy: actorId
+    },
+    include: {
+      file: true
+    }
+  });
+
+  return attachment;
+}
+
+export async function removePlanAttachment(actorId: string, planId: string, attachmentId: string) {
+  const attachment = await prisma.rehabilitationPlanAttachment.findUnique({
+    where: { id: attachmentId }
+  });
+  if (!attachment || attachment.rehabilitationPlanId !== planId) {
+    throw new NotFoundError("Attachment not found for this plan.");
+  }
+
+  await prisma.rehabilitationPlanAttachment.delete({
+    where: { id: attachmentId }
+  });
+
+  return { success: true };
+}
+
+export async function getFile(fileId: string) {
+  const file = await prisma.file.findUnique({ where: { id: fileId } });
+  if (!file) throw new NotFoundError("File not found.");
+  return file;
+}
+

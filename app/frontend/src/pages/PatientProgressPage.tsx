@@ -1,36 +1,30 @@
 import { Award, CalendarDays, TrendingUp } from "lucide-react";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
 import type { PatientNavLabel } from "../components/PatientSidebar";
+import { ApiError, getPatientPlans } from "../services/api";
+import { useAuth } from "../store/authStore";
+import { initialsFromName } from "../utils/displayName";
 import { trackingIcon, trackingLabel } from "./ProgramEditorPage";
 import { computeStreak, currentDayIndex, dayDateLabel, ISO_DATE_RE } from "../utils/rehabPlan";
 import type {
   ExerciseLibraryDifficulty,
   HeatmapDayStatus,
-  PatientProgramDay,
   PatientRehabPlan,
   RehabPlanStatus,
+  ScheduledExercise,
   ScheduledExerciseStatus
 } from "../types";
 
-// Patient Progress page (sidebar/bottom-nav "Progress"). Redesigned per
-// PATIENT_PROGRESS_MOCKUP_PLAN.md §2.3 to consume the real Program Editor schema
-// (PatientRehabPlan / ScheduleDay / ScheduledExercise, data/patientRehabPlanMock.ts)
-// instead of the old flat, hardcoded `PatientProgramDay` (data/patientMock.ts) —
-// so anything a PT actually assigns through Program Editor now shows up here.
-// `program` is still passed down for the sidebar/topbar's patient identity
-// (display name + avatar initials), which isn't part of the plan schema.
-//
-// Real, client-side only, same pattern as every other page here: no
-// patient_rehabilitation_plans/rehabilitation_schedule_days backend endpoint
-// exists yet, so this only ever reads the mock plans passed down from App.tsx —
-// there's nothing to persist or refetch.
+// Patient Progress page (sidebar/bottom-nav "Progress").
+// Fetches live rehabilitation plans, schedule days, and performance results
+// for the authenticated patient via GET /api/v1/patients/:patientId/plans.
+// Calculates real completion rate, average score from recorded attempts,
+// current streak, and day-by-day calendar heatmap.
 
 interface PatientProgressPageProps {
-  program: PatientProgramDay;
-  plans: PatientRehabPlan[];
   onLogout: () => void;
   onNavigate: (label: PatientNavLabel) => void;
 }
@@ -57,9 +51,6 @@ const difficultyLabels: Record<ExerciseLibraryDifficulty, string> = {
   hard: "Hard"
 };
 
-// .difficulty-badge's CSS only defines easy/moderate/hard modifier classes
-// (from the mockup's original Easy/Moderate/Hard difficulty set) — "medium" maps
-// onto "moderate" here rather than adding a fourth, near-duplicate CSS class.
 const difficultyBadgeClass: Record<ExerciseLibraryDifficulty, string> = {
   easy: "easy",
   medium: "moderate",
@@ -88,10 +79,6 @@ interface CalendarCell {
   dateNumber: number | null;
 }
 
-// Same Sun-first calendar-grid layout PatientDetailPage.tsx's Rehab Plan card
-// already uses (pd-calendar-* CSS classes) — sized to exactly `plan.days.length`
-// cells (padded to full weeks) rather than a fixed 14-cell strip, so a longer or
-// shorter plan renders its real length instead of an arbitrary two weeks.
 function buildCalendarCells(plan: PatientRehabPlan): CalendarCell[] {
   if (!ISO_DATE_RE.test(plan.startDateLabel)) {
     return plan.days.map((day, index) => ({ key: `d${index}`, status: day.status, dateNumber: null }));
@@ -105,8 +92,9 @@ function buildCalendarCells(plan: PatientRehabPlan): CalendarCell[] {
   }
 
   plan.days.forEach((day, index) => {
-    const date = new Date(startDate);
-    date.setDate(date.getDate() + index);
+    const date = day.dateLabel && ISO_DATE_RE.test(day.dateLabel)
+      ? new Date(`${day.dateLabel}T00:00:00`)
+      : new Date(startDate.getTime() + index * 86400000);
     cells.push({ key: `day-${index}`, status: day.status, dateNumber: date.getDate() });
   });
 
@@ -117,13 +105,142 @@ function buildCalendarCells(plan: PatientRehabPlan): CalendarCell[] {
   return cells;
 }
 
-export function PatientProgressPage({ program, plans, onLogout, onNavigate }: PatientProgressPageProps) {
-  // Plan switcher scoped to *active* plans only (PATIENT_PROGRESS_MOCKUP_PLAN.md
-  // §2.3/§5) — a completed baseline plan or a paused one stays out of Progress
-  // and remains History's job to browse. Defaults to the first active plan.
+// Mirrors backend session.service.ts's `targetValueLabel()`. Turns a raw JSON
+// target value (which Prisma returns as a JS object/array/primitive/null) into
+// a human-readable string. Without this, JSON objects produce "[object Object]".
+function formatTargetValue(targetValue: unknown): string {
+  if (targetValue === null || targetValue === undefined) return "";
+  if (typeof targetValue === "string" || typeof targetValue === "number") return String(targetValue);
+  if (Array.isArray(targetValue)) return targetValue.map(String).join(" · ");
+  if (typeof targetValue === "object") {
+    return Object.entries(targetValue as Record<string, unknown>)
+      .map(([key, value]) => `${String(value)} ${key}`)
+      .join(" · ");
+  }
+  return String(targetValue);
+}
+
+function mapServerPlans(serverPlans: any[]): PatientRehabPlan[] {
+  return serverPlans.map((sp: any) => {
+    const firstScheduleDate = sp.scheduleDays?.[0]?.scheduledDate
+      ? sp.scheduleDays[0].scheduledDate.slice?.(0, 10) ?? new Date(sp.scheduleDays[0].scheduledDate).toISOString().slice(0, 10)
+      : "";
+    const start = sp.startDate
+      ? sp.startDate.slice?.(0, 10) ?? new Date(sp.startDate).toISOString().slice(0, 10)
+      : firstScheduleDate;
+    const end = sp.endDate
+      ? sp.endDate.slice?.(0, 10) ?? new Date(sp.endDate).toISOString().slice(0, 10)
+      : "";
+    const days = (sp.scheduleDays || []).map((sd: any) => ({
+      id: sd.id,
+      dateLabel: sd.scheduledDate
+        ? sd.scheduledDate.slice?.(0, 10) ?? new Date(sd.scheduledDate).toISOString().slice(0, 10)
+        : undefined,
+      status: sd.status,
+      therapistNote: sd.therapistNote ?? undefined,
+      exercises: (sd.scheduledExercises || []).map((ex: any): ScheduledExercise => ({
+        id: ex.id,
+        exerciseLibraryId: ex.exerciseLibraryId,
+        exerciseName: ex.exerciseLibrary?.name ?? ex.exerciseName ?? (ex.exerciseLibraryId ?? ""),
+        versionLabel:
+          ex.exerciseLibrary?.versionNumber != null ? `v${ex.exerciseLibrary.versionNumber}` : (ex.versionLabel ?? undefined),
+        movementTracking: ex.exerciseLibrary?.movementTracking ?? ex.movementTracking ?? "none",
+        orderNumber: ex.orderNumber ?? 0,
+        targetType: ex.targetType ?? "free",
+        targetValueLabel: formatTargetValue(ex.targetValue),
+        difficultyLevel: ex.exerciseLibrary?.difficultyLevel ?? ex.difficultyLevel ?? undefined,
+        therapistInstruction: ex.therapistInstruction ?? undefined,
+        status: ex.status ?? "pending",
+        performanceResults: ex.performanceResults ?? []
+      }))
+    }));
+    const heatmap = (sp.scheduleDays || []).map((sd: any) => sd.status as HeatmapDayStatus);
+    return {
+      id: sp.id,
+      name: sp.name,
+      description: sp.description ?? undefined,
+      status: sp.status,
+      startDateLabel: start,
+      endDateLabel: end || undefined,
+      heatmap,
+      days
+    } as PatientRehabPlan;
+  });
+}
+
+function computePlanAverageScore(plan: PatientRehabPlan): number | null {
+  const scores: number[] = [];
+  for (const day of plan.days) {
+    for (const exercise of day.exercises) {
+      if (exercise.performanceResults && exercise.performanceResults.length > 0) {
+        const latest = exercise.performanceResults.reduce<any>(
+          (result, candidate) => (!result || candidate.attemptNumber > result.attemptNumber ? candidate : result),
+          null
+        );
+        const score = latest?.finalScore ?? latest?.ptScore ?? latest?.aiScore;
+        if (score !== null && score !== undefined) {
+          const num = typeof score === "number" ? score : Number(score);
+          if (!Number.isNaN(num)) scores.push(num);
+        }
+      }
+    }
+  }
+  if (scores.length === 0) return null;
+  return Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length);
+}
+
+export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPageProps) {
+  const { token, user } = useAuth();
+  const [plans, setPlans] = useState<PatientRehabPlan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const displayName = user?.displayName ?? user?.username ?? "Patient";
+  const avatarInitials = initialsFromName(displayName);
+
+  useEffect(() => {
+    if (!token || !user) {
+      setLoading(false);
+      setError("Please log in again to view your progress.");
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    getPatientPlans(token, user.id)
+      .then((res) => {
+        if (!cancelled) {
+          const mapped = mapServerPlans(res.plans || []);
+          setPlans(mapped);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "Couldn't load your progress. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user, reloadKey]);
+
   const activePlans = plans.filter((plan) => plan.status === "active");
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(activePlans[0]?.id ?? null);
-  const selectedPlan = activePlans.find((plan) => plan.id === selectedPlanId) ?? activePlans[0] ?? null;
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+
+  // Default to the first active plan if available, otherwise the first plan
+  const selectedPlan =
+    activePlans.find((plan) => plan.id === selectedPlanId) ??
+    activePlans[0] ??
+    plans.find((plan) => plan.id === selectedPlanId) ??
+    plans[0] ??
+    null;
 
   return (
     <section className="therapist-shell">
@@ -131,8 +248,8 @@ export function PatientProgressPage({ program, plans, onLogout, onNavigate }: Pa
         activeLabel="Progress"
         onNavigate={onNavigate}
         onLogout={onLogout}
-        displayName={`${program.patient.displayName} Rodthong`}
-        avatarInitials="SR"
+        displayName={displayName}
+        avatarInitials={avatarInitials}
       />
 
       <div className="therapist-workspace">
@@ -144,23 +261,39 @@ export function PatientProgressPage({ program, plans, onLogout, onNavigate }: Pa
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{program.patient.displayName} Rodthong</strong>
+                <strong>{displayName}</strong>
                 <small>Patient</small>
               </div>
-              <span className="avatar-badge">SR</span>
+              <span className="avatar-badge">{avatarInitials}</span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main patient-page-main">
-          {!selectedPlan ? (
+          {loading ? (
+            <div className="summary-card">
+              <p className="pd-empty-note">Loading your progress…</p>
+            </div>
+          ) : error ? (
+            <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)" }}>
+              <p className="pd-empty-note" style={{ color: "var(--danger, #d33)" }}>{error}</p>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ marginTop: 12 }}
+                onClick={() => setReloadKey((k) => k + 1)}
+              >
+                Try again
+              </button>
+            </div>
+          ) : !selectedPlan ? (
             <div className="summary-card">
               <p className="pd-empty-note">No active rehab plan right now &mdash; check History for past plans.</p>
             </div>
           ) : (
             <PlanProgress
               plan={selectedPlan}
-              allActivePlans={activePlans}
+              allPlans={plans}
               onSelectPlan={setSelectedPlanId}
             />
           )}
@@ -174,24 +307,22 @@ export function PatientProgressPage({ program, plans, onLogout, onNavigate }: Pa
 
 function PlanProgress({
   plan,
-  allActivePlans,
+  allPlans,
   onSelectPlan
 }: {
   plan: PatientRehabPlan;
-  allActivePlans: PatientRehabPlan[];
+  allPlans: PatientRehabPlan[];
   onSelectPlan: (planId: string) => void;
 }) {
   const calendarCells = buildCalendarCells(plan);
   const todayIndex = currentDayIndex(plan.days);
-  const todayDay = plan.days[todayIndex];
+  const todayDay = plan.days[todayIndex] ?? { status: "pending" as HeatmapDayStatus, exercises: [] };
   const streak = computeStreak(plan.days, todayIndex);
   const completedDays = plan.days.filter((day) => day.status === "completed").length;
   const completionPercent = plan.days.length > 0 ? Math.round((completedDays / plan.days.length) * 100) : 0;
+  const averageScore = computePlanAverageScore(plan);
 
-  // Next 2-3 pending days that already have exercises pre-scheduled by a PT —
-  // only possible now that Program Editor lets a PT assign exercises to future
-  // days ahead of time, which the old flat model had no way to represent
-  // (PATIENT_PROGRESS_MOCKUP_PLAN.md §2.3's "Coming up" section).
+  // Next 2-3 pending days that already have exercises pre-scheduled by a PT
   const comingUp = plan.days
     .map((day, index) => ({ day, index }))
     .filter(({ day, index }) => index > todayIndex && day.status === "pending" && day.exercises.length > 0)
@@ -199,11 +330,11 @@ function PlanProgress({
 
   return (
     <>
-      {allActivePlans.length > 1 && (
+      {allPlans.length > 1 && (
         <div className="summary-card">
-          <p className="pd-plan-selector-label">Active rehab plans</p>
+          <p className="pd-plan-selector-label">Rehabilitation plans</p>
           <div className="pd-plan-list">
-            {allActivePlans.map((candidate) => (
+            {allPlans.map((candidate) => (
               <button
                 key={candidate.id}
                 type="button"
@@ -224,8 +355,12 @@ function PlanProgress({
             <strong>{plan.name}</strong>
             <p>
               <span className={`pd-program-status ${plan.status}`}>{planStatusLabels[plan.status]}</span>
-              &nbsp;&middot; {plan.startDateLabel}
-              {plan.endDateLabel ? ` \u2013 ${plan.endDateLabel}` : ""}
+              {plan.startDateLabel && (
+                <>
+                  &nbsp;&middot; {plan.startDateLabel}
+                  {plan.endDateLabel ? ` \u2013 ${plan.endDateLabel}` : ""}
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -234,15 +369,16 @@ function PlanProgress({
 
       <div className="therapist-stat-grid">
         <StatCard icon={<TrendingUp size={20} />} label="Plan completion" value={`${completionPercent}%`} accent="primary" />
-        {/* Illustrative only — ScheduledExercise has no score field yet; real
-            scoring lives in Session Result Review's attempt model
-            (exercise_performance_results), a separate schema kept out of this
-            rebuild (PATIENT_PROGRESS_MOCKUP_PLAN.md §2.4). */}
-        <StatCard icon={<Award size={20} />} label="Avg score" value={84} accent="success" />
+        <StatCard
+          icon={<Award size={20} />}
+          label="Avg score"
+          value={averageScore !== null ? averageScore : "—"}
+          accent="success"
+        />
         <StatCard
           icon={<CalendarDays size={20} />}
           label="Program day"
-          value={`${todayIndex + 1} / ${plan.days.length}`}
+          value={plan.days.length > 0 ? `${todayIndex + 1} / ${plan.days.length}` : "—"}
           accent="teal"
         />
         <StatCard icon={<Award size={20} />} label="Current streak" value={`${streak} day${streak === 1 ? "" : "s"}`} accent="warning" />
@@ -315,7 +451,7 @@ function PlanProgress({
                         </span>{" "}
                         {trackingLabel[exercise.movementTracking]}
                       </td>
-                      <td>{exercise.targetValueLabel}</td>
+                      <td>{exercise.targetValueLabel || "—"}</td>
                       <td>
                         {exercise.difficultyLevel ? (
                           <span className={`difficulty-badge ${difficultyBadgeClass[exercise.difficultyLevel]}`}>

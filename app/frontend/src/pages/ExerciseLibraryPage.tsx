@@ -223,6 +223,7 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
             <div className="library-grid">
               {filteredExercises.map((exercise) => {
                 const Icon = trackingIcon[exercise.movementTracking];
+                const isOwner = user ? (exercise.createdById === user.id || user.role === "admin") : false;
                 return (
                   <div key={exercise.id} className={`library-card ${exercise.status === "archived" ? "is-archived" : ""}`}>
                     <div className="library-card-top">
@@ -240,6 +241,17 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
                     <div className="library-card-badges">
                       <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
                       <span className="library-version-badge">v{exercise.versionNumber}</span>
+                      {exercise.createdById && (
+                        <span
+                          className="library-version-badge"
+                          style={{
+                            background: isOwner ? "rgba(46, 117, 89, 0.12)" : "rgba(100, 116, 139, 0.12)",
+                            color: isOwner ? "var(--primary, #2e7559)" : "var(--text-secondary, #64748b)"
+                          }}
+                        >
+                          {isOwner ? "My Exercise" : `By ${exercise.createdByName || "Therapist"}`}
+                        </span>
+                      )}
                       {exercise.versions.length > 1 ? (
                         <button
                           type="button"
@@ -262,7 +274,7 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
                       </button>
                       {exercise.status === "archived" ? (
                         <span style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>Kept for history &middot; read-only</span>
-                      ) : (
+                      ) : isOwner ? (
                         <>
                           <button type="button" className="text-action" onClick={() => setEditingExercise(exercise)}>
                             Edit
@@ -276,6 +288,8 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
                             {archivingId === exercise.id ? "Archiving…" : "Archive"}
                           </button>
                         </>
+                      ) : (
+                        <span style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>Read-only</span>
                       )}
                     </div>
                   </div>
@@ -306,7 +320,7 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
           exercise={viewingExercise}
           onClose={() => setViewingExercise(null)}
           onEdit={
-            viewingExercise.status !== "archived"
+            viewingExercise.status !== "archived" && (user?.role === "admin" || viewingExercise.createdById === user?.id)
               ? () => {
                   setEditingExercise(viewingExercise);
                   setViewingExercise(null);
@@ -460,7 +474,8 @@ interface ExerciseFormModalProps {
 }
 
 function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProps) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isOwner = !exercise || (user ? (exercise.createdById === user.id || user.role === "admin") : false);
   const isEditingActive = exercise?.status === "active";
 
   const [name, setName] = useState(exercise?.name ?? "");
@@ -584,6 +599,15 @@ function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProp
             <span>
               Editing an active exercise creates a new version. This will update the exercise everywhere it&apos;s
               currently used (BR-6).
+            </span>
+          </div>
+        )}
+
+        {!isOwner && exercise && (
+          <div className="library-warning-banner" style={{ borderColor: "var(--warning, #f59e0b)", background: "rgba(245, 158, 11, 0.1)" }}>
+            <AlertTriangle size={16} />
+            <span>
+              This exercise was created by {exercise.createdByName || "another therapist"}. Only the creator can edit or version it.
             </span>
           </div>
         )}
@@ -736,13 +760,15 @@ function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProp
             </div>
           </div>
 
-          <button type="submit" className="primary-button full-width" disabled={saving}>
+          <button type="submit" className="primary-button full-width" disabled={saving || (!isOwner && !!exercise)}>
             {saving
               ? "Saving…"
               : exercise
-                ? isEditingActive
-                  ? `Save as v${exercise.versionNumber + 1} \u00b7 draft`
-                  : "Save changes"
+                ? !isOwner
+                  ? "Read-only (not creator)"
+                  : isEditingActive
+                    ? `Save as v${exercise.versionNumber + 1} \u00b7 draft`
+                    : "Save changes"
                 : "Save as v1 \u00b7 draft"}
           </button>
         </form>

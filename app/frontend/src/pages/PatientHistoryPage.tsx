@@ -1,27 +1,41 @@
-import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
-import { useMemo, useState } from "react";
-import { trackingLabels } from "../data/patientMock";
-import { patientHistoryPlans } from "../data/patientHistoryMock";
+import { ArrowLeft, ChevronLeft, ChevronRight, Dumbbell, Hand, Ban, CheckCircle2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
 import type { PatientNavLabel } from "../components/PatientSidebar";
-import type { HeatmapDayStatus, PatientHistoryPlan, PatientProgramDay } from "../types";
+import { ApiError, getPatientPlans } from "../services/api";
+import { useAuth } from "../store/authStore";
+import { initialsFromName } from "../utils/displayName";
+import type { ExerciseTrackingType, HeatmapDayStatus, RehabPlanStatus } from "../types";
 
-// Sidebar/bottom-nav "History" page. Top block is a real full-month calendar for
-// the selected rehab plan (data/patientHistoryMock.ts) — every day of the
-// currently viewed month renders, not just the plan's own day range, so days
-// with no plan scheduled are visible too (as a distinct "no plan" cell) instead
-// of the calendar shrinking down to whatever a short plan's length happens to
-// be. Month nav (‹ ›) lets a plan that spans more than one month (or a patient
-// browsing outside their plan's range entirely) move between months. Clicking a
-// plan day drills the bottom block down to just that day's exercises (each with
-// its own score); with no day selected, the bottom block instead shows a
-// rehab-plan selector plus the full day-by-day list for whichever plan is
-// chosen — both driven by the same `selectedPlanId` state so the calendar above
-// and the list below always agree on which plan they're showing.
+export interface HistoryExercise {
+  id: string;
+  name: string;
+  trackingType: ExerciseTrackingType;
+  difficultyLevel?: string;
+  targetValueLabel: string;
+  status: string;
+  score?: number;
+}
+
+export interface HistoryDay {
+  id: string;
+  dateLabel: string; // YYYY-MM-DD
+  status: HeatmapDayStatus;
+  therapistNote?: string;
+  exercises: HistoryExercise[];
+}
+
+export interface HistoryPlan {
+  id: string;
+  name: string;
+  status: RehabPlanStatus;
+  startDateLabel: string;
+  endDateLabel?: string;
+  days: HistoryDay[];
+}
 
 interface PatientHistoryPageProps {
-  program: PatientProgramDay;
   onLogout: () => void;
   onNavigate: (label: PatientNavLabel) => void;
 }
@@ -34,15 +48,23 @@ const heatmapLabels: Record<HeatmapDayStatus, string> = {
   cancelled: "Cancelled"
 };
 
+const trackingIcons: Record<ExerciseTrackingType, typeof Dumbbell> = {
+  pose: Dumbbell,
+  virtual_grip: Hand,
+  none: Ban
+};
+
+const trackingLabels: Record<ExerciseTrackingType, string> = {
+  pose: "Pose tracking",
+  virtual_grip: "Virtual grip",
+  none: "No AI tracking"
+};
+
 interface CalendarCell {
   key: string;
-  // Day-of-month number, or null for a leading/trailing padding cell outside the
-  // viewed month entirely.
   dateNumber: number | null;
-  // The plan's status for this date, or null if this date has no scheduled day
-  // in the plan (either outside the plan's date range, or a padding cell).
+  dateStr: string | null; // YYYY-MM-DD
   status: HeatmapDayStatus | null;
-  // Index into plan.days, only set when `status` is set.
   dayIndex: number | null;
 }
 
@@ -53,43 +75,119 @@ interface ViewedMonth {
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// Builds every cell for the given calendar month (Sun-first, padded to full
-// weeks), looking up each date against the plan's day range rather than only
-// laying out the plan's own days — see this file's header comment for why.
-function buildMonthCalendarCells(plan: PatientHistoryPlan, viewed: ViewedMonth): CalendarCell[] {
-  const planStart = ISO_DATE_RE.test(plan.startDateLabel) ? new Date(`${plan.startDateLabel}T00:00:00`) : null;
+function formatTargetValue(targetValue: unknown): string {
+  if (targetValue === null || targetValue === undefined) return "";
+  if (typeof targetValue === "string" || typeof targetValue === "number") return String(targetValue);
+  if (Array.isArray(targetValue)) return targetValue.map(String).join(" · ");
+  if (typeof targetValue === "object") {
+    return Object.entries(targetValue as Record<string, unknown>)
+      .map(([key, value]) => `${String(value)} ${key}`)
+      .join(" · ");
+  }
+  return String(targetValue);
+}
+
+function mapServerPlansToHistory(serverPlans: any[]): HistoryPlan[] {
+  return serverPlans.map((sp: any) => {
+    const firstScheduleDate = sp.scheduleDays?.[0]?.scheduledDate
+      ? sp.scheduleDays[0].scheduledDate.slice?.(0, 10) ?? new Date(sp.scheduleDays[0].scheduledDate).toISOString().slice(0, 10)
+      : "";
+    const start = sp.startDate
+      ? sp.startDate.slice?.(0, 10) ?? new Date(sp.startDate).toISOString().slice(0, 10)
+      : firstScheduleDate;
+    const end = sp.endDate
+      ? sp.endDate.slice?.(0, 10) ?? new Date(sp.endDate).toISOString().slice(0, 10)
+      : "";
+
+    const days: HistoryDay[] = (sp.scheduleDays || []).map((sd: any) => {
+      const dateLabel = sd.scheduledDate
+        ? sd.scheduledDate.slice?.(0, 10) ?? new Date(sd.scheduledDate).toISOString().slice(0, 10)
+        : "";
+
+      const exercises: HistoryExercise[] = (sd.scheduledExercises || []).map((ex: any) => {
+        const results = ex.performanceResults || [];
+        let score: number | undefined = undefined;
+        if (results.length > 0) {
+          const sorted = [...results].sort((a, b) => (b.attemptNumber || 0) - (a.attemptNumber || 0));
+          const latest = sorted[0];
+          const rawScore = latest?.finalScore ?? latest?.ptScore ?? latest?.aiScore;
+          if (rawScore !== null && rawScore !== undefined) {
+            const num = typeof rawScore === "number" ? rawScore : Number(rawScore);
+            if (!Number.isNaN(num)) score = Math.round(num);
+          }
+        }
+
+        return {
+          id: ex.id,
+          name: ex.exerciseLibrary?.name ?? ex.exerciseName ?? "Exercise",
+          trackingType: ex.exerciseLibrary?.movementTracking ?? ex.movementTracking ?? "none",
+          difficultyLevel: ex.exerciseLibrary?.difficultyLevel ?? ex.difficultyLevel,
+          targetValueLabel: formatTargetValue(ex.targetValue),
+          status: ex.status,
+          score
+        };
+      });
+
+      return {
+        id: sd.id,
+        dateLabel,
+        status: sd.status as HeatmapDayStatus,
+        therapistNote: sd.therapistNote ?? undefined,
+        exercises
+      };
+    });
+
+    return {
+      id: sp.id,
+      name: sp.name,
+      status: sp.status as RehabPlanStatus,
+      startDateLabel: start,
+      endDateLabel: end,
+      days
+    };
+  });
+}
+
+function buildMonthCalendarCells(plan: HistoryPlan, viewed: ViewedMonth): CalendarCell[] {
   const firstOfMonth = new Date(viewed.year, viewed.month, 1);
   const daysInMonth = new Date(viewed.year, viewed.month + 1, 0).getDate();
   const cells: CalendarCell[] = [];
 
+  // Map of YYYY-MM-DD -> { status, dayIndex }
+  const dayMap = new Map<string, { status: HeatmapDayStatus; dayIndex: number }>();
+  plan.days.forEach((day, index) => {
+    if (day.dateLabel && ISO_DATE_RE.test(day.dateLabel)) {
+      dayMap.set(day.dateLabel, { status: day.status, dayIndex: index });
+    }
+  });
+
   for (let i = 0; i < firstOfMonth.getDay(); i++) {
-    cells.push({ key: `lead-${i}`, dateNumber: null, status: null, dayIndex: null });
+    cells.push({ key: `lead-${i}`, dateNumber: null, dateStr: null, status: null, dayIndex: null });
   }
 
   for (let day = 1; day <= daysInMonth; day++) {
-    const date = new Date(viewed.year, viewed.month, day);
-    let status: HeatmapDayStatus | null = null;
-    let dayIndex: number | null = null;
+    const monthStr = String(viewed.month + 1).padStart(2, "0");
+    const dayStr = String(day).padStart(2, "0");
+    const fullDateStr = `${viewed.year}-${monthStr}-${dayStr}`;
 
-    if (planStart) {
-      const diffDays = Math.round((date.getTime() - planStart.getTime()) / (1000 * 60 * 60 * 24));
-      if (diffDays >= 0 && diffDays < plan.days.length) {
-        status = plan.days[diffDays].status;
-        dayIndex = diffDays;
-      }
-    }
-
-    cells.push({ key: `day-${day}`, dateNumber: day, status, dayIndex });
+    const match = dayMap.get(fullDateStr);
+    cells.push({
+      key: `day-${day}`,
+      dateNumber: day,
+      dateStr: fullDateStr,
+      status: match ? match.status : null,
+      dayIndex: match !== undefined ? match.dayIndex : null
+    });
   }
 
   while (cells.length % 7 !== 0) {
-    cells.push({ key: `trail-${cells.length}`, dateNumber: null, status: null, dayIndex: null });
+    cells.push({ key: `trail-${cells.length}`, dateNumber: null, dateStr: null, status: null, dayIndex: null });
   }
 
   return cells;
 }
 
-function monthOfPlanStart(plan: PatientHistoryPlan | undefined): ViewedMonth {
+function monthOfPlanStart(plan: HistoryPlan | undefined): ViewedMonth {
   if (plan && ISO_DATE_RE.test(plan.startDateLabel)) {
     const date = new Date(`${plan.startDateLabel}T00:00:00`);
     return { year: date.getFullYear(), month: date.getMonth() };
@@ -102,27 +200,75 @@ function viewedMonthLabel(viewed: ViewedMonth): string {
   return new Date(viewed.year, viewed.month, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-function dayDateLabel(plan: PatientHistoryPlan, dayIndex: number): string {
-  if (!ISO_DATE_RE.test(plan.startDateLabel)) {
-    return `Day ${dayIndex + 1}`;
+function dayDateLabel(day: HistoryDay, index: number): string {
+  if (day.dateLabel && ISO_DATE_RE.test(day.dateLabel)) {
+    const date = new Date(`${day.dateLabel}T00:00:00`);
+    return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   }
-  const date = new Date(`${plan.startDateLabel}T00:00:00`);
-  date.setDate(date.getDate() + dayIndex);
-  return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return `Day ${index + 1}`;
 }
 
-export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHistoryPageProps) {
-  const defaultPlanId = patientHistoryPlans.find((plan) => plan.status === "active")?.id ?? patientHistoryPlans[0]?.id;
-  const [selectedPlanId, setSelectedPlanId] = useState(defaultPlanId);
-  const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
+export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageProps) {
+  const { token, user } = useAuth();
+  const [plans, setPlans] = useState<HistoryPlan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const selectedPlan = patientHistoryPlans.find((plan) => plan.id === selectedPlanId) ?? patientHistoryPlans[0];
-  const [viewedMonth, setViewedMonth] = useState<ViewedMonth>(() => monthOfPlanStart(selectedPlan));
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
+  const [viewedMonth, setViewedMonth] = useState<ViewedMonth>(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+
+  const displayName = user?.displayName ?? user?.username ?? "Patient";
+  const avatarInitials = initialsFromName(displayName);
+
+  useEffect(() => {
+    if (!token || !user) {
+      setLoading(false);
+      setError("Please log in again to view your rehabilitation history.");
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    getPatientPlans(token, user.id)
+      .then((res) => {
+        if (!cancelled) {
+          const mapped = mapServerPlansToHistory(res.plans || []);
+          setPlans(mapped);
+          if (mapped.length > 0) {
+            const activeOrFirst = mapped.find((p) => p.status === "active") ?? mapped[0];
+            setSelectedPlanId((cur) => cur ?? activeOrFirst.id);
+            setViewedMonth(monthOfPlanStart(activeOrFirst));
+          }
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "Couldn't load your history. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user, reloadKey]);
+
+  const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? plans[0] ?? null;
 
   const calendarCells = useMemo(
     () => (selectedPlan ? buildMonthCalendarCells(selectedPlan, viewedMonth) : []),
     [selectedPlan, viewedMonth]
   );
+
   const selectedDay =
     selectedPlan && selectedDayIndex !== null && selectedPlan.days[selectedDayIndex]
       ? selectedPlan.days[selectedDayIndex]
@@ -131,7 +277,8 @@ export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHis
   const handleSelectPlan = (planId: string) => {
     setSelectedPlanId(planId);
     setSelectedDayIndex(null);
-    setViewedMonth(monthOfPlanStart(patientHistoryPlans.find((plan) => plan.id === planId)));
+    const chosen = plans.find((plan) => plan.id === planId);
+    setViewedMonth(monthOfPlanStart(chosen));
   };
 
   const handleSelectDay = (dayIndex: number, status: HeatmapDayStatus) => {
@@ -153,8 +300,8 @@ export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHis
         activeLabel="History"
         onNavigate={onNavigate}
         onLogout={onLogout}
-        displayName={`${program.patient.displayName} Rodthong`}
-        avatarInitials="SR"
+        displayName={displayName}
+        avatarInitials={avatarInitials}
       />
 
       <div className="therapist-workspace">
@@ -166,16 +313,27 @@ export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHis
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{program.patient.displayName} Rodthong</strong>
+                <strong>{displayName}</strong>
                 <small>Patient</small>
               </div>
-              <span className="avatar-badge">SR</span>
+              <span className="avatar-badge">{avatarInitials}</span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main patient-page-main">
-          {selectedPlan ? (
+          {loading ? (
+            <div className="summary-card" role="status">
+              <p className="pd-empty-note">Loading your rehabilitation history…</p>
+            </div>
+          ) : error ? (
+            <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)" }}>
+              <p style={{ margin: "0 0 12px", color: "var(--danger, #d33)" }}>{error}</p>
+              <button type="button" className="secondary-button" onClick={() => setReloadKey((k) => k + 1)}>
+                Try again
+              </button>
+            </div>
+          ) : selectedPlan ? (
             <div className="pp-history-layout">
               <div className="summary-card pd-calendar-card">
                 <div className="therapist-chart-heading">
@@ -183,7 +341,7 @@ export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHis
                     <strong>{selectedPlan.name}</strong>
                     <p>
                       {selectedPlan.status.charAt(0).toUpperCase() + selectedPlan.status.slice(1)} plan &middot;{" "}
-                      {selectedPlan.startDateLabel}
+                      {selectedPlan.startDateLabel || "No start date"}
                       {selectedPlan.endDateLabel ? ` – ${selectedPlan.endDateLabel}` : ""}
                     </p>
                   </div>
@@ -244,7 +402,7 @@ export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHis
                 <div className="summary-card pp-history-panel">
                   <div className="therapist-chart-heading">
                     <div>
-                      <strong>{dayDateLabel(selectedPlan, selectedDayIndex)}</strong>
+                      <strong>{dayDateLabel(selectedDay, selectedDayIndex)}</strong>
                       <p>{heatmapLabels[selectedDay.status]}</p>
                     </div>
                     <button type="button" className="text-action" onClick={() => setSelectedDayIndex(null)}>
@@ -256,24 +414,30 @@ export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHis
                     <p className="pd-empty-note">No exercises were recorded for this day.</p>
                   ) : (
                     <div className="pd-session-list">
-                      {selectedDay.exercises.map((exercise, index) => (
-                        <div className="pd-session-row" key={`${exercise.name}-${index}`}>
-                          <div className="pp-history-row-label">
-                            <strong>{exercise.name}</strong>
-                            <small>
-                              {exercise.nameTh ? `${exercise.nameTh} · ` : ""}
-                              {trackingLabels[exercise.trackingType]}
-                            </small>
+                      {selectedDay.exercises.map((exercise) => {
+                        const Icon = trackingIcons[exercise.trackingType] || Dumbbell;
+                        return (
+                          <div className="pd-session-row" key={exercise.id}>
+                            <div className="pp-history-row-label">
+                              <strong>{exercise.name}</strong>
+                              <small>
+                                <Icon size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                                {trackingLabels[exercise.trackingType]}
+                                {exercise.targetValueLabel ? ` · ${exercise.targetValueLabel}` : ""}
+                              </small>
+                            </div>
+                            <div className="pd-session-actions">
+                              {exercise.score !== undefined ? (
+                                <span className="pd-session-score">Score {exercise.score}</span>
+                              ) : (
+                                <span className="pd-session-skipped">
+                                  {exercise.status === "completed" ? "Completed" : "Not scored"}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div className="pd-session-actions">
-                            {exercise.score !== undefined ? (
-                              <span className="pd-session-score">Score {exercise.score}</span>
-                            ) : (
-                              <span className="pd-session-skipped">Not scored</span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -286,61 +450,73 @@ export function PatientHistoryPage({ program, onLogout, onNavigate }: PatientHis
                     </div>
                   </div>
 
-                  <label className="pp-plan-select">
-                    Rehab plan
-                    <select
-                      className="admin-role-select"
-                      value={selectedPlan.id}
-                      onChange={(event) => handleSelectPlan(event.target.value)}
-                    >
-                      {patientHistoryPlans.map((plan) => (
-                        <option key={plan.id} value={plan.id}>
-                          {plan.name} ({plan.status})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {plans.length > 1 && (
+                    <label className="pp-plan-select" style={{ marginBottom: 16 }}>
+                      Rehab plan
+                      <select
+                        className="admin-role-select"
+                        value={selectedPlan.id}
+                        onChange={(event) => handleSelectPlan(event.target.value)}
+                      >
+                        {plans.map((plan) => (
+                          <option key={plan.id} value={plan.id}>
+                            {plan.name} ({plan.status})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
 
                   <div className="pd-session-list">
-                    {selectedPlan.days.map((day, index) => (
-                      <div
-                        className={`pd-session-row ${day.status !== "pending" ? "pp-clickable-row" : ""}`}
-                        key={index}
-                        onClick={day.status !== "pending" ? () => handleSelectDay(index, day.status) : undefined}
-                      >
-                        <div className="pp-history-row-label">
-                          <strong>{dayDateLabel(selectedPlan, index)}</strong>
-                          <small>
-                            {day.exercises.length > 0
-                              ? `${day.exercises.length} exercise${day.exercises.length === 1 ? "" : "s"}`
-                              : "No exercises"}
-                          </small>
-                        </div>
-                        <div className="pd-session-actions">
-                          {day.status === "skipped" ? (
-                            <span className="pd-session-skipped">Skipped</span>
-                          ) : day.exercises.length > 0 ? (
-                            <span className="pd-session-score">
-                              Avg {Math.round(day.exercises.reduce((sum, ex) => sum + (ex.score ?? 0), 0) / day.exercises.length)}
-                            </span>
-                          ) : null}
-                          <span
-                            className={`badge-pill ${
-                              day.status === "completed" ? "good" : day.status === "in_progress" ? "fair" : "poor"
-                            }`}
+                    {selectedPlan.days.length === 0 ? (
+                      <p className="pd-empty-note">No schedule days have been created for this plan yet.</p>
+                    ) : (
+                      selectedPlan.days.map((day, index) => {
+                        const scoredExercises = day.exercises.filter((ex) => ex.score !== undefined);
+                        const avgScore =
+                          scoredExercises.length > 0
+                            ? Math.round(scoredExercises.reduce((sum, ex) => sum + (ex.score ?? 0), 0) / scoredExercises.length)
+                            : null;
+
+                        return (
+                          <div
+                            className={`pd-session-row ${day.status !== "pending" ? "pp-clickable-row" : ""}`}
+                            key={day.id || index}
+                            onClick={day.status !== "pending" ? () => handleSelectDay(index, day.status) : undefined}
                           >
-                            {heatmapLabels[day.status]}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                            <div className="pp-history-row-label">
+                              <strong>{dayDateLabel(day, index)}</strong>
+                              <small>
+                                {day.exercises.length > 0
+                                  ? `${day.exercises.length} exercise${day.exercises.length === 1 ? "" : "s"}`
+                                  : "No exercises"}
+                              </small>
+                            </div>
+                            <div className="pd-session-actions">
+                              {day.status === "skipped" ? (
+                                <span className="pd-session-skipped">Skipped</span>
+                              ) : avgScore !== null ? (
+                                <span className="pd-session-score">Avg {avgScore}</span>
+                              ) : null}
+                              <span
+                                className={`badge-pill ${
+                                  day.status === "completed" ? "good" : day.status === "in_progress" ? "fair" : "poor"
+                                }`}
+                              >
+                                {heatmapLabels[day.status]}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               )}
             </div>
           ) : (
             <div className="summary-card">
-              <p className="pd-empty-note">No rehab plans yet.</p>
+              <p className="pd-empty-note">You have no rehabilitation plans yet.</p>
             </div>
           )}
         </main>

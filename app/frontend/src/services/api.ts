@@ -365,16 +365,25 @@ export interface UserProfile {
   email: string | null;
   phoneNumber: string | null;
   createdAtLabel: string;
+  createdAtIso?: string;
   // Therapist-only — absent for patient/admin callers.
   licenseNumber?: string | null;
   licenseIssuedDate?: string | null;
   licenseExpiryDate?: string | null;
   // Patient-only — absent for therapist/admin callers. Populated for Admin's
-  // Patient-edit flow (AdminUserManagementPage.tsx's EditAccountModal).
+  // Patient-edit flow and Patient Settings.
   gender?: "male" | "female" | "other" | "unknown";
   dateOfBirth?: string | null;
   heightCm?: number | null;
   weightKg?: number | null;
+  address?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  assignedTherapist?: {
+    id: string;
+    displayName: string;
+    licenseNumber?: string | null;
+  } | null;
 }
 
 export interface UpdateProfilePayload {
@@ -385,14 +394,15 @@ export interface UpdateProfilePayload {
   licenseNumber?: string;
   licenseIssuedDate?: string;
   licenseExpiryDate?: string;
-  // Patient-only — Admin editing a Patient account. `username` doubles as the
-  // patient's login phone number, same convention as CreateUserPayload's
-  // Patient branch above.
+  // Patient-only
   username?: string;
   gender?: "male" | "female" | "other" | "unknown";
   dateOfBirth?: string;
   heightCm?: number;
   weightKg?: number;
+  address?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
 }
 
 export function getUserProfile(token: string, userId: string): Promise<{ user: UserProfile }> {
@@ -590,7 +600,14 @@ export function getPatientPlans(token: string, patientId: string): Promise<{ pla
 export function createPatientPlan(
   token: string,
   patientId: string,
-  payload: { name: string; description?: string; startDate?: string; endDate?: string; days?: any[] }
+  payload: {
+    name: string;
+    description?: string;
+    startDate?: string;
+    endDate?: string;
+    days?: any[];
+    attachments?: Array<{ fileId: string; description?: string }>;
+  }
 ): Promise<{ plan: any }> {
   return apiRequest<{ plan: any }>(`/patients/${patientId}/plans`, {
     method: "POST",
@@ -609,6 +626,48 @@ export function patchPlan(
     method: "PATCH",
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload)
+  });
+}
+
+// GET /patients/:patientId/attachments
+export function getPatientAttachments(
+  token: string,
+  patientId: string
+): Promise<{ attachments: any[]; files: any[] }> {
+  return apiRequest<{ attachments: any[]; files: any[] }>(`/patients/${patientId}/attachments`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+// POST /plans/:planId/attachments
+export function addPlanAttachment(
+  token: string,
+  planId: string,
+  payload: { fileId: string; description?: string }
+): Promise<{ attachment: any }> {
+  return apiRequest<{ attachment: any }>(`/plans/${planId}/attachments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+// DELETE /plans/:planId/attachments/:attachmentId
+export function deletePlanAttachment(
+  token: string,
+  planId: string,
+  attachmentId: string
+): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/plans/${planId}/attachments/${attachmentId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+// GET /files/:fileId
+export function getFile(token: string, fileId: string): Promise<{ file: any }> {
+  return apiRequest<{ file: any }>(`/files/${fileId}`, {
+    headers: { Authorization: `Bearer ${token}` }
   });
 }
 

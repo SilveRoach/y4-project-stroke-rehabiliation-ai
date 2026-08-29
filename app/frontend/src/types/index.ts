@@ -226,6 +226,7 @@ export interface ExerciseLibraryItem {
 
   createdAtLabel: string;
   createdByName: string;
+  createdById?: string;
 
   // Full version history for this parent_exercise_id, including this row itself,
   // newest first. Powers the "History" panel (UI_MOCKUP_PLAN_NEWDB.md §2.5).
@@ -352,6 +353,7 @@ export interface ScheduledExercise {
   difficultyLevel?: ExerciseLibraryDifficulty; // can override the library default for this patient
   therapistInstruction?: string;
   status: ScheduledExerciseStatus;
+  performanceResults?: any[];
 }
 
 export interface ScheduleDay {
@@ -360,6 +362,30 @@ export interface ScheduleDay {
   status: HeatmapDayStatus; // reuse existing enum (completed/in_progress/skipped/pending)
   therapistNote?: string;
   exercises: ScheduledExercise[];
+}
+
+export interface PlanAttachmentFile {
+  id: string;
+  originalName: string;
+  storedName?: string;
+  fileType: "image" | "video" | "document" | "audio" | "other";
+  mimeType?: string | null;
+  fileSize?: number | null;
+  storagePath?: string;
+}
+
+export interface PlanAttachment {
+  id: string;
+  rehabilitationPlanId: string;
+  fileId: string;
+  description?: string | null;
+  uploadedAtLabel?: string;
+  file?: PlanAttachmentFile;
+  rehabilitationPlan?: {
+    id: string;
+    name: string;
+    status?: string;
+  };
 }
 
 // `heatmap` stays exactly as-is (PatientDetailPage's calendar cells already render
@@ -374,6 +400,7 @@ export interface PatientRehabPlan {
   endDateLabel?: string;
   heatmap: HeatmapDayStatus[];
   days: ScheduleDay[];
+  attachments?: PlanAttachment[];
 }
 
 export interface PatientDetailProfile {

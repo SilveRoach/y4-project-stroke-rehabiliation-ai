@@ -4,19 +4,39 @@ import {
   Calendar,
   ChevronRight,
   ClipboardList,
+  Eye,
   FileText,
+  FileVideo,
+  Image as ImageIcon,
+  Paperclip,
   Plus,
+  Trash2,
   X
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { ApiError, getTherapistSessions, getPatientPlans, createPatientPlan, patchPlan, createScheduleDay, createScheduledExercise, patchScheduleDay, patchScheduledExerciseStatus } from "../services/api";
+import {
+  ApiError,
+  getTherapistSessions,
+  getPatientPlans,
+  createPatientPlan,
+  patchPlan,
+  createScheduleDay,
+  createScheduledExercise,
+  patchScheduleDay,
+  patchScheduledExerciseStatus,
+  getPatientAttachments,
+  addPlanAttachment,
+  deletePlanAttachment
+} from "../services/api";
 import { useAuth } from "../store/authStore";
 import type {
   HeatmapDayStatus,
   PatientRehabPlan,
+  PlanAttachment,
+  PlanAttachmentFile,
   RehabPlanStatus,
   SessionHistoryEntry,
   TherapistPatientSummary
@@ -285,6 +305,13 @@ export function PatientDetailPage({
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
 
+  // Available medical attachments & files for this patient
+  const [availableAttachments, setAvailableAttachments] = useState<PlanAttachment[]>([]);
+  const [availableFiles, setAvailableFiles] = useState<PlanAttachmentFile[]>([]);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [viewingFile, setViewingFile] = useState<{ file: PlanAttachmentFile; description?: string | null } | null>(null);
+  const [showAddAttachmentModal, setShowAddAttachmentModal] = useState(false);
+
   function handleSelectDay(key: string) {
     if (!selectedPlan) return;
     if (!key.startsWith("day-")) return;
@@ -312,11 +339,29 @@ export function PatientDetailPage({
           movementTracking: ex.exerciseLibrary?.movementTracking ?? ex.movementTracking ?? "none",
           orderNumber: ex.orderNumber ?? 0,
           targetType: ex.targetType ?? "free",
-          targetValueLabel: ex.targetValue ? String(ex.targetValue) : "",
+          targetValueLabel: ex.targetValue ? (typeof ex.targetValue === "object" ? JSON.stringify(ex.targetValue) : String(ex.targetValue)) : "",
           difficultyLevel: ex.exerciseLibrary?.difficultyLevel ?? ex.difficultyLevel ?? undefined,
           therapistInstruction: ex.therapistInstruction ?? undefined,
           status: ex.status ?? "pending"
         }))
+      }));
+      const attachments: PlanAttachment[] = (sp.attachments || []).map((att: any) => ({
+        id: att.id,
+        rehabilitationPlanId: att.rehabilitationPlanId,
+        fileId: att.fileId,
+        description: att.description ?? undefined,
+        uploadedAtLabel: att.uploadedAt
+          ? (att.uploadedAt.slice?.(0, 10) ?? new Date(att.uploadedAt).toISOString().slice(0, 10))
+          : undefined,
+        file: att.file ? {
+          id: att.file.id,
+          originalName: att.file.originalName,
+          storedName: att.file.storedName,
+          fileType: att.file.fileType,
+          mimeType: att.file.mimeType ?? undefined,
+          fileSize: att.file.fileSize != null ? Number(att.file.fileSize) : undefined,
+          storagePath: att.file.storagePath
+        } : undefined
       }));
       const heatmap = (sp.scheduleDays || []).map((sd: any) => sd.status as HeatmapDayStatus);
       return {
@@ -327,9 +372,43 @@ export function PatientDetailPage({
         startDateLabel: start,
         endDateLabel: end || undefined,
         heatmap,
-        days
+        days,
+        attachments
       } as PatientRehabPlan;
     });
+  };
+
+  const refreshAvailableAttachments = async () => {
+    if (!token || !patient.id) return;
+    setAttachmentsLoading(true);
+    try {
+      const res = await getPatientAttachments(token, patient.id);
+      const mappedAtts: PlanAttachment[] = (res.attachments || []).map((att: any) => ({
+        id: att.id,
+        rehabilitationPlanId: att.rehabilitationPlanId,
+        fileId: att.fileId,
+        description: att.description ?? undefined,
+        uploadedAtLabel: att.uploadedAt
+          ? (att.uploadedAt.slice?.(0, 10) ?? new Date(att.uploadedAt).toISOString().slice(0, 10))
+          : undefined,
+        file: att.file ? {
+          id: att.file.id,
+          originalName: att.file.originalName,
+          storedName: att.file.storedName,
+          fileType: att.file.fileType,
+          mimeType: att.file.mimeType ?? undefined,
+          fileSize: att.file.fileSize != null ? Number(att.file.fileSize) : undefined,
+          storagePath: att.file.storagePath
+        } : undefined,
+        rehabilitationPlan: att.rehabilitationPlan
+      }));
+      setAvailableAttachments(mappedAtts);
+      setAvailableFiles(res.files || []);
+    } catch {
+      // best-effort
+    } finally {
+      setAttachmentsLoading(false);
+    }
   };
 
   // Refresh plans from the server and update local state. Keeps selectedPlanId
@@ -406,7 +485,7 @@ export function PatientDetailPage({
     setPlans((current) => current.map((plan) => (plan.id === pendingPlanUpdate.id ? pendingPlanUpdate : plan)));
   }, [pendingPlanUpdate]);
 
-  // Load plans from backend
+  // Load plans & attachments from backend
   useEffect(() => {
     if (!token || !patient.id) return;
     let cancelled = false;
@@ -420,6 +499,8 @@ export function PatientDetailPage({
         if (!cancelled) setPlansLoading(false);
       });
 
+    refreshAvailableAttachments();
+
     return () => {
       cancelled = true;
     };
@@ -427,7 +508,11 @@ export function PatientDetailPage({
 
   // Save plan via backend calls; maps client plan shape to API payloads and
   // updates local state from server response.
-  const handleSavePlan = async (plan: PatientRehabPlan, mode: "edit" | "create") => {
+  const handleSavePlan = async (
+    plan: PatientRehabPlan,
+    mode: "edit" | "create",
+    selectedAttachments?: Array<{ fileId: string; description?: string }>
+  ) => {
     if (!token) {
       alert("Not authenticated");
       return;
@@ -440,13 +525,15 @@ export function PatientDetailPage({
           name: plan.name,
           description: plan.description,
           startDate: plan.startDateLabel || undefined,
-          endDate: plan.endDateLabel || undefined
+          endDate: plan.endDateLabel || undefined,
+          attachments: selectedAttachments && selectedAttachments.length > 0 ? selectedAttachments : undefined
         };
         const res = await createPatientPlan(token, patient.id, payload);
         const mapped = mapServerPlans([res.plan])[0];
 
         setPlans((current) => [mapped, ...current]);
         setSelectedPlanId(mapped.id);
+        await refreshAvailableAttachments();
       } else {
         // edit existing
         const payload: any = {
@@ -459,17 +546,70 @@ export function PatientDetailPage({
         const res = await patchPlan(token, plan.id, payload);
         const mapped = mapServerPlans([res.plan])[0];
 
-        setPlans((current) => current.map((p) => (p.id === mapped.id ? mapped : p)));
+        // Sync attachments for existing plan if specified
+        if (selectedAttachments && selectedPlan) {
+          const currentAtts = selectedPlan.attachments ?? [];
+          const currentFileIds = new Set(currentAtts.map((a) => a.fileId));
+          const targetFileIds = new Set(selectedAttachments.map((a) => a.fileId));
+
+          // Remove any attachments that were unselected
+          for (const att of currentAtts) {
+            if (!targetFileIds.has(att.fileId)) {
+              try {
+                await deletePlanAttachment(token, selectedPlan.id, att.id);
+              } catch {
+                // best-effort
+              }
+            }
+          }
+
+          // Add any new attachments
+          for (const att of selectedAttachments) {
+            if (!currentFileIds.has(att.fileId)) {
+              try {
+                await addPlanAttachment(token, selectedPlan.id, { fileId: att.fileId, description: att.description });
+              } catch {
+                // best-effort
+              }
+            }
+          }
+        }
+
+        await refreshPlans();
+        await refreshAvailableAttachments();
         setSelectedPlanId(mapped.id);
       }
     } catch (err) {
       // surface error to therapist; controllers throw ApiError via apiRequest
       const message = err instanceof ApiError ? err.message : String(err);
-      // keep simple UX: show alert for now
       alert(`Could not save plan: ${message}`);
       return;
     } finally {
       setShowPlanModal(false);
+    }
+  };
+
+  const handleRemoveAttachment = async (attachmentId: string) => {
+    if (!token || !selectedPlan) return;
+    if (!window.confirm("Remove this medical attachment from the rehabilitation plan?")) return;
+    try {
+      await deletePlanAttachment(token, selectedPlan.id, attachmentId);
+      await refreshPlans();
+      await refreshAvailableAttachments();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : String(err));
+    }
+  };
+
+  const handleAddAttachment = async (fileId: string, description?: string) => {
+    if (!token || !selectedPlan) return;
+    try {
+      await addPlanAttachment(token, selectedPlan.id, { fileId, description });
+      await refreshPlans();
+      await refreshAvailableAttachments();
+      setShowAddAttachmentModal(false);
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : String(err));
     }
   };
 
@@ -675,13 +815,101 @@ export function PatientDetailPage({
             )}
           </div>
 
-          {/* 3 & 4. Medical history + Session history, side by side as their own
-              blocky cards. Medical history shows only the latest record — "View
-              full history" (bottom-right of the card) opens every record in a
-              slide-over. Previously every record rendered inline in a long
-              single-column stack, which made the page feel dense before you'd
-              even reached Session history. */}
+          {/* 3 & 4. Medical Attachments + Session history, side by side as their own cards */}
           <div className="pd-bottom-grid">
+            {/* Plan Medical Attachments card */}
+            <div className="summary-card pd-attachments-card">
+              <div className="therapist-chart-heading">
+                <div>
+                  <strong style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Paperclip size={16} /> Plan Medical Attachments
+                  </strong>
+                  <p>
+                    {selectedPlan
+                      ? `${selectedPlan.attachments?.length ?? 0} attachment${(selectedPlan.attachments?.length ?? 0) === 1 ? "" : "s"} linked to this plan`
+                      : "No plan selected"}
+                  </p>
+                </div>
+                {selectedPlan && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    style={{ minHeight: 32, padding: "4px 10px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: 4 }}
+                    onClick={() => setShowAddAttachmentModal(true)}
+                  >
+                    <Plus size={13} /> Attach file
+                  </button>
+                )}
+              </div>
+
+              {!selectedPlan ? (
+                <p className="pd-empty-note">Select a plan above to view its medical attachments.</p>
+              ) : (!selectedPlan.attachments || selectedPlan.attachments.length === 0) ? (
+                <div style={{ textAlign: "center", padding: "20px 0" }}>
+                  <p className="pd-empty-note">No medical attachments linked to this rehabilitation plan.</p>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    style={{ marginTop: 8 }}
+                    onClick={() => setShowAddAttachmentModal(true)}
+                  >
+                    <Paperclip size={14} /> Associate medical attachment
+                  </button>
+                </div>
+              ) : (
+                <div className="pd-session-list">
+                  {selectedPlan.attachments.map((att) => {
+                    const fileType = att.file?.fileType ?? "document";
+                    const fileName = att.file?.originalName ?? "Medical Attachment";
+                    const fileSizeLabel = formatFileSize(att.file?.fileSize);
+                    return (
+                      <div key={att.id} className="pd-session-row">
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span className="filepicker-thumb" style={{ width: 34, height: 34 }}>
+                            {getFileIcon(fileType)}
+                          </span>
+                          <div>
+                            <strong style={{ fontSize: "0.85rem", color: "var(--text-primary)" }}>{fileName}</strong>
+                            <small>
+                              {fileType}
+                              {fileSizeLabel ? ` \u00b7 ${fileSizeLabel}` : ""}
+                              {att.uploadedAtLabel ? ` \u00b7 ${att.uploadedAtLabel}` : ""}
+                            </small>
+                            {att.description && (
+                              <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "var(--text-secondary)" }}>
+                                {att.description}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="pd-session-actions" style={{ gap: 6 }}>
+                          {att.file && (
+                            <button
+                              type="button"
+                              className="text-action"
+                              onClick={() => setViewingFile({ file: att.file!, description: att.description })}
+                              title="View file details"
+                            >
+                              <Eye size={13} /> View
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="text-action"
+                            style={{ color: "var(--error)" }}
+                            onClick={() => handleRemoveAttachment(att.id)}
+                            title="Remove attachment from plan"
+                          >
+                            <Trash2 size={13} /> Remove
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             <div className="summary-card pd-session-card">
               <div className="therapist-chart-heading">
@@ -749,7 +977,31 @@ export function PatientDetailPage({
       </div>
 
       {showPlanModal && (
-        <PlanModal selectedPlan={selectedPlan} onClose={() => setShowPlanModal(false)} onSave={handleSavePlan} />
+        <PlanModal
+          selectedPlan={selectedPlan}
+          availableAttachments={availableAttachments}
+          availableFiles={availableFiles}
+          onClose={() => setShowPlanModal(false)}
+          onSave={handleSavePlan}
+        />
+      )}
+
+      {showAddAttachmentModal && selectedPlan && (
+        <AddAttachmentModal
+          selectedPlan={selectedPlan}
+          availableAttachments={availableAttachments}
+          availableFiles={availableFiles}
+          onClose={() => setShowAddAttachmentModal(false)}
+          onAdd={handleAddAttachment}
+        />
+      )}
+
+      {viewingFile && (
+        <FileViewModal
+          file={viewingFile.file}
+          description={viewingFile.description}
+          onClose={() => setViewingFile(null)}
+        />
       )}
     </section>
   );
@@ -758,14 +1010,45 @@ export function PatientDetailPage({
 
 
 
+function formatFileSize(bytes?: number | null): string {
+  if (bytes == null || Number.isNaN(bytes)) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileIcon(type?: string) {
+  if (type === "image") return <ImageIcon size={16} />;
+  if (type === "video") return <FileVideo size={16} />;
+  return <FileText size={16} />;
+}
+
+interface AvailableFileItem {
+  fileId: string;
+  originalName: string;
+  fileType: "image" | "video" | "document" | "audio" | "other";
+  mimeType?: string | null;
+  fileSize?: number | null;
+  defaultDescription?: string | null;
+  uploadedAtLabel?: string;
+}
+
 function PlanModal({
   selectedPlan,
+  availableAttachments,
+  availableFiles,
   onClose,
   onSave
 }: {
   selectedPlan: PatientRehabPlan | null;
+  availableAttachments: PlanAttachment[];
+  availableFiles: PlanAttachmentFile[];
   onClose: () => void;
-  onSave: (plan: PatientRehabPlan, mode: "edit" | "create") => void;
+  onSave: (
+    plan: PatientRehabPlan,
+    mode: "edit" | "create",
+    selectedAttachments?: Array<{ fileId: string; description?: string }>
+  ) => void;
 }) {
   const [mode, setMode] = useState<"edit" | "create">(selectedPlan ? "edit" : "create");
   const [name, setName] = useState(selectedPlan?.name ?? "");
@@ -778,9 +1061,72 @@ function PlanModal({
     selectedPlan?.endDateLabel && ISO_DATE_RE.test(selectedPlan.endDateLabel) ? selectedPlan.endDateLabel : ""
   );
 
+  // Combine unique available files for this patient
+  const uniqueAvailableFiles: AvailableFileItem[] = [];
+  const seenFileIds = new Set<string>();
+
+  for (const att of availableAttachments) {
+    if (att.file && !seenFileIds.has(att.fileId)) {
+      seenFileIds.add(att.fileId);
+      uniqueAvailableFiles.push({
+        fileId: att.fileId,
+        originalName: att.file.originalName,
+        fileType: att.file.fileType,
+        mimeType: att.file.mimeType,
+        fileSize: att.file.fileSize,
+        defaultDescription: att.description,
+        uploadedAtLabel: att.uploadedAtLabel
+      });
+    }
+  }
+
+  for (const f of availableFiles) {
+    if (!seenFileIds.has(f.id)) {
+      seenFileIds.add(f.id);
+      uniqueAvailableFiles.push({
+        fileId: f.id,
+        originalName: f.originalName,
+        fileType: f.fileType,
+        mimeType: f.mimeType,
+        fileSize: f.fileSize,
+        defaultDescription: undefined,
+        uploadedAtLabel: undefined
+      });
+    }
+  }
+
+  // Selected attachments in this modal: map of fileId -> description
+  const [selectedAttachmentsMap, setSelectedAttachmentsMap] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    if (selectedPlan?.attachments) {
+      for (const att of selectedPlan.attachments) {
+        init[att.fileId] = att.description ?? "";
+      }
+    }
+    return init;
+  });
+
+  const toggleAttachment = (fileId: string, defaultDesc = "") => {
+    setSelectedAttachmentsMap((current) => {
+      const next = { ...current };
+      if (fileId in next) {
+        delete next[fileId];
+      } else {
+        next[fileId] = defaultDesc;
+      }
+      return next;
+    });
+  };
+
+  const updateAttachmentDescription = (fileId: string, desc: string) => {
+    setSelectedAttachmentsMap((current) => ({
+      ...current,
+      [fileId]: desc
+    }));
+  };
+
   // Switching between "edit the selected plan" and "start a new one" resets the
-  // form to that mode's starting values, rather than carrying over half-edited
-  // fields from the other mode.
+  // form to that mode's starting values
   const switchMode = (nextMode: "edit" | "create") => {
     setMode(nextMode);
     if (nextMode === "edit" && selectedPlan) {
@@ -789,12 +1135,18 @@ function PlanModal({
       setStatus(selectedPlan.status);
       setStartDateLabel(ISO_DATE_RE.test(selectedPlan.startDateLabel) ? selectedPlan.startDateLabel : "");
       setEndDateLabel(selectedPlan.endDateLabel && ISO_DATE_RE.test(selectedPlan.endDateLabel) ? selectedPlan.endDateLabel : "");
+      const init: Record<string, string> = {};
+      for (const att of selectedPlan.attachments ?? []) {
+        init[att.fileId] = att.description ?? "";
+      }
+      setSelectedAttachmentsMap(init);
     } else {
       setName("");
       setDescription("");
       setStatus("draft");
       setStartDateLabel("");
       setEndDateLabel("");
+      setSelectedAttachmentsMap({});
     }
   };
 
@@ -802,11 +1154,12 @@ function PlanModal({
     event.preventDefault();
     if (!name.trim() || !startDateLabel || !endDateLabel) return;
 
+    const attachmentPayload = Object.entries(selectedAttachmentsMap).map(([fileId, desc]) => ({
+      fileId,
+      description: desc.trim() || undefined
+    }));
+
     if (mode === "edit" && selectedPlan) {
-      // Editing only changes the plan's own fields — it deliberately keeps the
-      // existing heatmap (day-by-day progress) as-is rather than regenerating
-      // rehabilitation_schedule_days from a new date range, which would silently
-      // discard real completed/skipped days.
       onSave(
         {
           ...selectedPlan,
@@ -816,7 +1169,8 @@ function PlanModal({
           startDateLabel,
           endDateLabel
         },
-        "edit"
+        "edit",
+        attachmentPayload
       );
     } else {
       onSave(
@@ -828,15 +1182,13 @@ function PlanModal({
           startDateLabel,
           endDateLabel,
           heatmap: Array.from({ length: daysBetweenInclusive(startDateLabel, endDateLabel) }, () => "pending" as HeatmapDayStatus),
-          // Fresh plan starts with every day scheduled but empty (no exercises
-          // assigned yet) — filling these in is Program Editor's job, not this
-          // modal's (PT_EXERCISE_PATH_MOCKUP_PLAN.md §4.5).
           days: Array.from({ length: daysBetweenInclusive(startDateLabel, endDateLabel) }, () => ({
             status: "pending" as HeatmapDayStatus,
             exercises: []
           }))
         },
-        "create"
+        "create",
+        attachmentPayload
       );
     }
   };
@@ -844,7 +1196,7 @@ function PlanModal({
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="pd-modal" role="dialog" aria-label="Manage rehabilitation plan">
+      <div className="pd-modal" role="dialog" aria-label="Manage rehabilitation plan" style={{ width: "min(100%, 540px)" }}>
         <div className="therapist-detail-header">
           <strong>Rehabilitation plan</strong>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
@@ -915,17 +1267,316 @@ function PlanModal({
             </label>
           </div>
 
+          {/* Medical Attachments selection */}
+          <div style={{ display: "grid", gap: 8, marginTop: 4 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
+              <Paperclip size={14} /> Medical Attachments
+            </label>
+            {uniqueAvailableFiles.length === 0 ? (
+              <p className="pd-empty-note" style={{ margin: 0, padding: "10px 0", fontSize: "0.8rem" }}>
+                No medical files or attachments available for this patient yet.
+              </p>
+            ) : (
+              <div style={{ display: "grid", gap: 8, maxHeight: 180, overflowY: "auto", paddingRight: 2 }}>
+                {uniqueAvailableFiles.map((file) => {
+                  const isChecked = file.fileId in selectedAttachmentsMap;
+                  const isOriginallyAttached = selectedPlan?.attachments?.some((a) => a.fileId === file.fileId);
+                  return (
+                    <div
+                      key={file.fileId}
+                      style={{
+                        border: "1px solid var(--border)",
+                        borderRadius: 10,
+                        padding: "8px 10px",
+                        background: isChecked ? "var(--primary-light)" : "var(--card)",
+                        display: "grid",
+                        gap: 6
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <label
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            cursor: "pointer",
+                            margin: 0,
+                            fontWeight: 500,
+                            fontSize: "0.82rem"
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleAttachment(file.fileId, file.defaultDescription ?? "")}
+                          />
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            {getFileIcon(file.fileType)}
+                            <strong>{file.originalName}</strong>
+                          </span>
+                        </label>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {isOriginallyAttached && mode === "edit" && (
+                            <span className="pd-program-status active" style={{ fontSize: "0.7rem", padding: "1px 6px" }}>
+                              Attached
+                            </span>
+                          )}
+                          <small style={{ color: "var(--text-secondary)", fontSize: "0.72rem" }}>
+                            {formatFileSize(file.fileSize)}
+                          </small>
+                        </div>
+                      </div>
+
+                      {isChecked && (
+                        <input
+                          type="text"
+                          placeholder="Optional attachment note/description..."
+                          value={selectedAttachmentsMap[file.fileId] ?? ""}
+                          onChange={(e) => updateAttachmentDescription(file.fileId, e.target.value)}
+                          style={{
+                            minHeight: 28,
+                            fontSize: "0.78rem",
+                            padding: "4px 8px",
+                            borderRadius: 6,
+                            border: "1px solid var(--border)"
+                          }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <p className="pd-modal-hint">
             <Calendar size={12} />{" "}
             {mode === "create"
-              ? "Creates a fresh day-by-day schedule with every day pending, matching patient_rehabilitation_plans + rehabilitation_schedule_days \u2014 but no backend endpoint exists yet, so this only lives in this browser tab."
-              : "Editing keeps this plan's existing day-by-day progress as-is \u2014 only the plan's own fields (name/description/status/dates) change here."}
+              ? "Creates a fresh day-by-day schedule matching patient_rehabilitation_plans and links any selected medical attachments."
+              : "Editing updates plan metadata and synchronizes associated medical attachments."}
           </p>
 
           <button type="submit" className="primary-button full-width">
             {mode === "create" ? "Create plan" : "Save changes"}
           </button>
         </form>
+      </div>
+    </>
+  );
+}
+
+function AddAttachmentModal({
+  selectedPlan,
+  availableAttachments,
+  availableFiles,
+  onClose,
+  onAdd
+}: {
+  selectedPlan: PatientRehabPlan;
+  availableAttachments: PlanAttachment[];
+  availableFiles: PlanAttachmentFile[];
+  onClose: () => void;
+  onAdd: (fileId: string, description?: string) => Promise<void> | void;
+}) {
+  const currentFileIds = new Set((selectedPlan.attachments ?? []).map((a) => a.fileId));
+
+  // Collect available files not currently on this plan
+  const candidateFiles: AvailableFileItem[] = [];
+  const seenFileIds = new Set<string>();
+
+  for (const att of availableAttachments) {
+    if (att.file && !seenFileIds.has(att.fileId) && !currentFileIds.has(att.fileId)) {
+      seenFileIds.add(att.fileId);
+      candidateFiles.push({
+        fileId: att.fileId,
+        originalName: att.file.originalName,
+        fileType: att.file.fileType,
+        mimeType: att.file.mimeType,
+        fileSize: att.file.fileSize,
+        defaultDescription: att.description,
+        uploadedAtLabel: att.uploadedAtLabel
+      });
+    }
+  }
+
+  for (const f of availableFiles) {
+    if (!seenFileIds.has(f.id) && !currentFileIds.has(f.id)) {
+      seenFileIds.add(f.id);
+      candidateFiles.push({
+        fileId: f.id,
+        originalName: f.originalName,
+        fileType: f.fileType,
+        mimeType: f.mimeType,
+        fileSize: f.fileSize,
+        defaultDescription: undefined,
+        uploadedAtLabel: undefined
+      });
+    }
+  }
+
+  const [selectedFileId, setSelectedFileId] = useState<string>(candidateFiles[0]?.fileId ?? "");
+  const [customFileId, setCustomFileId] = useState("");
+  const [description, setDescription] = useState("");
+  const [useCustomFileId, setUseCustomFileId] = useState(candidateFiles.length === 0);
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    const fileId = useCustomFileId ? customFileId.trim() : selectedFileId;
+    if (!fileId) return;
+    onAdd(fileId, description.trim() || undefined);
+  };
+
+  return (
+    <>
+      <div className="therapist-panel-scrim" onClick={onClose} />
+      <div className="pd-modal" role="dialog" aria-label="Attach Medical File" style={{ width: "min(100%, 480px)" }}>
+        <div className="therapist-detail-header">
+          <strong>Attach Medical File to Plan</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form className="pd-modal-form" onSubmit={handleSubmit}>
+          {candidateFiles.length > 0 && !useCustomFileId ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <label style={{ margin: 0 }}>Select patient file</label>
+              <div style={{ display: "grid", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+                {candidateFiles.map((file) => (
+                  <button
+                    key={file.fileId}
+                    type="button"
+                    className={`pd-plan-row ${file.fileId === selectedFileId ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedFileId(file.fileId);
+                      if (file.defaultDescription && !description) {
+                        setDescription(file.defaultDescription);
+                      }
+                    }}
+                    style={{ textAlign: "left", width: "100%" }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {getFileIcon(file.fileType)}
+                      <div>
+                        <strong style={{ fontSize: "0.82rem" }}>{file.originalName}</strong>
+                        <small style={{ color: "var(--text-secondary)" }}>
+                          {file.fileType} {formatFileSize(file.fileSize) ? ` \u00b7 ${formatFileSize(file.fileSize)}` : ""}
+                        </small>
+                      </div>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="link-button"
+                style={{ fontSize: "0.78rem", textAlign: "left", padding: 0 }}
+                onClick={() => setUseCustomFileId(true)}
+              >
+                Or enter a specific File ID
+              </button>
+            </div>
+          ) : (
+            <label>
+              File ID (UUID)
+              <input
+                value={customFileId}
+                onChange={(e) => setCustomFileId(e.target.value)}
+                placeholder="e.g. 9b07fc68-a923-45e7-8b13-02aca49dfabe"
+                required
+              />
+              {candidateFiles.length > 0 && (
+                <button
+                  type="button"
+                  className="link-button"
+                  style={{ fontSize: "0.78rem", textAlign: "left", padding: 0 }}
+                  onClick={() => setUseCustomFileId(false)}
+                >
+                  Choose from available patient files
+                </button>
+              )}
+            </label>
+          )}
+
+          <label>
+            Description / Note (optional)
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. MRI scan report from neurologist"
+              rows={2}
+            />
+          </label>
+
+          <button
+            type="submit"
+            className="primary-button full-width"
+            disabled={useCustomFileId ? !customFileId.trim() : !selectedFileId}
+          >
+            Attach to Plan
+          </button>
+        </form>
+      </div>
+    </>
+  );
+}
+
+function FileViewModal({
+  file,
+  description,
+  onClose
+}: {
+  file: PlanAttachmentFile;
+  description?: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div className="therapist-panel-scrim" onClick={onClose} />
+      <div className="pd-modal" role="dialog" aria-label="Attachment Details" style={{ width: "min(100%, 460px)" }}>
+        <div className="therapist-detail-header">
+          <strong style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {getFileIcon(file.fileType)} Attachment Details
+          </strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gap: 14 }}>
+          <div>
+            <strong style={{ fontSize: "1rem", color: "var(--text-primary)" }}>{file.originalName}</strong>
+            <p style={{ margin: "2px 0 0", color: "var(--text-secondary)", fontSize: "0.8rem" }}>
+              {file.fileType} {file.mimeType ? ` \u00b7 ${file.mimeType}` : ""} {formatFileSize(file.fileSize) ? ` \u00b7 ${formatFileSize(file.fileSize)}` : ""}
+            </p>
+          </div>
+
+          {description && (
+            <div style={{ border: "1px solid var(--border-light)", borderRadius: 10, padding: "10px 12px", background: "var(--bg)" }}>
+              <span style={{ fontSize: "0.72rem", textTransform: "uppercase", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Note / Description
+              </span>
+              <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "var(--text-primary)" }}>
+                {description}
+              </p>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gap: 6, fontSize: "0.78rem", color: "var(--text-secondary)", borderTop: "1px solid var(--border-light)", paddingTop: 10 }}>
+            <div>
+              <strong>File ID:</strong> <code style={{ fontSize: "0.75rem" }}>{file.id}</code>
+            </div>
+            {file.storagePath && (
+              <div>
+                <strong>Storage Path:</strong> <code style={{ fontSize: "0.75rem" }}>{file.storagePath}</code>
+              </div>
+            )}
+          </div>
+
+          <button type="button" className="secondary-button full-width" onClick={onClose}>
+            Close
+          </button>
+        </div>
       </div>
     </>
   );

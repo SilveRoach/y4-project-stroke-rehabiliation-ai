@@ -4,7 +4,9 @@ import * as service from "./rehab.service";
 export async function getPatientPlans(req: Request, res: Response, next: NextFunction) {
   try {
     const patientId = String(req.params.patientId);
-    const plans = await service.getPatientPlans(patientId);
+    const actorId = req.user!.sub;
+    const actorRole = req.user!.role;
+    const plans = await service.getPatientPlans(patientId, actorId, actorRole);
     res.json({ plans });
   } catch (err) {
     next(err);
@@ -105,3 +107,48 @@ export async function patchScheduledExerciseStatus(req: Request, res: Response, 
     next(err);
   }
 }
+
+export async function getPatientAttachments(req: Request, res: Response, next: NextFunction) {
+  try {
+    const patientId = String(req.params.patientId);
+    const data = await service.getPatientAttachments(patientId);
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function addPlanAttachment(req: Request, res: Response, next: NextFunction) {
+  try {
+    const actorId = req.user!.sub;
+    const planId = String(req.params.planId);
+    const payload = req.body;
+    const attachment = await service.addPlanAttachment(actorId, planId, payload);
+    res.status(201).json({ attachment });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function removePlanAttachment(req: Request, res: Response, next: NextFunction) {
+  try {
+    const actorId = req.user!.sub;
+    const planId = String(req.params.planId);
+    const attachmentId = String(req.params.attachmentId);
+    const result = await service.removePlanAttachment(actorId, planId, attachmentId);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getFile(req: Request, res: Response, next: NextFunction) {
+  try {
+    const fileId = String(req.params.fileId);
+    const file = await service.getFile(fileId);
+    res.json({ file });
+  } catch (err) {
+    next(err);
+  }
+}
+

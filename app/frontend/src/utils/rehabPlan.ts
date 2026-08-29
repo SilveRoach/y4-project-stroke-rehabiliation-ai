@@ -9,30 +9,43 @@ import type { PatientRehabPlan, ScheduleDay } from "../types";
 
 export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// "Today" is whichever day is actively in_progress; if none is (nothing started
-// yet today, or the plan hasn't begun), it's the next pending day; if every day
-// is already resolved (completed/skipped), it's the plan's last day. Matches
-// ProgramEditorPage.tsx's "first non-completed, non-skipped day" default.
+// "Today" is matching today's calendar date if present; otherwise whichever day is
+// actively in_progress; if none is, the next pending day; if every day is resolved, the last day.
 export function currentDayIndex(days: ScheduleDay[]): number {
-  const inProgress = days.findIndex((day) => day.status === "in_progress");
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const todayStr = `${year}-${month}-${day}`;
+
+  const todayMatch = days.findIndex((d) => d.dateLabel === todayStr);
+  if (todayMatch !== -1) return todayMatch;
+
+  const inProgress = days.findIndex((d) => d.status === "in_progress");
   if (inProgress !== -1) return inProgress;
-  const pending = days.findIndex((day) => day.status === "pending");
+  const pending = days.findIndex((d) => d.status === "pending");
   if (pending !== -1) return pending;
   return Math.max(days.length - 1, 0);
 }
 
-// Walks ScheduleDay.status backward from today (exclusive), counting consecutive
-// "completed" days until the streak breaks.
+// Walks ScheduleDay.status backward from today (inclusive if today is completed), counting
+// consecutive "completed" days until the streak breaks.
 export function computeStreak(days: ScheduleDay[], todayIndex: number): number {
   let streak = 0;
-  for (let i = todayIndex - 1; i >= 0; i--) {
-    if (days[i].status !== "completed") break;
+  const startIdx = days[todayIndex]?.status === "completed" ? todayIndex : todayIndex - 1;
+  for (let i = startIdx; i >= 0; i--) {
+    if (days[i]?.status !== "completed") break;
     streak++;
   }
   return streak;
 }
 
 export function dayDateLabel(plan: PatientRehabPlan, dayIndex: number): string {
+  const day = plan.days[dayIndex];
+  if (day?.dateLabel && ISO_DATE_RE.test(day.dateLabel)) {
+    const date = new Date(`${day.dateLabel}T00:00:00`);
+    return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  }
   if (!ISO_DATE_RE.test(plan.startDateLabel)) {
     return `Day ${dayIndex + 1}`;
   }

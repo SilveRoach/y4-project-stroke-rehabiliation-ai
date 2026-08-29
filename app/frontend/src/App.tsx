@@ -73,8 +73,8 @@ function homeViewForRole(role: Role): View {
 }
 
 function AppShell() {
-  const { logout } = useAuth();
-  const [view, setView] = useState<View>("login");
+  const { user, logout } = useAuth();
+  const [view, setView] = useState<View>(() => (user ? homeViewForRole(user.role) : "login"));
   const [sessionPaused, setSessionPaused] = useState(false);
   const [lowConfidence, setLowConfidence] = useState(false);
   const [detailPatient, setDetailPatient] = useState<TherapistPatientSummary | null>(null);
@@ -292,8 +292,6 @@ function AppShell() {
       )}
       {view === "progress" && (
         <PatientProgressPage
-          program={patientProgram}
-          plans={rehabPlans}
           onLogout={() => {
             logout();
             setView("login");
@@ -303,7 +301,6 @@ function AppShell() {
       )}
       {view === "history" && (
         <PatientHistoryPage
-          program={patientProgram}
           onLogout={() => {
             logout();
             setView("login");
@@ -313,7 +310,6 @@ function AppShell() {
       )}
       {view === "patient-settings" && (
         <PatientSettingsPage
-          program={patientProgram}
           onLogout={() => {
             logout();
             setView("login");

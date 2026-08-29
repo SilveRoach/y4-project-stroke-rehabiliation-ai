@@ -341,19 +341,24 @@ export interface UserProfileDto {
   email: string | null;
   phoneNumber: string | null;
   createdAtLabel: string;
-  // Therapist-only — omitted entirely for patient/admin callers (no current
-  // page needs patient-role self-profile fields; PatientSettingsPage.tsx is
-  // still fully mock, out of scope for this pass).
+  createdAtIso?: string;
+  // Therapist-only
   licenseNumber?: string | null;
   licenseIssuedDate?: string | null;
   licenseExpiryDate?: string | null;
-  // Patient-only — populated when the target user is a Patient, for Admin's
-  // Patient-edit flow (AdminUserManagementPage.tsx) and returned the same way
-  // GET/PATCH /users/:id already return License fields for a Therapist.
+  // Patient-only
   gender?: "male" | "female" | "other" | "unknown";
   dateOfBirth?: string | null;
   heightCm?: number | null;
   weightKg?: number | null;
+  address?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  assignedTherapist?: {
+    id: string;
+    displayName: string;
+    licenseNumber?: string | null;
+  } | null;
 }
 
 export interface UpdateProfileInput {
@@ -364,16 +369,15 @@ export interface UpdateProfileInput {
   licenseNumber?: string;
   licenseIssuedDate?: string;
   licenseExpiryDate?: string;
-  // Patient-only (Admin-editing-a-Patient flow, AdminUserManagementPage.tsx).
-  // `username` doubles as the patient's login phone number, same convention
-  // as createAccount()'s Patient branch — changing it updates both
-  // users.username and users.phone_number together. Ignored (see
-  // updateUserProfile below) for a Therapist/Admin target.
+  // Patient-only
   username?: string;
   gender?: "male" | "female" | "other" | "unknown";
   dateOfBirth?: string;
   heightCm?: number;
   weightKg?: number;
+  address?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
 }
 
 /** Date -> "yyyy-MM-dd" for an <input type="date">'s value, or null if unset. */
@@ -407,7 +411,20 @@ function validatePhoneNumberField(phoneNumber: string): string {
 }
 
 async function fetchUserWithTherapist(id: string) {
-  return prisma.user.findUnique({ where: { id }, include: { therapist: true, patient: true } });
+  return prisma.user.findUnique({
+    where: { id },
+    include: {
+      therapist: true,
+      patient: {
+        include: {
+          therapistAssignments: {
+            where: { status: "active" },
+            include: { therapist: { include: { user: true } } }
+          }
+        }
+      }
+    }
+  });
 }
 
 function toProfileDto(user: NonNullable<Awaited<ReturnType<typeof fetchUserWithTherapist>>>): UserProfileDto {
@@ -420,7 +437,8 @@ function toProfileDto(user: NonNullable<Awaited<ReturnType<typeof fetchUserWithT
     displayName: displayName(user),
     email: user.email,
     phoneNumber: user.phoneNumber,
-    createdAtLabel: relativeDateLabel(user.createdAt)
+    createdAtLabel: relativeDateLabel(user.createdAt),
+    createdAtIso: user.createdAt.toISOString().slice(0, 10)
   };
 
   if (user.role === "therapist" && user.therapist) {
@@ -434,6 +452,20 @@ function toProfileDto(user: NonNullable<Awaited<ReturnType<typeof fetchUserWithT
     base.dateOfBirth = toDateInputValue(user.patient.dateOfBirth);
     base.heightCm = user.patient.heightCm !== null && user.patient.heightCm !== undefined ? Number(user.patient.heightCm) : null;
     base.weightKg = user.patient.weightKg !== null && user.patient.weightKg !== undefined ? Number(user.patient.weightKg) : null;
+    base.address = user.patient.address;
+    base.emergencyContactName = user.patient.emergencyContactName;
+    base.emergencyContactPhone = user.patient.emergencyContactPhone;
+
+    const activeAssignment = user.patient.therapistAssignments?.[0];
+    if (activeAssignment?.therapist) {
+      base.assignedTherapist = {
+        id: activeAssignment.therapist.userId,
+        displayName: displayName(activeAssignment.therapist.user),
+        licenseNumber: activeAssignment.therapist.licenseNumber
+      };
+    } else {
+      base.assignedTherapist = null;
+    }
   }
 
   return base;
@@ -482,10 +514,6 @@ export async function updateUserProfile(
     userData.phoneNumber = clean.length > 0 ? clean : null;
   }
 
-  // Patient's login identifier IS their phone number (see createAccount()'s
-  // Patient branch) — a `username` edit here only makes sense, and is only
-  // accepted, for a Patient target; Therapist/Admin usernames aren't editable
-  // through this pass (no page offers it yet).
   if (input.username !== undefined && user.role === "patient") {
     const cleanPhone = validatePhoneNumberField(input.username);
     if (!cleanPhone) {
@@ -502,13 +530,6 @@ export async function updateUserProfile(
   const therapistData: { licenseNumber?: string | null; licenseIssuedDate?: Date | null; licenseExpiryDate?: Date | null } =
     {};
 
-  // License fields only ever apply to a Therapist target — a patient/admin
-  // can't have license data (no `therapists` row to write to), so any license
-  // fields in the body are silently ignored rather than rejected outright,
-  // same tolerance the rest of this input already has for fields the caller
-  // chooses not to send. Gated on the *target's* role (`user.role`), not the
-  // caller's — this endpoint now also serves Admin editing a Patient, whose
-  // own role obviously isn't "therapist".
   if (user.role === "therapist") {
     if (input.licenseNumber !== undefined) {
       const trimmed = input.licenseNumber.trim();
@@ -528,17 +549,14 @@ export async function updateUserProfile(
     }
   }
 
-  // Patient-only fields (patients.gender/date_of_birth/height_cm/weight_kg) —
-  // AdminUserManagementPage.tsx's Edit account flow for a Patient row. Same
-  // "only apply for the matching target role" tolerance as License above.
-  // heightCm/weightKg can only be set here, not cleared — matches
-  // createAccount()'s Patient branch, which has the same limitation for the
-  // same optional-number-field reason.
   const patientData: {
     gender?: "male" | "female" | "other" | "unknown";
     dateOfBirth?: Date | null;
     heightCm?: number;
     weightKg?: number;
+    address?: string | null;
+    emergencyContactName?: string | null;
+    emergencyContactPhone?: string | null;
   } = {};
 
   if (user.role === "patient") {
@@ -553,6 +571,18 @@ export async function updateUserProfile(
     }
     if (input.weightKg !== undefined) {
       patientData.weightKg = input.weightKg;
+    }
+    if (input.address !== undefined) {
+      const trimmed = input.address.trim();
+      patientData.address = trimmed.length > 0 ? trimmed : null;
+    }
+    if (input.emergencyContactName !== undefined) {
+      const trimmed = input.emergencyContactName.trim();
+      patientData.emergencyContactName = trimmed.length > 0 ? trimmed : null;
+    }
+    if (input.emergencyContactPhone !== undefined) {
+      const clean = validatePhoneNumberField(input.emergencyContactPhone);
+      patientData.emergencyContactPhone = clean.length > 0 ? clean : null;
     }
   }
 

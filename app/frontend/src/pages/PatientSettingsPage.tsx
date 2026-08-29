@@ -1,68 +1,125 @@
-import { LogOut, Pencil, Phone, Save, User, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, LogOut, Pencil, Phone, Save, User, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
 import type { PatientNavLabel } from "../components/PatientSidebar";
-import { therapistProfile } from "../data/therapistMock";
-import type { PatientProgramDay } from "../types";
-
-// Sidebar/bottom-nav "Settings" page — profile + assigned PT + contact info,
-// mirroring pages/TherapistSettingsPage.tsx's stub reasoning (no profile-edit
-// endpoint exists for `users`/`patients` yet, so every field here is local
-// component state only — saving updates nothing beyond this page's own
-// render). Notifications/Language/Security were dropped from this page (no
-// longer part of the design) in favor of a view/edit toggle: fields render as
-// plain text until "Edit profile" is pressed, matching the two-panel
-// Profile+assigned-PT / Contact layout from the reference wireframe. The
-// assigned PT (therapistProfile, from data/therapistMock.ts — the same "Dr.
-// Pattarapong" who owns this mock patient in therapistMock.ts's patient list)
-// is shown read-only; it isn't part of `form` since the patient can't edit it.
+import {
+  ApiError,
+  getUserProfile,
+  updateUserProfile,
+  type UpdateProfilePayload,
+  type UserProfile
+} from "../services/api";
+import { useAuth } from "../store/authStore";
+import { initialsFromName } from "../utils/displayName";
 
 interface PatientSettingsPageProps {
-  program: PatientProgramDay;
   onLogout: () => void;
   onNavigate: (label: PatientNavLabel) => void;
 }
 
 interface PatientContactForm {
-  displayName: string;
+  firstName: string;
+  lastName: string;
   phoneNumber: string;
   dateOfBirth: string;
+  gender: "male" | "female" | "other" | "unknown";
   email: string;
   address: string;
   emergencyContactName: string;
   emergencyContactPhone: string;
 }
 
-// Account creation date ("admission date") — read-only, system-set, so it lives
-// outside `form` next to the assigned-PT constant rather than as an editable
-// field. Mock value only: no `users`/`patients`.created_at is wired up yet.
-const ADMISSION_DATE_ISO = "2026-01-14";
-
-function formatDateLabel(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", {
+function formatDateLabel(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso.includes("T") ? iso : `${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric"
   });
 }
 
-export function PatientSettingsPage({ program, onLogout, onNavigate }: PatientSettingsPageProps) {
+const genderLabels: Record<string, string> = {
+  male: "Male",
+  female: "Female",
+  other: "Other",
+  unknown: "Not specified"
+};
+
+export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPageProps) {
+  const { token, user: authUser } = useAuth();
+
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
   const [form, setForm] = useState<PatientContactForm>({
-    displayName: `${program.patient.displayName} Rodthong`,
-    phoneNumber: program.patient.phoneNumber,
-    dateOfBirth: "1959-03-14",
-    email: "somchai.r@example.com",
-    address: "88/12 Sukhumvit Soi 24, Khlong Toei, Bangkok 10110",
-    emergencyContactName: "Ananya Rodthong (spouse)",
-    emergencyContactPhone: "0898765432"
+    firstName: "",
+    lastName: "",
+    phoneNumber: "",
+    dateOfBirth: "",
+    gender: "unknown",
+    email: "",
+    address: "",
+    emergencyContactName: "",
+    emergencyContactPhone: ""
   });
+
   const [isEditing, setIsEditing] = useState(false);
-  const [saved, setSaved] = useState(false);
-  // Snapshot taken when edit mode starts, restored on "Discard changes" —
-  // lets fields be edited freely without a cancel undoing more than this pass.
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
   const beforeEditRef = useRef(form);
+
+  useEffect(() => {
+    if (!token || !authUser) {
+      setLoading(false);
+      setFetchError("Please log in again to view your settings.");
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setFetchError(null);
+
+    getUserProfile(token, authUser.id)
+      .then((res) => {
+        if (!cancelled) {
+          const u = res.user;
+          setProfile(u);
+          const initialForm: PatientContactForm = {
+            firstName: u.firstName ?? "",
+            lastName: u.lastName ?? "",
+            phoneNumber: u.phoneNumber ?? u.username ?? "",
+            dateOfBirth: u.dateOfBirth ?? "",
+            gender: u.gender ?? "unknown",
+            email: u.email ?? "",
+            address: u.address ?? "",
+            emergencyContactName: u.emergencyContactName ?? "",
+            emergencyContactPhone: u.emergencyContactPhone ?? ""
+          };
+          setForm(initialForm);
+          beforeEditRef.current = initialForm;
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setFetchError(err instanceof ApiError ? err.message : "Couldn't load your profile. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, authUser, reloadKey]);
 
   const updateField = (key: keyof PatientContactForm) => (event: { target: { value: string } }) => {
     setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -70,24 +127,72 @@ export function PatientSettingsPage({ program, onLogout, onNavigate }: PatientSe
 
   const startEditing = () => {
     beforeEditRef.current = form;
-    setSaved(false);
+    setSavedSuccess(false);
+    setSaveError(null);
     setIsEditing(true);
   };
 
   const discardChanges = () => {
     setForm(beforeEditRef.current);
     setIsEditing(false);
+    setSaveError(null);
   };
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    // Stub: no profile-edit endpoint exists yet — this only updates local state
-    // (and the "Saved" confirmation resets after a moment) so the form is
-    // demoable end to end without pretending a backend call happened.
-    setIsEditing(false);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2500);
+    if (!token || !authUser) return;
+
+    setSaving(true);
+    setSaveError(null);
+    setSavedSuccess(false);
+
+    const payload: UpdateProfilePayload = {
+      firstName: form.firstName.trim() || undefined,
+      lastName: form.lastName.trim() || undefined,
+      phoneNumber: form.phoneNumber.trim() || undefined,
+      dateOfBirth: form.dateOfBirth.trim() || undefined,
+      gender: form.gender,
+      email: form.email.trim() || undefined,
+      address: form.address.trim() || undefined,
+      emergencyContactName: form.emergencyContactName.trim() || undefined,
+      emergencyContactPhone: form.emergencyContactPhone.trim() || undefined
+    };
+
+    try {
+      const res = await updateUserProfile(token, authUser.id, payload);
+      const updated = res.user;
+      setProfile(updated);
+      const updatedForm: PatientContactForm = {
+        firstName: updated.firstName ?? "",
+        lastName: updated.lastName ?? "",
+        phoneNumber: updated.phoneNumber ?? updated.username ?? "",
+        dateOfBirth: updated.dateOfBirth ?? "",
+        gender: updated.gender ?? "unknown",
+        email: updated.email ?? "",
+        address: updated.address ?? "",
+        emergencyContactName: updated.emergencyContactName ?? "",
+        emergencyContactPhone: updated.emergencyContactPhone ?? ""
+      };
+      setForm(updatedForm);
+      beforeEditRef.current = updatedForm;
+      setIsEditing(false);
+      setSavedSuccess(true);
+      window.setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : "Failed to update profile. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const displayName =
+    profile?.displayName ||
+    [form.firstName, form.lastName].filter(Boolean).join(" ") ||
+    authUser?.displayName ||
+    authUser?.username ||
+    "Patient";
+
+  const avatarInitials = initialsFromName(displayName);
 
   return (
     <section className="therapist-shell">
@@ -95,8 +200,8 @@ export function PatientSettingsPage({ program, onLogout, onNavigate }: PatientSe
         activeLabel="Settings"
         onNavigate={onNavigate}
         onLogout={onLogout}
-        displayName={form.displayName}
-        avatarInitials="SR"
+        displayName={displayName}
+        avatarInitials={avatarInitials}
       />
 
       <div className="therapist-workspace">
@@ -108,110 +213,177 @@ export function PatientSettingsPage({ program, onLogout, onNavigate }: PatientSe
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{form.displayName}</strong>
+                <strong>{displayName}</strong>
                 <small>Patient</small>
               </div>
-              <span className="avatar-badge">SR</span>
+              <span className="avatar-badge">{avatarInitials}</span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main settings-main patient-page-main ps-main">
-          <form className="ps-card" onSubmit={handleSubmit}>
-            <div className="ps-avatar-circle">SR</div>
+          {loading ? (
+            <div className="summary-card" role="status">
+              <p className="pd-empty-note">Loading your profile…</p>
+            </div>
+          ) : fetchError ? (
+            <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)" }}>
+              <p style={{ margin: "0 0 12px", color: "var(--danger, #d33)" }}>{fetchError}</p>
+              <button type="button" className="secondary-button" onClick={() => setReloadKey((k) => k + 1)}>
+                Try again
+              </button>
+            </div>
+          ) : (
+            <form className="ps-card" onSubmit={handleSubmit}>
+              <div className="ps-avatar-circle">{avatarInitials}</div>
 
-            <div className="ps-panels">
-              <section className="ps-panel">
-                <div className="settings-section-heading">
-                  <User size={15} /> <strong>Profile</strong>
-                </div>
-                <SettingsField
-                  label="Display name"
-                  value={form.displayName}
-                  editing={isEditing}
-                  onChange={updateField("displayName")}
-                />
-                <SettingsField
-                  label="Phone number"
-                  value={form.phoneNumber}
-                  editing={isEditing}
-                  onChange={updateField("phoneNumber")}
-                />
-                <SettingsField
-                  label="Date of birth"
-                  type="date"
-                  value={form.dateOfBirth}
-                  editing={isEditing}
-                  onChange={updateField("dateOfBirth")}
-                  displayValue={formatDateLabel(form.dateOfBirth)}
-                />
-                <div className="ps-field">
-                  <span className="ps-field-label">Assigned PT</span>
-                  <p className="ps-field-value">
-                    {therapistProfile.displayName} · {therapistProfile.title}
+              {saveError && (
+                <div
+                  className="summary-card"
+                  role="alert"
+                  style={{ borderColor: "var(--danger, #d33)", margin: "0 20px 16px", width: "calc(100% - 40px)" }}
+                >
+                  <p style={{ margin: 0, color: "var(--danger, #d33)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <AlertCircle size={16} /> {saveError}
                   </p>
                 </div>
-                <div className="ps-field">
-                  <span className="ps-field-label">Admission date</span>
-                  <p className="ps-field-value">{formatDateLabel(ADMISSION_DATE_ISO)}</p>
-                </div>
-              </section>
-
-              <section className="ps-panel">
-                <div className="settings-section-heading">
-                  <Phone size={15} /> <strong>Contact Information</strong>
-                </div>
-                <SettingsField
-                  label="Email address"
-                  type="email"
-                  value={form.email}
-                  editing={isEditing}
-                  onChange={updateField("email")}
-                />
-                <SettingsField
-                  label="Home address"
-                  value={form.address}
-                  editing={isEditing}
-                  onChange={updateField("address")}
-                />
-                <SettingsField
-                  label="Emergency contact name"
-                  value={form.emergencyContactName}
-                  editing={isEditing}
-                  onChange={updateField("emergencyContactName")}
-                />
-                <SettingsField
-                  label="Emergency contact phone"
-                  value={form.emergencyContactPhone}
-                  editing={isEditing}
-                  onChange={updateField("emergencyContactPhone")}
-                />
-              </section>
-            </div>
-
-            <div className="ps-edit-actions">
-              {isEditing ? (
-                <>
-                  <button type="button" className="secondary-button" onClick={discardChanges}>
-                    <X size={14} /> Discard changes
-                  </button>
-                  <button type="submit" className="primary-button">
-                    <Save size={14} /> Save changes
-                  </button>
-                </>
-              ) : (
-                <>
-                  {saved && <span className="ps-saved-note">Saved</span>}
-                  <button type="button" className="secondary-button" onClick={onLogout}>
-                    <LogOut size={14} /> Log out
-                  </button>
-                  <button type="button" className="primary-button" onClick={startEditing}>
-                    <Pencil size={14} /> Edit profile
-                  </button>
-                </>
               )}
-            </div>
-          </form>
+
+              {savedSuccess && (
+                <div
+                  className="summary-card"
+                  role="status"
+                  style={{ borderColor: "var(--primary, #2e7559)", margin: "0 20px 16px", width: "calc(100% - 40px)", background: "rgba(46, 117, 89, 0.08)" }}
+                >
+                  <p style={{ margin: 0, color: "var(--primary, #2e7559)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <CheckCircle2 size={16} /> Profile updated successfully.
+                  </p>
+                </div>
+              )}
+
+              <div className="ps-panels">
+                <section className="ps-panel">
+                  <div className="settings-section-heading">
+                    <User size={15} /> <strong>Profile</strong>
+                  </div>
+                  <SettingsField
+                    label="First name"
+                    value={form.firstName}
+                    editing={isEditing}
+                    onChange={updateField("firstName")}
+                  />
+                  <SettingsField
+                    label="Last name"
+                    value={form.lastName}
+                    editing={isEditing}
+                    onChange={updateField("lastName")}
+                  />
+                  <SettingsField
+                    label="Phone number"
+                    value={form.phoneNumber}
+                    editing={isEditing}
+                    onChange={updateField("phoneNumber")}
+                  />
+                  <SettingsField
+                    label="Date of birth"
+                    type="date"
+                    value={form.dateOfBirth}
+                    editing={isEditing}
+                    onChange={updateField("dateOfBirth")}
+                    displayValue={formatDateLabel(form.dateOfBirth)}
+                  />
+                  <div className="ps-field">
+                    <span className="ps-field-label">Gender</span>
+                    {isEditing ? (
+                      <select
+                        className="admin-role-select"
+                        style={{ width: "100%", marginTop: 4 }}
+                        value={form.gender}
+                        onChange={(e) =>
+                          setForm((cur) => ({
+                            ...cur,
+                            gender: e.target.value as PatientContactForm["gender"]
+                          }))
+                        }
+                      >
+                        <option value="unknown">Not specified</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                      </select>
+                    ) : (
+                      <p className="ps-field-value">{genderLabels[form.gender] ?? form.gender}</p>
+                    )}
+                  </div>
+                  <div className="ps-field">
+                    <span className="ps-field-label">Assigned PT</span>
+                    <p className="ps-field-value">
+                      {profile?.assignedTherapist
+                        ? `${profile.assignedTherapist.displayName}${profile.assignedTherapist.licenseNumber ? ` · ${profile.assignedTherapist.licenseNumber}` : ""}`
+                        : "No physical therapist assigned yet"}
+                    </p>
+                  </div>
+                  <div className="ps-field">
+                    <span className="ps-field-label">Admission date</span>
+                    <p className="ps-field-value">{formatDateLabel(profile?.createdAtIso ?? profile?.createdAtLabel)}</p>
+                  </div>
+                </section>
+
+                <section className="ps-panel">
+                  <div className="settings-section-heading">
+                    <Phone size={15} /> <strong>Contact Information</strong>
+                  </div>
+                  <SettingsField
+                    label="Email address"
+                    type="email"
+                    value={form.email}
+                    editing={isEditing}
+                    onChange={updateField("email")}
+                  />
+                  <SettingsField
+                    label="Home address"
+                    value={form.address}
+                    editing={isEditing}
+                    onChange={updateField("address")}
+                  />
+                  <SettingsField
+                    label="Emergency contact name"
+                    value={form.emergencyContactName}
+                    editing={isEditing}
+                    onChange={updateField("emergencyContactName")}
+                  />
+                  <SettingsField
+                    label="Emergency contact phone"
+                    value={form.emergencyContactPhone}
+                    editing={isEditing}
+                    onChange={updateField("emergencyContactPhone")}
+                  />
+                </section>
+              </div>
+
+              <div className="ps-edit-actions">
+                {isEditing ? (
+                  <>
+                    <button type="button" className="secondary-button" onClick={discardChanges} disabled={saving}>
+                      <X size={14} /> Discard changes
+                    </button>
+                    <button type="submit" className="primary-button" disabled={saving}>
+                      <Save size={14} /> {saving ? "Saving…" : "Save changes"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className="secondary-button" onClick={onLogout}>
+                      <LogOut size={14} /> Log out
+                    </button>
+                    <button type="button" className="primary-button" onClick={startEditing}>
+                      <Pencil size={14} /> Edit profile
+                    </button>
+                  </>
+                )}
+              </div>
+            </form>
+          )}
         </main>
       </div>
 
@@ -241,7 +413,7 @@ function SettingsField({
       {editing ? (
         <input type={type} value={value} onChange={onChange} />
       ) : (
-        <p className="ps-field-value">{displayValue ?? value}</p>
+        <p className="ps-field-value">{displayValue || value || "—"}</p>
       )}
     </div>
   );
