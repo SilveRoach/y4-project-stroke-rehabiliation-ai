@@ -41,6 +41,19 @@ export type PatientStanding = "active" | "at_risk";
 export interface TherapistPatientSummary {
   id: string;
   name: string;
+  username: string;
+  email: string | null;
+  phoneNumber: string | null;
+  accountStatus: string;
+  lastLoginLabel: string;
+  gender: string;
+  dateOfBirth: string | null;
+  heightCm: number | null;
+  weightKg: number | null;
+  address: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  profilePictureFileId: string | null;
   nameTh?: string;
   age: number;
   condition: string;
@@ -51,6 +64,8 @@ export interface TherapistPatientSummary {
   standing: PatientStanding;
   avatarInitials: string;
   summary: string;
+  assignedTherapistId?: string | null;
+  assignedTherapistName?: string | null;
 }
 
 export interface WeeklySessionPoint {
@@ -160,6 +175,19 @@ function buildPatientSummary(patient: AssignedPatient): TherapistPatientSummary 
   return {
     id: patient.userId,
     name,
+    username: patient.user.username,
+    email: patient.user.email,
+    phoneNumber: patient.user.phoneNumber,
+    accountStatus: patient.user.status,
+    lastLoginLabel: relativeDateLabel(patient.user.lastLoginAt),
+    gender: patient.gender,
+    dateOfBirth: patient.dateOfBirth?.toISOString().slice(0, 10) ?? null,
+    heightCm: patient.heightCm === null ? null : Number(patient.heightCm),
+    weightKg: patient.weightKg === null ? null : Number(patient.weightKg),
+    address: patient.address,
+    emergencyContactName: patient.emergencyContactName,
+    emergencyContactPhone: patient.emergencyContactPhone,
+    profilePictureFileId: patient.user.profilePictureFileId,
     age,
     condition,
     lastSessionLabel: relativeDateLabel(lastSessionDate),
@@ -170,7 +198,9 @@ function buildPatientSummary(patient: AssignedPatient): TherapistPatientSummary 
     avatarInitials: initialsFromName(name),
     summary: currentPlan
       ? `${progressPercent}% through "${currentPlan.name}" — ${compliancePercent}% compliance on days due so far.`
-      : "No rehabilitation plan has been created for this patient yet."
+      : "No rehabilitation plan has been created for this patient yet.",
+    assignedTherapistId: null,
+    assignedTherapistName: null
   };
 }
 
@@ -185,7 +215,17 @@ export async function getTherapistPatients(therapistId: string): Promise<Therapi
 // Returns a lightweight patient list including assignment status (active assignment -> therapist id & name)
 export interface PatientListItem {
   id: string;
+  name: string;
   displayName: string;
+  age: number;
+  condition: string;
+  lastSessionLabel: string;
+  sessionsCompleted: number;
+  avatarInitials: string;
+  progressPercent: number;
+  compliancePercent: number;
+  standing: PatientStanding;
+  summary: string;
   phoneNumber?: string | null;
   status: "active" | "inactive" | "suspended";
   assignedTherapistId?: string | null;
@@ -197,6 +237,19 @@ export async function listAllPatients(q?: string): Promise<PatientListItem[]> {
   const patients = await prisma.patient.findMany({
     include: {
       user: true,
+      rehabilitationPlans: {
+        orderBy: { createdAt: "desc" as const },
+        include: {
+          scheduleDays: {
+            orderBy: { scheduledDate: "asc" as const },
+            include: {
+              scheduledExercises: {
+                include: { performanceResults: true }
+              }
+            }
+          }
+        }
+      },
       therapistAssignments: {
         where: { status: "active" },
         include: { therapist: { include: { user: true } } }
@@ -207,10 +260,14 @@ export async function listAllPatients(q?: string): Promise<PatientListItem[]> {
   const normalized = patients.map((p) => {
     const assigned = p.therapistAssignments && p.therapistAssignments.length > 0 ? p.therapistAssignments[0] : null;
     const displayNameStr = displayName({ firstName: p.user.firstName, lastName: p.user.lastName, username: p.user.username });
+    const summary = buildPatientSummary(p);
 
     return {
+      ...summary,
       id: p.userId,
+      name: displayNameStr,
       displayName: displayNameStr,
+      username: p.user.username,
       phoneNumber: p.user.phoneNumber ?? null,
       status: p.user.status as "active" | "inactive" | "suspended",
       assignedTherapistId: assigned ? assigned.therapistId : null,
@@ -284,6 +341,34 @@ export async function assignPatient(therapistId: string, patientId: string, assi
   if (!patient) throw new NotFoundError("Patient not found.");
   // Build and return the TherapistPatientSummary the frontend expects
   return buildPatientSummary(patient as AssignedPatient);
+}
+
+// --- New: unassignPatient — ends the patient's ACTIVE assignment ---------------
+// Only the therapist who owns the active assignment (self-unassign) or an admin
+// (authorization handled by the controller's requireSelfTherapistOrAdmin) may
+// end it. Sets status='ended' + ended_at/ended_by so the assignment history in
+// patient_therapist_assignments is preserved (the partial unique index added in
+// the fix_patient_therapist_assignment_unique migration allows unlimited
+// 'ended' rows per patient while still enforcing one active assignment).
+export async function unassignPatient(therapistId: string, patientId: string, endedById: string): Promise<void> {
+  const active = await prisma.patientTherapistAssignment.findFirst({
+    where: { patientId, status: "active" }
+  });
+  if (!active) {
+    throw new NotFoundError("This patient has no active therapist assignment.");
+  }
+  if (active.therapistId !== therapistId) {
+    throw new ConflictError("This patient is assigned to a different therapist.");
+  }
+
+  await prisma.patientTherapistAssignment.update({
+    where: { id: active.id },
+    data: {
+      status: "ended",
+      endedAt: new Date(),
+      endedBy: endedById
+    }
+  });
 }
 
 async function computeDashboardStats(

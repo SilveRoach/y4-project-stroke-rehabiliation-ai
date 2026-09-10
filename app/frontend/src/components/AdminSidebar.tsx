@@ -1,6 +1,7 @@
 import { Settings, Shield, Users } from "lucide-react";
 import type { ComponentType } from "react";
-import { adminProfile } from "../data/adminMock";
+import { useAuth } from "../store/authStore";
+import { initialsFromName } from "../utils/displayName";
 
 // Shared sidebar for every admin-role page (Dashboard, Users, Settings).
 // Previously AdminDashboardPage.tsx and AdminUserManagementPage.tsx each
@@ -18,6 +19,9 @@ interface AdminSidebarProps {
   activeLabel: AdminNavLabel;
   onNavigate: (label: AdminNavLabel) => void;
   onLogout: () => void;
+  // Resolved profile-picture object URL (useProfilePicture) — when present it
+  // replaces the initials badge; initials remain the fallback otherwise.
+  avatarUrl?: string | null;
 }
 
 const navItems: Array<{ icon: ComponentType<{ size?: number }>; label: AdminNavLabel }> = [
@@ -26,7 +30,14 @@ const navItems: Array<{ icon: ComponentType<{ size?: number }>; label: AdminNavL
   { icon: Settings, label: "Settings" }
 ];
 
-export function AdminSidebar({ activeLabel, onNavigate, onLogout }: AdminSidebarProps) {
+export function AdminSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: AdminSidebarProps) {
+  // Real logged-in admin from the auth store, mirroring TherapistSidebar.tsx —
+  // previously this profile block hardcoded data/adminMock.ts's static
+  // "Admin Suda" placeholder regardless of who was actually signed in.
+  const { user } = useAuth();
+  const displayName = user?.displayName || user?.username || "Admin";
+  const initials = initialsFromName(displayName);
+
   return (
     <aside className="therapist-sidebar admin-sidebar">
       <div className="therapist-brand">
@@ -52,10 +63,12 @@ export function AdminSidebar({ activeLabel, onNavigate, onLogout }: AdminSidebar
       </nav>
 
       <div className="therapist-sidebar-profile">
-        <span className="avatar-badge admin-avatar">{adminProfile.initials}</span>
+        <span className={`avatar-badge admin-avatar${avatarUrl ? " with-photo" : ""}`}>
+          {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : initials}
+        </span>
         <div>
-          <strong>{adminProfile.displayName}</strong>
-          <small>{adminProfile.title}</small>
+          <strong>{displayName}</strong>
+          <small>System Administrator</small>
         </div>
       </div>
 

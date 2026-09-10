@@ -4,14 +4,14 @@ import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { ApiError, getTherapistSessions } from "../services/api";
 import { useAuth } from "../store/authStore";
+import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import type { EvaluationSource, TherapistSessionLogEntry } from "../types";
 import { initialsFromName } from "../utils/displayName";
 
 // Sidebar "Sessions" page — a cross-patient session log, filterable by evaluation
-// source (§2.7's ai_score/pt_score split). The per-entry "Review" action is the
-// same stub as Patient Detail's session history: Session Result Review
-// (UI_MOCKUP_PLAN_NEWDB.md §2.7) exists only as a static mockup
-// (session-result-review.html) so far, not a real React page yet.
+// source (§2.7's ai_score/pt_score split). Rows are clickable and open the
+// Session Result Review view for that session (App.tsx's openSessionReview),
+// same action as Patient Detail's session history.
 //
 // Backed by GET /therapists/:id/sessions (modules/session-results/*) — replaces
 // the former data/therapistSessionsMock.ts import (therapistSessionLog) and
@@ -25,6 +25,8 @@ import { initialsFromName } from "../utils/displayName";
 interface TherapistSessionsPageProps {
   onLogout: () => void;
   onNavigate: (label: TherapistNavLabel) => void;
+  // Opens the Session Result Review view for a clicked log entry.
+  onReviewSession: (session: TherapistSessionLogEntry) => void;
 }
 
 type SourceFilter = "all" | EvaluationSource;
@@ -35,7 +37,7 @@ const filterOptions: Array<{ key: SourceFilter; label: string }> = [
   { key: "pt_reviewed", label: "PT-reviewed" }
 ];
 
-export function TherapistSessionsPage({ onLogout, onNavigate }: TherapistSessionsPageProps) {
+export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }: TherapistSessionsPageProps) {
   const { token, user } = useAuth();
 
   const [filter, setFilter] = useState<SourceFilter>("all");
@@ -72,6 +74,7 @@ export function TherapistSessionsPage({ onLogout, onNavigate }: TherapistSession
   const visibleSessions = sessions.filter((session) => filter === "all" || session.evaluationSource === filter);
 
   const displayName = user?.displayName || user?.username || "Therapist";
+  const ownAvatarUrl = useOwnProfilePicture();
 
   return (
     <section className="therapist-shell">
@@ -89,7 +92,9 @@ export function TherapistSessionsPage({ onLogout, onNavigate }: TherapistSession
                 <strong>{displayName}</strong>
                 <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{initialsFromName(displayName)}</span>
+              <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
+                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
+              </span>
             </div>
           </div>
         </header>
@@ -124,7 +129,20 @@ export function TherapistSessionsPage({ onLogout, onNavigate }: TherapistSession
               ) : (
                 <>
                   {visibleSessions.map((session) => (
-                    <div key={session.id} className="pd-session-row">
+                    <div
+                      key={session.id}
+                      className="pd-session-row ts-session-row-clickable"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open session review for ${session.patientName}, ${session.dateLabel}`}
+                      onClick={() => onReviewSession(session)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onReviewSession(session);
+                        }
+                      }}
+                    >
                       <div className="ts-session-patient">
                         <span className="therapist-avatar">{session.patientAvatarInitials}</span>
                         <div>
@@ -145,7 +163,7 @@ export function TherapistSessionsPage({ onLogout, onNavigate }: TherapistSession
                             {session.evaluationSource === "ai" ? "AI-scored" : "PT-reviewed"}
                           </span>
                         )}
-                        <span className="text-action pd-stub-link" title="Session Result Review page not built yet">
+                        <span className="text-action">
                           Review <ChevronRight size={12} />
                         </span>
                       </div>

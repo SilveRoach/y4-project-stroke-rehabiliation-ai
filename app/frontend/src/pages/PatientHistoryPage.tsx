@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
 import type { PatientNavLabel } from "../components/PatientSidebar";
+import { useProfilePicture } from "../hooks/useProfilePicture";
 import { ApiError, getPatientPlans } from "../services/api";
 import { useAuth } from "../store/authStore";
 import { initialsFromName } from "../utils/displayName";
@@ -215,6 +216,13 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Server-computed name from GET /patients/:id/plans — the same source of
+  // truth PatientTodayPage uses via /patients/:id/today. The auth-store user
+  // carries no displayName for patients (patient login returns only
+  // id/role/phone/name fields), which is why this page used to show a bare
+  // "Patient" where the name should be.
+  const [serverPatient, setServerPatient] = useState<{ displayName: string; avatarInitials: string; profilePictureFileId?: string | null } | null>(null);
+
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
   const [viewedMonth, setViewedMonth] = useState<ViewedMonth>(() => {
@@ -222,8 +230,11 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
     return { year: now.getFullYear(), month: now.getMonth() };
   });
 
-  const displayName = user?.displayName ?? user?.username ?? "Patient";
-  const avatarInitials = initialsFromName(displayName);
+  // Same fallback chain as PatientTodayPage: server name first, then whatever
+  // the auth store has, then the generic label.
+  const displayName = serverPatient?.displayName ?? user?.displayName ?? user?.username ?? "Patient";
+  const avatarInitials = serverPatient?.avatarInitials ?? initialsFromName(displayName);
+  const avatarUrl = useProfilePicture(token, serverPatient?.profilePictureFileId ?? null);
 
   useEffect(() => {
     if (!token || !user) {
@@ -239,8 +250,11 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
     getPatientPlans(token, user.id)
       .then((res) => {
         if (!cancelled) {
-          const mapped = mapServerPlansToHistory(res.plans || []);
+          const mapped = mapServerPlansToHistory(res.plans || []).filter(
+            (p) => p.status === "active" || p.status === "completed"
+          );
           setPlans(mapped);
+          setServerPatient(res.patient ?? null);
           if (mapped.length > 0) {
             const activeOrFirst = mapped.find((p) => p.status === "active") ?? mapped[0];
             setSelectedPlanId((cur) => cur ?? activeOrFirst.id);
@@ -262,7 +276,14 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
     };
   }, [token, user, reloadKey]);
 
-  const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? plans[0] ?? null;
+  // Only active or completed plans are selectable in the "Rehab plan" dropdown —
+  // draft/cancelled plans have no meaningful day-by-day history to browse.
+  const selectablePlans = useMemo(
+    () => plans.filter((plan) => plan.status === "active" || plan.status === "completed"),
+    [plans]
+  );
+
+  const selectedPlan = selectablePlans.find((plan) => plan.id === selectedPlanId) ?? selectablePlans[0] ?? null;
 
   const calendarCells = useMemo(
     () => (selectedPlan ? buildMonthCalendarCells(selectedPlan, viewedMonth) : []),
@@ -302,6 +323,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
         onLogout={onLogout}
         displayName={displayName}
         avatarInitials={avatarInitials}
+        avatarUrl={avatarUrl}
       />
 
       <div className="therapist-workspace">
@@ -316,7 +338,9 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                 <strong>{displayName}</strong>
                 <small>Patient</small>
               </div>
-              <span className="avatar-badge">{avatarInitials}</span>
+              <span className={`avatar-badge${avatarUrl ? " with-photo" : ""}`}>
+                {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : avatarInitials}
+              </span>
             </div>
           </div>
         </header>

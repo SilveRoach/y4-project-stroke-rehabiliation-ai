@@ -5,20 +5,23 @@
 // (this screen is patient-only, so there's no PT panel here — just the AI half of
 // that page's two-panel layout).
 //
-// Real, client-side only: no files/exercise_performance_results upload endpoint
-// exists yet (§6.7), so "Confirm & upload" is a simulated delay, kept in
-// App.tsx's local state — same "real UI, mock persistence" pattern as every other
-// still-mock write flow in this app (Add Record, Create Plan, etc.).
+// REAL submission now: "Confirm & upload" POSTs the recording blob + the AI
+// score/feedback to /scheduled-exercises/:id/results (backend session-results
+// module), which stores the video via the files module, creates the
+// exercise_performance_results row, and marks the exercise/day completed —
+// then App.tsx's onConfirm updates the local Today/Progress state to match.
 
-import { Loader2, RotateCcw, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertCircle, Loader2, RotateCcw, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { useState } from "react";
+import { submitExerciseResult } from "../services/api";
+import { useAuth } from "../store/authStore";
 import type { PendingSessionAttempt } from "../types";
 
 interface SessionUploadConfirmPageProps {
   attempt: PendingSessionAttempt;
   // attempt_number is only assigned once Confirm is pressed (§6.1) — this is a
   // preview of what it *would* be, not an already-consumed number (a Retry here
-  // doesn't consume one).
+  // doesn't consume one). The server computes the authoritative number.
   attemptNumber: number;
   onConfirm: () => void;
   onRetry: () => void;
@@ -26,18 +29,30 @@ interface SessionUploadConfirmPageProps {
 }
 
 export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, onRetry, onDiscard }: SessionUploadConfirmPageProps) {
+  const { token } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
+    if (!token) {
+      setUploadError("Please log in again to submit this recording.");
+      return;
+    }
     setUploading(true);
-    // Simulated delay — reuses the same "spinner then success" shape as
-    // components/FilePicker.tsx's upload-progress pattern rather than a new one.
-    window.setTimeout(() => {
-      setUploading(false);
+    setUploadError(null);
+    try {
+      await submitExerciseResult(token, attempt.scheduledExerciseId, attempt.videoBlob, attempt.videoFileName, attempt.videoMimeType, {
+        aiScore: attempt.aiScore,
+        aiFeedback: attempt.aiFeedback
+      });
       setUploaded(true);
       window.setTimeout(onConfirm, 500);
-    }, 1100);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Failed to upload this recording. Please try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -84,9 +99,17 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
           </div>
         </div>
 
+        {uploadError && (
+          <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 12 }}>
+            <p style={{ margin: 0, color: "var(--danger, #d33)", display: "flex", alignItems: "center", gap: 6 }}>
+              <AlertCircle size={16} /> {uploadError}
+            </p>
+          </div>
+        )}
+
         <div className="sud-actions">
           {uploaded ? (
-            <p className="ps-saved-note">Saved &middot; บันทึกแล้ว</p>
+            <p className="ps-saved-note">Uploaded &middot; อัปโหลดแล้ว</p>
           ) : uploading ? (
             <button type="button" className="primary-button full-width" disabled>
               <Loader2 size={16} className="filepicker-spin" /> Uploading&hellip; &middot; กำลังอัปโหลด

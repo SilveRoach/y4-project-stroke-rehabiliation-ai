@@ -12,6 +12,8 @@
   --warning-light: #fffbeb;
   --error: #ef4444;
   --error-light: #fef2f2;
+  --darkgray: #4b5563;
+  --darkgray-light: #f3f4f6;
   --bg: #f8fafc;
   --card: #ffffff;
   --text-primary: #111827;
@@ -448,6 +450,19 @@ input:focus {
   font-weight: 800;
 }
 
+/* Uploaded profile picture inside an avatar badge (patient pages' topbar +
+   sidebar, via useProfilePicture) — cover-crops to the badge's circle. */
+.avatar-badge.with-photo {
+  overflow: hidden;
+}
+
+.avatar-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .desktop-header {
   position: sticky;
   top: 0;
@@ -508,50 +523,146 @@ input:focus {
   padding: 18px;
 }
 
+/* Redesigned Home hero (PATIENT_TODAY mobile design reference) — a light
+   bordered card (like every other .today-main-panel) instead of the old full
+   gradient block, with a small progress ring + "3/5 Done" copy on the left and
+   a compact "Continue" pill on the right. The completion bar itself now lives
+   *outside* the card, directly on the page background, via .pt-hero-block
+   wrapping both. */
+.pt-hero-block {
+  display: grid;
+  gap: 10px;
+}
+
 .hero-progress-card {
-  border: 0;
-  background: linear-gradient(135deg, var(--primary), var(--teal));
-  color: #ffffff;
-}
-
-.hero-progress-card p,
-.hero-progress-card span {
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.hero-progress-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
 }
 
-.hero-progress-row strong {
-  display: block;
-  color: #ffffff;
-  font-size: 2.45rem;
-  line-height: 1;
+.pt-hero-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pt-hero-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pt-hero-copy strong {
+  color: var(--text-primary);
+  font-size: 1.02rem;
+}
+
+.pt-hero-copy span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.pt-continue-btn {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-size: 0.85rem;
 }
 
 .linear-progress {
-  height: 7px;
+  height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
-  margin-top: 18px;
+  background: var(--border-light);
 }
 
 .linear-progress span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #ffffff;
+  background: var(--success);
 }
 
-.patient-start-button {
-  background: rgba(255, 255, 255, 0.96);
-  color: var(--primary);
-  box-shadow: none;
+/* Patient pages' topbar uses the shared .therapist-topbar chrome (page name +
+   info line on the left, name/role/avatar profile on the top-right — same as
+   the Settings page). utils/displayName.ts's timeOfDayGreeting() remains
+   available for PatientTodayPage's own pt-topbar layout. */
+.pt-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 16px 20px;
+  backdrop-filter: blur(10px);
+}
+
+.pt-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pt-identity h1 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.pt-avatar {
+  flex-shrink: 0;
+}
+
+.pt-greeting {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.pt-exercises-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pt-exercises-heading h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.pt-count-badge {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--border-light);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* (The old .pt-plan-selector/.pt-plan-chip pill row was removed once both the
+   Home and Progress pages switched to the shared .pp-plan-switcher dropdown
+   defined further down — no markup uses the chip classes anymore.) */
+
+/* Group header inside the exercise list, shown above each plan's exercises only
+   when "All Plans" is selected and more than one plan actually has exercises
+   today — otherwise the list renders flat, same as before this feature. */
+.pt-exercise-group-label {
+  margin: 4px 0 -2px;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .program-heading {
@@ -625,6 +736,20 @@ input:focus {
   color: var(--primary);
 }
 
+/* Icon color follows the exercise's tracking type (same convention as
+   .pe-exercise-icon.tracking-* in Program Editor) rather than its schedule
+   status, so exercises keep a consistent color as they move through
+   pending/next — only "done" overrides to green. */
+.exercise-icon.tracking-virtual_grip {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.exercise-icon.tracking-none {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
 .exercise-icon.done {
   background: var(--success-light);
   color: var(--success);
@@ -640,24 +765,164 @@ input:focus {
   color: var(--text-secondary);
 }
 
-.exercise-meta {
+/* Redesigned exercise row (PATIENT_TODAY_MOBILE_REDESIGN.md) — wraps the
+   name/tracking-meta/note stack in its own grid cell so the therapist note can
+   collapse behind a tap-to-expand toggle instead of always rendering a third
+   line, and so the "next up" exercise can carry an inline badge without
+   duplicating a whole separate summary card elsewhere on the page. */
+.exercise-card-body {
   display: grid;
-  justify-items: end;
-  gap: 4px;
-  min-width: 82px;
-  text-align: right;
+  gap: 2px;
+  min-width: 0;
 }
 
-.exercise-meta > strong {
+.exercise-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Exercise name truncation: long names end with "…" on a single line instead
+   of wrapping the card taller (Today page + Progress page exercise cards).
+   Requires the min-width:0 chain through the grid column and flex row so the
+   strong can actually shrink below its content width. */
+.exercise-card .exercise-card-body,
+.exercise-card-title-row {
+  min-width: 0;
+}
+
+.exercise-card-title-row strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exercise-card.next {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary) inset;
+}
+
+.next-pill {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #ffffff;
+  padding: 2px 8px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* Small inline icon-only trigger next to the exercise title (design reference:
+   a bare message-bubble glyph right after the name/NEXT badge, not the old
+   "Therapist note" text label) that expands .exercise-note-text below. */
+.exercise-note-icon-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.exercise-note-text {
+  margin-top: 2px !important;
+  color: var(--text-secondary);
+}
+
+/* Today page's exercise panel — tighter text scale than the shared
+   .exercise-card defaults so more rows fit a phone screen. Scoped to
+   .exercise-panel (the Home page's exercise section only) so the Progress
+   page's exercise cards keep their original sizing. */
+.exercise-panel .pt-exercises-heading h2 {
+  font-size: 0.95rem;
+}
+
+.exercise-panel .pt-count-badge {
+  font-size: 0.68rem;
+}
+
+.exercise-panel .exercise-card strong {
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.exercise-panel .exercise-card small {
+  font-size: 0.73rem;
+}
+
+.exercise-panel .exercise-note-text {
+  font-size: 0.7rem;
+}
+
+/* Today page's exercise panel — compact card block to match the tighter text
+   scale: smaller padding/min-height, smaller tracking icon and status dot.
+   Scoped to .exercise-panel so the Progress page's cards keep the shared
+   .exercise-card sizing. */
+.exercise-panel .exercise-card {
+  grid-template-columns: 40px 1fr auto;
+  gap: 10px;
+  min-height: 58px;
+  padding: 9px 12px;
+  border-radius: 13px;
+}
+
+.exercise-panel .exercise-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+}
+
+.exercise-panel .exercise-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.exercise-panel .exercise-status-dot {
+  width: 22px;
+  height: 22px;
+}
+
+.exercise-panel .exercise-status-dot.next .status-dot-inner {
+  width: 10px;
+  height: 10px;
+}
+
+/* Trailing checkbox-style status indicator (design reference) — replaces the
+   old right-aligned difficulty-badge + status-label column; the difficulty is
+   now folded into the subtitle line instead ("10 reps · Easy"). */
+.exercise-status-dot {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+
+.exercise-status-dot.done {
   color: var(--success);
-  font-size: 1.35rem;
-  line-height: 1;
 }
 
-.today-side-panel {
-  align-content: start;
+.exercise-status-dot.next {
+  border: 2px solid var(--primary);
 }
 
+.exercise-status-dot.next .status-dot-inner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.exercise-status-dot.pending {
+  border: 2px solid var(--border);
+}
+
+/* .pt-calendar-card (the week/month calendar) is just an alias applied
+   alongside .summary-card .calendar-card so the desktop grid-column rule below
+   can target it without touching other .calendar-card usages, if any appear
+   elsewhere later. */
 .summary-card,
 .achievement-card {
   display: grid;
@@ -704,6 +969,329 @@ input:focus {
 
 .stats-row {
   grid-template-columns: repeat(2, 1fr);
+}
+
+/* Redesigned Home stats row (design reference) — two icon+value cards (Avg
+   Score, Sessions) instead of the old 3-up stats-strip; the streak now lives
+   solely in the header pill, so it isn't repeated down here. */
+.pt-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.pt-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.pt-stat-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.pt-stat-icon.sessions {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+/* Progress-page stat icon variant (Program Day card) — teal, matching the
+   therapist palette's accent-teal so it reads distinctly from Avg Score. */
+.pt-stat-icon.plan {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+/* Progress page's combined bottom stat card: Avg Score + Completed Days in a
+   single summary-card, side by side (wrapping to stacked on very narrow
+   phones). Reuses the pt-stat-icon/pt-stat-body idiom from Today's stat cards. */
+.pp-summary-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px 24px;
+  flex-wrap: wrap;
+}
+
+.pp-summary-stat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.pp-summary-stats .pt-stat-body strong {
+  font-size: 1.15rem;
+}
+
+/* Progress page's plan dropdown switcher — one full-width card-styled select
+   occupying a single row above the calendar. Follows the page's existing
+   select idiom (.admin-role-select's card bg + 12px radius and 1.5px border)
+   with a touch-friendly 44px height, a --text-secondary chevron, and the
+   card hover/focus treatment used by .summary-card/.pt-plan-chip. */
+.pp-plan-switcher {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 40px 0 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background-color: var(--card);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  box-shadow: var(--shadow-card);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  appearance: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pp-plan-switcher:hover {
+  border-color: var(--primary);
+}
+
+.pp-plan-switcher:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+/* Progress page's calendar footnote: plan period + "Day X of Y" and the
+   "Back to today" reset link shown while a calendar day is selected. */
+.pp-calendar-footnote {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Progress page's All-Plans view: small name + status header above each
+   plan's schedule blocks when "All Plans" merges several active plans. */
+.pp-plan-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 4px 0;
+}
+
+.pp-plan-section-header strong {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+
+/* Progress page's standalone plan-description line (was a full summary-card
+   header block; now a compact text paragraph under the hero/stats so phones
+   don't spend a whole card on it). */
+.pp-plan-description {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+/* Non-interactive exercise-card variant used on the Progress page — the
+   Today page renders these as <button>s, but Progress rows aren't tappable,
+   so reset the hover affordance and cursor. */
+div.exercise-card {
+  cursor: default;
+}
+
+div.exercise-card:hover {
+  transform: none;
+  box-shadow: var(--shadow-sm, none);
+}
+
+.pt-stat-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pt-stat-label {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pt-stat-body strong {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+}
+
+.pt-stat-body strong small {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.pt-stat-trend {
+  color: var(--success);
+}
+
+/* Compact week strip — Home's default calendar view, replacing the full month
+   grid as the first thing shown (the month grid is still one tap away via
+   "View month"). */
+.week-strip-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.week-strip-heading .eyebrow {
+  margin: 0;
+}
+
+.week-strip-heading .text-action {
+  font-size: 0.78rem;
+}
+
+.week-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  /* Half-cell-ish side padding so the first and last cells (today − 10 / +10)
+     can still be scrolled all the way to the strip's horizontal center, not
+     just as far as the container's natural scroll bounds would otherwise
+     allow. */
+  padding-inline: calc(50% - 23px);
+  padding-bottom: 2px;
+  /* Fade at the trailing edge hints there's more to scroll without needing
+     visible scrollbar chrome on every platform. */
+  -webkit-overflow-scrolling: touch;
+}
+
+.week-strip-cell {
+  display: grid;
+  flex: 0 0 auto;
+  width: 46px;
+  justify-items: center;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 0;
+  background: var(--card);
+  color: var(--text-secondary);
+  scroll-snap-align: center;
+}
+
+.week-strip-cell small {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.week-strip-cell strong {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+/* Whichever cell is currently scrolled to the strip's horizontal center (or
+   was just tapped) — filled solid primary blue. */
+.week-strip-cell.is-centered {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.week-strip-cell.is-centered small,
+.week-strip-cell.is-centered strong {
+  color: #ffffff;
+}
+
+/* Exercise-status color for the whole date cell — completed (green), missing
+   (red, scheduled but not fully done), or no exercise that day at all (gray).
+   The dots are gone; the card itself is the indicator. Text flips to white for
+   contrast on the filled cells. */
+.week-strip-cell.status-completed {
+  border-color: var(--success);
+  background: var(--success);
+  color: #ffffff;
+}
+
+.week-strip-cell.status-missing {
+  border-color: var(--error);
+  background: var(--error);
+  color: #ffffff;
+}
+
+.week-strip-cell.status-none {
+  border-color: #cbd5e1;
+  background: #cbd5e1;
+  color: var(--text-primary);
+}
+
+.week-strip-cell.status-completed small,
+.week-strip-cell.status-missing small,
+.week-strip-cell.status-completed strong,
+.week-strip-cell.status-missing strong {
+  color: #ffffff;
+}
+
+/* Light-gray "no exercise" cells keep dark text for contrast against the pale
+   fill (white would be unreadable). */
+.week-strip-cell.status-none small,
+.week-strip-cell.status-none strong {
+  color: var(--text-primary);
+}
+
+/* Today always wins the blue highlight — even when another day is centered or
+   the day would otherwise show its status fill (green/red/gray). Declared last
+   so it overrides everything above. */
+.week-strip-cell.is-today {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.week-strip-cell.is-today small,
+.week-strip-cell.is-today strong {
+  color: #ffffff;
+}
+
+/* Exception to the rule above: when TODAY is completed, the green "done" fill
+   wins over the blue today highlight (the completion is the more meaningful
+   state, and the cell is still the centered/current one anyway). */
+.week-strip-cell.status-completed.is-today {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.week-strip-legend {
+  margin-top: 2px;
+}
+
+
+.pt-view-history-link {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  padding: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .stats-row span,
@@ -928,18 +1516,24 @@ input:focus {
   position: absolute;
   inset: 0;
   z-index: 3;
-  display: grid;
-  justify-items: center;
-  align-content: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 18px;
   padding: 32px;
   text-align: center;
+  overflow: hidden;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.05) 45%);
 }
 
 .framing-guide {
-  width: min(70%, 220px);
+  width: min(94%, 680px);
   height: auto;
+  /* 2x visual scale on top of the sized width — the outline is allowed to
+     overflow the stage's edges (cropped by .session-preroll's overflow:hidden)
+     so the silhouette reads as a big, immersive body frame. */
+  transform: scale(2);
   fill: none;
   stroke: rgba(255, 255, 255, 0.65);
   stroke-width: 3;
@@ -947,16 +1541,29 @@ input:focus {
 }
 
 .session-preroll p {
+  position: absolute;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
   margin: 0;
-  max-width: 260px;
+  max-width: 90%;
   color: #ffffff;
   font-size: 0.92rem;
   font-weight: 600;
   line-height: 1.4;
 }
 
+/* Start sits pinned to the BOTTOM of the camera screen (thumb-friendly on
+   phones, matching where the STOP/pause/restart controls appear once the
+   session is running) instead of floating in the middle next to the framing
+   guide and prompt. */
 .session-preroll .primary-button {
-  min-width: 160px;
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  min-width: 180px;
 }
 
 /* §2.2 — caption for the decorative PoseOverlay/HandOverlay, so they read as an
@@ -1335,12 +1942,14 @@ input:focus {
     padding: 28px;
   }
 
-  .hero-progress-card {
+  .pt-hero-block {
     grid-column: 1;
+    grid-row: 1;
   }
 
   .exercise-panel {
     grid-column: 1;
+    grid-row: 2;
   }
 
   .exercise-panel .exercise-instruction-video,
@@ -1353,13 +1962,22 @@ input:focus {
     grid-column: 1;
   }
 
-  .today-side-panel {
+  /* Home's side column: the calendar and the stat cards sit in the same
+     column, one above the other, next to the hero/exercise column — replacing
+     the old single .today-side-panel aside that wrapped both. Split apart
+     because the design reference wants the calendar between the hero and the
+     exercise list, and the stats only at the very bottom — a single two-item
+     aside can't express that stacking order on mobile, where all four blocks
+     fall into one column in source order. */
+  .pt-calendar-card {
     grid-column: 2;
-    grid-row: 1 / span 2;
-    background: transparent;
-    border: 0;
-    box-shadow: none;
-    padding: 0;
+    grid-row: 1;
+  }
+
+  .pt-stats-grid {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
   }
 
   .patient-bottom-nav {
@@ -1402,20 +2020,36 @@ input:focus {
   }
 }
 
-@media (max-width: 560px) {
+/* Home mobile density pass — tighter padding/gaps and a smaller hero card below
+   the 900px breakpoint where .today-grid is still a single stacked column, so
+   the page reads closer to the density of the homepage list instead of a stack
+   of full-size cards. Desktop (900px+) is untouched by this block. */
+@media (max-width: 899px) {
+  .today-grid {
+    gap: 12px;
+    padding: 16px 16px 100px;
+  }
+
+  .today-main-panel,
+  .summary-card,
+  .achievement-card {
+    padding: 14px;
+  }
+
   .exercise-card {
-    grid-template-columns: 54px 1fr;
+    min-height: 64px;
+    padding: 12px;
+    gap: 12px;
   }
 
-  .exercise-meta {
-    grid-column: 2;
-    grid-template-columns: auto 1fr;
-    justify-items: start;
-    align-items: center;
-    min-width: 0;
-    text-align: left;
+  .exercise-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
   }
+}
 
+@media (max-width: 560px) {
   .camera-stage {
     min-height: 100vh;
     width: 100%;
@@ -1598,6 +2232,197 @@ input:focus {
   align-content: start;
   gap: 20px;
   padding: 20px;
+}
+
+.therapist-patient-table-row {
+  cursor: pointer;
+}
+
+.therapist-patient-table-row:hover,
+.therapist-patient-table-row:focus-visible {
+  background: var(--primary-light);
+  outline: none;
+}
+
+.pd-patient-info-layout {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.pd-patient-info-card {
+  min-width: 0;
+}
+
+.pd-read-only-notice {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: .82rem;
+}
+
+.pd-patient-info-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.pd-patient-info-group + .pd-patient-info-group {
+  border-left: 1px solid var(--border);
+  padding-left: 24px;
+}
+
+.pd-patient-info-group h3 {
+  margin: 0 0 14px;
+  font-size: .88rem;
+}
+
+.pd-patient-info-layout .pd-patient-profile-avatar {
+  width: 150px;
+  height: 150px;
+  min-height: 150px;
+  align-self: start;
+  border-radius: 50%;
+}
+
+.pd-patient-info-card {
+  display: grid;
+  align-items: start;
+}
+
+.pd-patient-profile-avatar {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  color: white;
+  background: var(--primary);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+/* Uploaded profile picture inside the patient-profile avatar
+   (PatientDetailPage, via useProfilePicture) — cover-crops into the round
+   badge, same idiom as .avatar-badge.with-photo. */
+.pd-patient-profile-avatar.with-photo {
+  overflow: hidden;
+}
+
+.pd-patient-profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pd-patient-info-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 20px;
+}
+
+.pd-patient-info-grid > div {
+  min-width: 0;
+}
+
+.pd-patient-info-grid span,
+.pd-patient-info-grid strong {
+  display: block;
+}
+
+.pd-patient-info-grid span {
+  color: var(--text-secondary);
+  font-size: .72rem;
+}
+
+.pd-patient-info-grid strong {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: .84rem;
+}
+
+.pd-patient-info-wide {
+  grid-column: span 2;
+}
+
+.pd-mock-attachment,
+.pd-mock-attachment > div {
+  display: flex;
+  align-items: center;
+}
+
+.pd-mock-attachment {
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px dashed var(--primary);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--primary-light);
+}
+
+.pd-mock-attachment > div {
+  min-width: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pd-mock-attachment strong {
+  font-size: .8rem;
+}
+
+.pd-mock-attachment small {
+  color: var(--text-secondary);
+  font-size: .72rem;
+}
+
+.pd-mock-attachment-button {
+  justify-content: center;
+  width: 100%;
+}
+
+.date-input-with-calendar {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 6px;
+  align-items: center;
+}
+
+.date-input-with-calendar input[type="date"] {
+  min-width: 0;
+  padding: 8px;
+}
+
+.date-calendar-icon {
+  position: absolute;
+  right: 13px;
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.date-input-with-calendar .native-calendar-trigger {
+  grid-column: 2;
+  z-index: 1;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.date-input-with-calendar:hover .date-calendar-icon {
+  color: var(--primary);
+}
+
+.date-input-with-calendar:focus-within .date-calendar-icon {
+  color: var(--primary);
 }
 
 .therapist-stat-grid {
@@ -1810,6 +2635,11 @@ input:focus {
   font-size: 0.85rem;
 }
 
+.therapist-table-muted {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 .therapist-add-patient {
   min-height: 38px;
   padding: 8px 16px;
@@ -1818,6 +2648,20 @@ input:focus {
 
 .therapist-table-scroll {
   overflow-x: auto;
+}
+
+.admin-account-list-scroll {
+  max-height: 590px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+.admin-account-list-scroll .therapist-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
 }
 
 .therapist-table {
@@ -1886,6 +2730,19 @@ input:focus {
   background: linear-gradient(135deg, var(--primary), var(--teal));
   color: #ffffff;
   font-size: 1.1rem;
+}
+
+/* Uploaded profile picture inside the account-table avatar
+   (AdminUserManagementPage, via useProfilePicture) — same cover-crop idiom as
+   .avatar-badge.with-photo above: the image fills the initials circle. */
+.therapist-avatar.with-photo {
+  overflow: hidden;
+}
+
+.therapist-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .therapist-compliance-bar {
@@ -2466,6 +3323,63 @@ input:focus {
   margin-bottom: 4px;
 }
 
+.library-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 280px;
+  min-width: min(100%, 240px);
+}
+
+.library-search svg {
+  position: absolute;
+  left: 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.library-search input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text-primary);
+  padding: 8px 12px 8px 36px;
+  font-size: 0.84rem;
+}
+
+.library-search input:focus {
+  border-color: var(--primary);
+  outline: 3px solid rgba(37, 99, 235, 0.12);
+}
+
+.library-status-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.library-status-filter select {
+  min-height: 40px;
+  min-width: 128px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text-primary);
+  padding: 8px 30px 8px 12px;
+  font-size: 0.84rem;
+}
+
+.library-status-filter select:focus {
+  border-color: var(--primary);
+  outline: 3px solid rgba(37, 99, 235, 0.12);
+}
+
 .library-filter-chips {
   display: flex;
   flex-wrap: wrap;
@@ -2502,6 +3416,16 @@ input:focus {
   background: var(--card);
   padding: 16px;
   box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.library-card:hover,
+.library-card:focus-visible {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-hover);
+  outline: none;
+  transform: translateY(-2px);
 }
 
 .library-card.is-archived {
@@ -2511,6 +3435,78 @@ input:focus {
 .library-card-top {
   display: flex;
   gap: 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: opacity 0.15s;
+}
+
+.library-card-top:hover .library-card-title {
+  color: var(--primary, #2e7559);
+}
+
+.library-card-media {
+  position: relative;
+  overflow: hidden;
+  min-height: 150px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--primary-light), #e0f2fe);
+}
+
+.library-card-thumbnail {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  height: 150px;
+  color: var(--primary);
+}
+
+.library-card-thumbnail span {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.library-card-video-thumbnail {
+  display: block;
+  width: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.library-card-type {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--primary);
+  padding: 5px 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.library-card-type.tracking-virtual_grip {
+  color: var(--teal);
+}
+
+.library-card-type.tracking-none {
+  color: var(--text-secondary);
+}
+
+.library-card-details {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.library-card-details > span:not(.library-status-badge):not(.library-card-history-link) {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.library-card-details .library-card-history-link {
+  justify-self: end;
+  margin-top: 2px;
 }
 
 .library-card-icon {
@@ -2754,6 +3750,1005 @@ input:focus {
 @media (min-width: 1180px) {
   .library-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* --- Exercise Creation Page (ExerciseCreationPage.tsx — reached after the
+   first "New exercise" popup in the Exercise Library). Reuses .library-*
+   classes for segmented controls, criteria grids, and form rows. The classes
+   below cover the checkpoint picker, target-ROM slider, and trunk sensitivity
+   selector that are unique to this page. */
+
+/* Wraps one logical criteria sub-section (checkpoints / ROM / trunk) */
+.creation-section-card {
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  background: var(--surface-card, rgba(255,255,255,0.04));
+}
+
+/* Header row inside a creation-section-card: emoji + title/desc block */
+.creation-section-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.creation-section-header > span:first-child {
+  font-size: 1.25rem;
+  line-height: 1;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.creation-section-header strong {
+  display: block;
+  font-size: 0.97rem;
+  margin-bottom: 3px;
+}
+
+/* Dark video-preview box for the checkpoint scrubber */
+.checkpoint-video-area {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #0a0a0a;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.checkpoint-video-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.checkpoint-video-no-video {
+  color: rgba(255,255,255,0.35);
+  font-size: 1.05rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.checkpoint-video-no-video small {
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+/* Checkpoint type badge overlaid on the bottom-left of the video preview */
+.checkpoint-video-badge {
+  position: absolute;
+  bottom: 12px;
+  left: 14px;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  pointer-events: none;
+}
+
+/* Small dim frame-counter below the scrubber */
+.checkpoint-frame-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #64748b);
+  letter-spacing: 0.01em;
+}
+
+/* Target-ROM slider card with labeled extremes */
+.rom-slider-card .creation-section-header {
+  margin-bottom: 0;
+}
+
+.rom-slider-extreme {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #64748b);
+}
+
+/* The numeric angle value badge centered between the extremes */
+.rom-slider-value {
+  background: var(--surface-elevated, rgba(255,255,255,0.1));
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 8px;
+  padding: 3px 14px;
+  font-size: 1rem;
+  font-weight: 700;
+  min-width: 56px;
+  text-align: center;
+}
+
+/* Two-column layout for ExerciseCreationPage (Left: Video + Form, Right: Checkpoints + Trunk) */
+.creation-two-column-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (min-width: 960px) {
+  .creation-two-column-layout {
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  }
+}
+
+.creation-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.creation-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.creation-video-card {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--surface-card, rgba(255, 255, 255, 0.04));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.creation-select {
+  height: 42px;
+  width: 100%;
+  border: 1.5px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 12px;
+  padding: 8px 14px;
+  background: var(--card, #1e293b);
+  color: var(--text-primary, #f8fafc);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.creation-select:focus {
+  border-color: var(--primary, #2e7559);
+}
+
+.creation-authoring-section {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+/* Let the checkpoint editor participate in the page flow so it can sit after
+   the authoring and review sections rather than beside the demo video. */
+.exercise-creation-form .creation-right-col {
+  display: contents;
+}
+
+.exercise-creation-form .creation-left-col {
+  display: contents;
+}
+
+.exercise-creation-form .creation-video-card {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.exercise-creation-form .creation-left-col > label,
+.exercise-creation-form .creation-left-col > .creation-meta-row,
+.exercise-creation-form .creation-left-col > div:not(.creation-info-extra):not(.creation-info-combined):not(.exercise-difficulty-card):not(.exercise-save-actions) {
+  grid-column: 1;
+}
+
+.exercise-creation-form .creation-info-combined {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  margin-top: 0;
+  min-width: 0;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.exercise-creation-form .creation-right-col > .creation-section-card {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.exercise-creation-form .creation-left-col > .exercise-difficulty-card {
+  grid-column: 2 !important;
+  grid-row: 2;
+  min-width: 0;
+}
+
+.exercise-creation-form .creation-left-col > .exercise-save-actions {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.creation-info-combined .creation-info-extra {
+  margin-top: 0;
+}
+
+.creation-info-combined .creation-meta-row {
+  margin-top: 0;
+}
+
+.creation-info-combined > label,
+.creation-info-combined > .creation-meta-row {
+  width: 100%;
+  min-width: 0;
+}
+
+.creation-info-combined input,
+.creation-info-combined textarea,
+.creation-info-combined select {
+  max-width: 100%;
+}
+
+.exercise-creation-form .checkpoint-editor-card {
+  order: 10;
+  grid-column: 1 / -1;
+}
+
+.exercise-creation-form .creation-moved-to-ai {
+  display: none;
+}
+
+.exercise-creation-form .difficulty-authoring-section {
+  order: 5;
+  grid-column: 1 / -1;
+}
+
+.exercise-creation-form .dataset-authoring-section {
+  order: 4;
+  grid-column: 1 / -1;
+}
+
+.exercise-creation-form .difficulty-authoring-section,
+.exercise-creation-form .dataset-authoring-section,
+.exercise-creation-form .movement-authoring-section,
+.exercise-creation-form .testing-authoring-section {
+  display: none;
+}
+
+.ai-workspace-main {
+  max-width: 1180px !important;
+}
+
+.ai-checkpoint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-checkpoint-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.ai-checkpoint-card > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.ai-checkpoint-card strong,
+.ai-checkpoint-card small {
+  display: block;
+}
+
+.ai-checkpoint-card strong {
+  font-size: .8rem;
+}
+
+.ai-checkpoint-card small {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: .72rem;
+}
+
+.ai-checkpoint-card > svg {
+  color: var(--primary);
+}
+
+.ai-checkpoint-number {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  color: white;
+  background: var(--primary);
+  font-size: .75rem;
+  font-weight: 700;
+}
+
+.ai-rom-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.ai-rom-control p {
+  margin: 4px 0 0;
+}
+
+.rom-control-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: .75rem;
+}
+
+.ai-workspace-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ai-workspace-heading h1 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.ai-workspace-heading p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
+.mock-badge {
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--primary);
+  background: var(--primary-light);
+  font-size: .75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ai-workspace-footer {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  margin-top: 4px;
+  padding-bottom: 20px;
+}
+
+.creation-section-header svg {
+  color: var(--primary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.creation-section-header p {
+  margin: 0;
+}
+
+.creation-info-extra {
+  margin-top: 2px;
+}
+
+.creation-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.creation-field-grid label,
+.rule-row label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: .78rem;
+  font-weight: 600;
+}
+
+.creation-field-grid textarea {
+  resize: vertical;
+}
+
+.dataset-grid,
+.difficulty-grid,
+.testing-grid,
+.review-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.dataset-grid,
+.difficulty-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dataset-panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--bg);
+}
+
+.dataset-panel-heading,
+.testing-actions,
+.review-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dataset-panel-heading span,
+.difficulty-card > div span {
+  color: var(--text-secondary);
+  font-size: .78rem;
+}
+
+.dataset-video-card {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.dataset-video-card strong,
+.dataset-video-card small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataset-video-card strong {
+  font-size: .8rem;
+}
+
+.dataset-video-card small {
+  color: var(--text-secondary);
+  font-size: .72rem;
+  margin-top: 3px;
+}
+
+.dataset-reason {
+  margin-top: 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: var(--card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: .7rem;
+}
+
+.dataset-thumbnail {
+  height: 38px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: linear-gradient(135deg, #346b60, #8eb9a9);
+}
+
+.dataset-panel:nth-child(2) .dataset-thumbnail {
+  background: linear-gradient(135deg, #9d665b, #e5ad8c);
+}
+
+.dataset-add-button {
+  margin-top: 12px;
+  width: 100%;
+  justify-content: center;
+}
+
+.rule-list,
+.trunk-rules {
+  display: grid;
+  gap: 10px;
+}
+
+.trunk-rules {
+  margin-top: 18px;
+}
+
+.rule-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 100px 100px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.rule-row > strong,
+.rule-row > span {
+  font-size: .85rem;
+}
+
+.rule-row input {
+  width: 100%;
+}
+
+.testing-grid {
+  grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr);
+}
+
+.testing-preview {
+  min-height: 230px;
+  border-radius: 12px;
+  background: radial-gradient(circle at 50% 38%, #244f49, #0f2428 70%);
+  color: #b9f3db;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.testing-skeleton {
+  text-align: center;
+  font-size: 2.4rem;
+  line-height: 1.15;
+  filter: drop-shadow(0 0 12px rgba(185, 243, 219, .5));
+}
+
+.testing-checkpoint {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  color: white;
+  background: rgba(0, 0, 0, .45);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: .74rem;
+}
+
+.testing-metrics {
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.testing-metrics span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: .82rem;
+}
+
+.testing-metrics strong {
+  color: var(--text-primary);
+}
+
+.score-good {
+  color: var(--primary) !important;
+}
+
+.testing-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  color: #a7652c;
+  font-size: .76rem;
+}
+
+.testing-actions {
+  justify-content: flex-start;
+  margin-top: 14px;
+}
+
+.debug-toggle,
+.debug-options {
+  color: var(--text-secondary);
+  font-size: .8rem;
+}
+
+.debug-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.difficulty-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--bg);
+}
+
+.difficulty-card > div {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.difficulty-card p {
+  display: flex;
+  justify-content: space-between;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: .8rem;
+}
+
+.difficulty-card b {
+  color: var(--text-primary);
+}
+
+.difficulty-hard {
+  border-color: #d68b78;
+  background: #fff8f5;
+}
+
+.scoring-preview {
+  margin-top: 18px;
+}
+
+.score-table {
+  display: grid;
+  grid-template-columns: 1.5fr repeat(3, 1fr);
+  gap: 1px;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.score-table > * {
+  padding: 9px;
+  background: var(--bg);
+  font-size: .78rem;
+}
+
+.score-table > :not(:nth-child(4n + 1)) {
+  text-align: center;
+}
+
+.review-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.review-grid span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: .8rem;
+}
+
+.review-grid b {
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.review-actions {
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+@media (max-width: 700px) {
+  .creation-field-grid,
+  .dataset-grid,
+  .difficulty-grid,
+  .testing-grid,
+  .review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-row {
+    grid-template-columns: 1fr 80px 80px;
+  }
+
+  .exercise-creation-form .difficulty-authoring-section {
+    grid-column: 1;
+  }
+
+  .exercise-creation-form .creation-info-combined {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .exercise-creation-form .creation-right-col > .creation-section-card {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .exercise-creation-form .creation-left-col > .exercise-difficulty-card {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .exercise-creation-form .creation-left-col > .exercise-save-actions {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .ai-checkpoint-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-grid span {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pd-patient-info-card {
+    grid-template-columns: 1fr;
+  }
+
+  .pd-patient-info-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .pd-patient-info-layout .pd-patient-profile-avatar {
+    width: 100%;
+    height: 120px;
+    min-height: 120px;
+    border-radius: 50%;
+  }
+
+  .pd-patient-info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pd-patient-info-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .pd-patient-info-group + .pd-patient-info-group {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+    padding-left: 0;
+  }
+
+  .pd-patient-info-wide {
+    grid-column: span 2;
+  }
+}
+
+/* Focused editor treatment. The creation flow uses the same light palette as
+   the therapist workspace while giving video review and criteria a clearer
+   hierarchy. */
+.exercise-creation-page {
+  --creation-bg: var(--bg);
+  --creation-surface: var(--card);
+  --creation-border: var(--border);
+  --creation-muted: var(--text-secondary);
+  --creation-accent: var(--primary);
+  background: var(--bg);
+}
+
+.exercise-creation-page .therapist-workspace {
+  background: var(--bg);
+}
+
+.exercise-creation-page .therapist-topbar {
+  border-bottom-color: var(--creation-border);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
+}
+
+.exercise-creation-page .therapist-sidebar {
+  border-right-color: var(--creation-border);
+  background: var(--card);
+  color: var(--text-primary);
+}
+
+.exercise-creation-page .therapist-brand small,
+.exercise-creation-page .therapist-sidebar-profile small {
+  color: var(--creation-muted);
+}
+
+.exercise-creation-page .therapist-nav-link {
+  color: var(--text-secondary);
+}
+
+.exercise-creation-page .therapist-nav-link.active {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.exercise-creation-page .therapist-sidebar-profile {
+  background: var(--bg);
+}
+
+.creation-topbar-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--creation-accent);
+}
+
+.creation-topbar-title div {
+  display: grid;
+  gap: 2px;
+}
+
+.creation-topbar-title strong {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.creation-topbar-title span {
+  color: var(--creation-muted);
+  font-size: 0.72rem;
+}
+
+.exercise-creation-main {
+  color: var(--text-primary);
+  max-width: none !important;
+  margin: 0 !important;
+  width: 100% !important;
+}
+
+.exercise-creation-main .pd-back-link {
+  color: var(--primary);
+}
+
+.exercise-creation-form {
+  gap: 20px;
+}
+
+.exercise-creation-form .creation-video-card,
+.exercise-creation-form .creation-section-card {
+  border-color: var(--creation-border);
+  border-radius: 16px;
+  background: var(--creation-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.exercise-creation-form .creation-video-card {
+  padding: 18px;
+}
+
+.creation-status-field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.creation-meta-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: -4px;
+}
+
+.creation-meta-row .creation-select {
+  max-width: none;
+}
+
+.creation-status-field .creation-select.status-active {
+  border-color: var(--success);
+  background: var(--success-light) !important;
+  color: #15803d !important;
+}
+
+.creation-status-field .creation-select.status-draft {
+  border-color: #f59e0b;
+  background: var(--warning-light) !important;
+  color: #b45309 !important;
+}
+
+.creation-status-field .creation-select.status-archived {
+  background: var(--border-light) !important;
+  color: var(--text-secondary) !important;
+}
+
+.exercise-creation-form .creation-section-card {
+  padding: 20px;
+}
+
+.exercise-creation-form .creation-section-header strong,
+.exercise-creation-form label {
+  color: var(--text-primary);
+}
+
+.exercise-creation-form .library-card-sub,
+.exercise-creation-form .rom-slider-extreme,
+.exercise-creation-form .checkpoint-frame-label {
+  color: var(--creation-muted);
+}
+
+.exercise-creation-form input:not([type="range"]):not([type="radio"]):not([type="checkbox"]),
+.exercise-creation-form select,
+.exercise-creation-form textarea {
+  border-color: var(--creation-border) !important;
+  background: var(--card) !important;
+  color: var(--text-primary) !important;
+}
+
+.exercise-creation-form input:not([type="range"]):not([type="radio"]):not([type="checkbox"]):focus,
+.exercise-creation-form select:focus,
+.exercise-creation-form textarea:focus {
+  border-color: var(--creation-accent) !important;
+  outline: 3px solid rgba(96, 165, 250, 0.14);
+}
+
+.exercise-creation-form input::placeholder,
+.exercise-creation-form textarea::placeholder {
+  color: var(--text-secondary);
+}
+
+.exercise-creation-form .creation-select {
+  color-scheme: dark;
+}
+
+.exercise-creation-form .checkpoint-video-area {
+  min-height: 240px;
+  border: 1px solid var(--border);
+  background: #17202b;
+}
+
+.exercise-creation-form .rom-slider-value {
+  border-color: var(--border);
+  background: var(--bg);
+  color: var(--text-primary);
+}
+
+.exercise-creation-form .library-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.exercise-creation-form .library-segmented button {
+  min-height: 42px;
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--text-secondary);
+}
+
+.exercise-creation-form .library-segmented button.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.exercise-creation-form .primary-button {
+  border-radius: 10px;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  box-shadow: 0 8px 16px rgba(59, 130, 246, 0.2);
+}
+
+@media (max-width: 620px) {
+  .creation-topbar-title span {
+    display: none;
+  }
+
+  .exercise-creation-form .library-segmented {
+    grid-template-columns: 1fr;
+  }
+
+  .creation-meta-row {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -3014,8 +5009,8 @@ input:focus {
 }
 
 .pd-calendar-cell.pending {
-  background: var(--border-light);
-  color: var(--text-secondary);
+  background: #60a5fa;
+  color: #ffffff;
 }
 
 .pd-calendar-cell.cancelled {
@@ -3067,7 +5062,7 @@ input:focus {
 }
 
 .pd-legend-dot.pending {
-  background: var(--border-light);
+  background: #60a5fa;
 }
 
 .pd-legend-dot.cancelled {
@@ -3901,6 +5896,759 @@ input:focus {
   outline-offset: 2px;
 }
 
+/* Day rows */
+.pd-day-row {
+  display: grid;
+  gap: 3px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 9px 11px;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.pd-day-row:hover:not(.active) {
+  border-color: var(--primary);
+}
+
+.pd-day-row.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.pd-day-row strong {
+  font-size: 0.8rem;
+}
+
+.pd-day-row small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+
+.pd-day-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pd-day-status {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pd-day-status.completed {
+  background: var(--success-light);
+  color: #16a34a;
+}
+
+.pd-day-status.in_progress {
+  background: var(--warning-light);
+  color: #d97706;
+}
+
+.pd-day-status.skipped {
+  background: var(--error-light);
+  color: #dc2626;
+}
+
+.pd-day-status.pending {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.pd-day-status.cancelled {
+  background: var(--border-light);
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+/* Exercise column: selected-day context header + exercise rows */
+.pd-day-context {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 10px 12px;
+}
+
+.pd-day-context .pd-day-status {
+  align-self: flex-start;
+}
+
+.pd-day-note {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.pd-day-note-empty {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.pd-day-note-editor {
+  width: 100%;
+  min-height: 72px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: var(--card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.pd-day-note-editor::placeholder {
+  color: var(--text-secondary);
+}
+
+.pd-day-note-editor:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+.pd-day-note-editor:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.pd-day-note-editor:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  background: var(--border-light);
+}
+
+.pd-day-context-actions {
+  display: flex;
+  gap: 14px;
+}
+
+.pd-ex-list {
+  gap: 10px;
+}
+
+.pd-ws-add-exercise {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.pd-ex-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 7px 9px;
+}
+
+.pd-ex-row[draggable="true"] {
+  cursor: grab;
+}
+
+.pd-ex-row[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.pd-ex-drag-handle {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.pd-ex-row.completed {
+  border-color: var(--success-light);
+  background: var(--success-light);
+}
+
+.pd-ex-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.pd-ex-info,
+.pd-ex-content {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.pd-ex-info strong,
+.pd-ex-topline strong {
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+.pd-ex-topline,
+.pd-ex-bottomline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pd-ex-topline > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-ex-top-meta,
+.pd-ex-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pd-ex-version {
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.7rem;
+}
+
+.pd-ex-info small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.pd-ex-bottomline > small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.pd-ex-note {
+  margin: 3px 0 0;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.pd-ex-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.pd-ex-target-control {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.pd-ex-target-control button {
+  width: 22px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.pd-ex-target-control button:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+
+.pd-ex-target-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pd-ex-target-control input {
+  width: 28px;
+  height: 24px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  outline: none;
+}
+
+.pd-ex-target-control input::-webkit-inner-spin-button,
+.pd-ex-target-control input::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.pd-ex-target-control input:disabled {
+  opacity: 0.6;
+}
+
+.pd-ex-target-control > span {
+  padding-right: 8px;
+  white-space: nowrap;
+}
+
+.pd-ex-view {
+  border: 0;
+  padding: 3px 4px;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.pd-ex-view:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.pd-ex-view:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pd-ex-remove {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.pd-ex-remove:hover:not(:disabled) {
+  background: var(--error-light);
+  color: var(--error);
+}
+
+.pd-ex-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pd-confirm-modal {
+  width: min(100%, 420px);
+}
+
+.pd-confirm-message {
+  margin: 20px 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.pd-confirm-message strong {
+  color: var(--text-primary);
+}
+
+.pd-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.pd-ex-status {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.pd-ex-status.completed {
+  background: var(--success);
+  color: #ffffff;
+}
+
+.pd-ex-status.in_progress {
+  background: var(--warning);
+  color: #ffffff;
+}
+
+.pd-ex-status.pending {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.pd-ex-status.skipped {
+  background: var(--error-light);
+  color: #dc2626;
+}
+
+.pd-ex-status.cancelled {
+  background: var(--border-light);
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+/* Shared empty-state block for any workspace column */
+.pd-ws-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.pd-ws-empty strong {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.pd-ws-empty p {
+  margin: 0;
+  font-size: 0.76rem;
+  max-width: 300px;
+}
+
+.pd-ws-empty .secondary-button {
+  margin-top: 6px;
+}
+
+.pd-ws-empty-plan {
+  padding: 48px 16px;
+}
+
+
+/* ==========================================================================
+   Patient Detail — Calendar | Plan | Day | Exercise therapist workspace
+   (desktop-only four-column panel inside .pd-plan-card). Columns share one
+   container so they read as a single connected workspace; selection flows
+   left → right: Calendar/Plan → Day → Exercise.
+   ========================================================================== */
+.pd-workspace {
+  display: grid;
+  grid-template-columns:
+    minmax(340px, 420px)
+    minmax(250px, 300px)
+    minmax(220px, 270px)
+    minmax(0, 0.9fr);
+  align-items: stretch;
+}
+
+/* Cap the scrollable lists so a plan with many days/exercises (or many plans)
+   scrolls inside its column instead of stretching the whole workspace card. */
+.pd-ws-scroll {
+  max-height: 420px;
+}
+
+.pd-ws-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 2px 16px;
+  border-left: 1px solid var(--border-light);
+}
+
+.pd-ws-col:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+
+.pd-ws-col:last-child {
+  padding-right: 0;
+}
+
+.pd-ws-col-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.pd-ws-col-head strong {
+  display: block;
+  font-size: 0.86rem;
+}
+
+/* Let the title block stretch so .pd-ws-title-row's space-between can push
+   the "+" button all the way to the right edge of the column. */
+.pd-ws-col-head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Column-title row: label + inline "+" quick-action button */
+.pd-ws-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.pd-ws-day-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pd-ws-add {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0; /* override .icon-button's 8px 10px padding — it was offsetting the icon off-center */
+  line-height: 1;
+  border-radius: 7px;
+  color: var(--primary);
+  transition: background 0.15s ease;
+}
+
+.pd-ws-add:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+
+.pd-ws-add:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.pd-ws-col-head small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.pd-ws-step {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.pd-ws-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.pd-ws-footnote {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-light);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+/* Month calendar header: ‹ Month Year › navigation */
+.pd-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pd-calendar-header strong {
+  font-size: 0.86rem;
+}
+
+.pd-calendar-nav {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--primary);
+  transition: background 0.15s ease;
+}
+
+.pd-calendar-nav:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+
+.pd-calendar-nav:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* In-month days with no status and outside the plan's range: shadowed out. */
+.pd-calendar-cell.empty {
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.pd-calendar-cell.outside {
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0.45;
+  border: 1px dashed var(--border);
+}
+
+/* Admin User Management: patient row's assigned-therapist line + unassign flow */
+.admin-assigned-therapist {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.admin-unassigned-therapist {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Column-header sorting buttons (replace the old role-filter dropdown) */
+.admin-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-sort-button:hover {
+  color: var(--text-primary);
+}
+
+.admin-sort-button.active {
+  color: var(--primary);
+}
+
+.admin-sort-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/* Inactive columns show a faint up+down pair; active columns show a single
+   bold arrow in the sort direction (rendered by SortHeader). */
+.admin-sort-button .admin-sort-arrow-idle-up,
+.admin-sort-button .admin-sort-arrow-idle-down {
+  opacity: 0.35;
+}
+
+/* Adjacent-month padding days: faded, non-interactive. */
+.pd-calendar-cell.other {
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0.25;
+  cursor: default;
+}
+/* Adjacent-month cells that DO belong to the plan (e.g. a plan spanning
+   Aug 28 → Sep 2 viewed from September): full status color, only softly
+   de-emphasized so they're clearly part of the plan, not "no plan". */
+.pd-calendar-cell.adjacent {
+  opacity: 0.55;
+  border: 1px dashed currentColor;
+}
+
+
+.pd-ws-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
+}
+
+/* Plan rows: reuse .pd-plan-row, extended with a dates line + progress bar. */
+.pd-ws-plan-list .pd-plan-row {
+  gap: 5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.pd-ws-plan-list .pd-plan-row:hover:not(.active) {
+  border-color: var(--primary);
+}
+
+.pd-plan-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pd-plan-row-dates {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-progress-track {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--border-light);
+  overflow: hidden;
+}
+
+.pd-plan-row.active .pd-progress-track {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.pd-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+
 /* .pd-calendar-grid/.pd-calendar-weekdays use `minmax(0, 1fr)` columns with
    aspect-ratio: 1 cells, so on a phone-width container they're naturally
    compact — but on a wide desktop .therapist-main with nothing else
@@ -3933,6 +6681,21 @@ input:focus {
   border: 1px dashed var(--border);
 }
 
+/* Reused by the Home week-strip's legend (.week-strip-legend) below the
+   scrollable calendar — same green/red/dark-gray status colors as the strip's
+   own dots (.week-strip-dot.status-*), just spelled out as a legend row. */
+.pd-legend-dot.status-completed {
+  background: var(--success);
+}
+
+.pd-legend-dot.status-missing {
+  background: var(--error);
+}
+
+.pd-legend-dot.status-none {
+  background: var(--darkgray);
+}
+
 .pp-calendar-month-nav {
   display: flex;
   align-items: center;
@@ -3946,6 +6709,191 @@ input:focus {
   text-align: center;
   color: var(--text-primary);
   font-size: 0.85rem;
+}
+
+/* --- Admin User Management: Account Information popup (mini profile) ---------
+   Opened by clicking a full table row. Reuses .admin-modal's shell but is wider
+   and uses a grid/divided layout so each role (Patient/Therapist/Admin) can show
+   its own field set while staying visually consistent. */
+.admin-modal.admin-info-modal {
+  width: min(100%, 520px);
+}
+
+/* Clickable account rows — the whole row opens the popup. */
+tr.admin-user-row {
+  cursor: pointer;
+}
+tr.admin-user-row td {
+  transition: background 0.12s ease;
+}
+tr.admin-user-row:hover td {
+  background: var(--darkgray-light, #f3f4f6);
+}
+tr.admin-user-row:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+/* Trailing chevron per row: faint at rest, highlighted on hover so the row
+   clearly reads as "opens something". */
+.admin-row-open-hint {
+  width: 36px;
+  text-align: center;
+  color: var(--text-secondary);
+  opacity: 0.35;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+tr.admin-user-row:hover .admin-row-open-hint {
+  opacity: 1;
+  color: var(--primary);
+}
+
+/* Centered empty-state row (deduplicated — used to render twice). */
+.admin-table-empty td {
+  text-align: center;
+  padding: 28px 0;
+  color: var(--text-secondary);
+}
+
+/* Mini profile header — consistent across roles. */
+.admin-info-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-light);
+}
+.admin-info-avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 0.95rem;
+}
+.admin-info-header-text {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.admin-info-header-text strong {
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+.admin-info-badges {
+  display: flex;
+  gap: 6px;
+}
+.admin-info-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-info-header-btn {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}
+
+/* Info grid used in view mode. */
+.admin-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 18px;
+  padding: 16px 0;
+}
+.admin-info-item {
+  display: grid;
+  gap: 2px;
+}
+.admin-info-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+.admin-info-value {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+/* Case-by-case section (e.g. "Assigned therapist" for patients). */
+.admin-info-section {
+  padding: 14px 0;
+  border-top: 1px solid var(--border-light);
+}
+.admin-info-section > strong {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.admin-info-section .assign-patient-row {
+  margin-top: 8px;
+}
+.admin-info-error {
+  margin: 8px 0 0;
+}
+.admin-info-error svg {
+  display: inline;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+/* Edit-mode hint + action row. */
+.admin-info-editnote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--darkgray-light, #f3f4f6);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+.admin-info-editnote svg {
+  flex-shrink: 0;
+}
+.admin-info-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Confirm-on-save dialog. */
+.admin-info-confirm-scrim {
+  z-index: 211;
+}
+.admin-info-confirm {
+  z-index: 212;
+  width: min(100%, 380px);
+  justify-items: center;
+  text-align: center;
+  gap: 10px;
+}
+.admin-info-confirm-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--darkgray-light, #f3f4f6);
+  color: var(--primary);
+}
+.admin-info-confirm strong {
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+.admin-info-confirm p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.admin-info-confirm-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+  width: 100%;
 }
 
 /* Calendar + day-by-day side by side, desktop only — phones keep the original
@@ -4050,6 +6998,66 @@ input:focus {
   box-shadow: var(--shadow-card);
 }
 
+/* Uploaded profile picture fills the initials circle (PatientSettingsPage) —
+   object-fit: cover so any aspect ratio crops to a clean circle. */
+.ps-avatar-circle.with-photo {
+  overflow: hidden;
+}
+
+/* Patient Settings' enlarged avatar — the profile picture is the page's focal
+   point, so its circle is roughly twice the base initials circle. Overlapping
+   the card's top edge proportionally, with the card's padding-top raised to
+   match (and .ps-main's top padding increased so the taller overhang still
+   clears the topbar). */
+.ps-avatar-circle.lg {
+  top: -60px;
+  width: 120px;
+  height: 120px;
+  border-width: 6px;
+  font-size: 1.5rem;
+}
+
+.ps-card:has(.ps-avatar-circle.lg) {
+  padding-top: 76px;
+}
+
+.patient-page-main.ps-main {
+  padding-top: 72px;
+}
+
+.ps-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Upload/Change-photo button under the avatar card — same small secondary
+   treatment as .ps-editing-pill's pill family. */
+.ps-avatar-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 auto 4px;
+  padding: 6px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ps-avatar-upload:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+.ps-avatar-upload:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .ps-panels {
   display: grid;
   gap: 16px;
@@ -4088,6 +7096,63 @@ input:focus {
   word-break: break-word;
 }
 
+/* Edit-mode form controls inside the settings card — previously UNSTYLED, so
+   tapping "Edit profile" swapped the read-only values for raw browser-default
+   inputs (tiny ~170px wide, wrong font, no border treatment) and the page
+   looked like it hadn't entered edit mode. Now styled like the rest of the
+   card family: full-width, card background, 1.5px border, 10px radius, and the
+   app's standard primary focus ring. */
+.ps-field input,
+.ps-field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.ps-field input::placeholder {
+  color: var(--text-secondary);
+}
+
+.ps-field input:focus-visible,
+.ps-field select:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+/* View→edit state indicator on the card itself: primary border + inner ring
+   while editing, so the mode change is obvious even before scrolling to a
+   field, plus a matching "Editing" pill next to the avatar. */
+.ps-card.editing {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary) inset, var(--shadow-card);
+}
+
+.ps-editing-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.ps-editing-pill .pencil-spin {
+  display: inline-flex;
+}
+
 .ps-edit-actions {
   display: flex;
   flex-wrap: wrap;
@@ -4122,6 +7187,18 @@ input:focus {
     height: 96px;
     font-size: 1.15rem;
     border-width: 5px;
+  }
+
+  .ps-avatar-circle.lg {
+    top: -70px;
+    width: 140px;
+    height: 140px;
+    font-size: 1.7rem;
+    border-width: 7px;
+  }
+
+  .ps-card:has(.ps-avatar-circle.lg) {
+    padding-top: 88px;
   }
 
   .ps-panels {
@@ -4573,4 +7650,35 @@ input:focus {
 
 .pei-start-button {
   margin-top: auto;
+}
+
+/* This page's topbar stacks a "Back to today" button above the usual
+   eyebrow + h1, so it's taller than the other therapist pages' one-liner
+   headers. The shared @media (min-width: 900px) rule pins
+   .therapist-topbar to a fixed 64px height — content that tall overflows
+   the bar and overlaps the page content beneath it. Let this page's bar
+   size to its content instead. */
+.pei-topbar {
+  height: auto;
+  min-height: 64px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.pei-topbar .sidebar-link {
+  min-height: 0;
+  padding: 4px 0;
+  margin-bottom: 4px;
+  color: var(--primary);
+}
+
+/* Clickable session-log rows (TherapistSessionsPage) — the whole row opens the
+   Session Result Review, so give it pointer/hover affordance. */
+.ts-session-row-clickable {
+  cursor: pointer;
+}
+
+.ts-session-row-clickable:hover,
+.ts-session-row-clickable:focus-visible {
+  background: var(--primary-light);
 }

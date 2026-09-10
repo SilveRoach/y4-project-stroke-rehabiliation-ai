@@ -27,13 +27,14 @@
 // `/admin/dashboard`) is a separate, already-built page; this page only
 // covers §9.
 
-import { AlertCircle, Pencil, Plus, Search, Shield, User, Users, X } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, ChevronRight, Pencil, Plus, Search, Shield, User, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
-import { adminProfile } from "../data/adminMock";
-import { ApiError, createUser, getUsers, updateUserProfile, type AdminUserListItem } from "../services/api";
+import { ApiError, assignPatient, createUser, getUsers, unassignPatient, updateUserProfile, type AdminUserListItem } from "../services/api";
 import { useAuth } from "../store/authStore";
+import { useProfilePicture } from "../hooks/useProfilePicture";
+import { initialsFromName } from "../utils/displayName";
 import type { AdminManagedRole, AdminUserSummary, StaffRole } from "../types";
 
 interface AdminUserManagementPageProps {
@@ -42,7 +43,42 @@ interface AdminUserManagementPageProps {
   onNavigateSettings: () => void;
 }
 
-type RoleFilter = "all" | "patient" | StaffRole;
+// Column-header sorting (replaces the old role-filter dropdown): each sortable
+// header toggles asc/desc and shows an ArrowUp/ArrowDown indicator.
+type UserSortKey = "name" | "role" | "username" | "status" | "lastLogin";
+type SortDir = "asc" | "desc";
+
+// Role sort order — mirrors schema.prisma's Role enum (PATIENT, THERAPIST, ADMIN).
+const ROLE_SORT_ORDER: Record<AdminUserSummary["role"], number> = {
+  patient: 0,
+  therapist: 1,
+  admin: 2
+};
+
+// Status sort order — mirrors schema.prisma's UserStatus enum order
+// (active, inactive, suspended). GET /users already collapses
+// inactive/suspended into "disabled" (user.service.ts's toAccountStatus),
+// so at the UI level this is active → disabled.
+const STATUS_SORT_ORDER: Record<AdminUserSummary["status"], number> = {
+  active: 0,
+  disabled: 1
+};
+
+// "Login sort by day": converts the display label back into a comparable
+// timestamp. Labels come from backend relativeDateLabel(): "Today",
+// "Yesterday", "N days ago", an absolute "12 Aug 2026" date, or "Never".
+// Accounts that never logged in sort as the oldest in either direction.
+function lastLoginSortKey(label: string): number {
+  if (!label || label === "Never") return Number.NEGATIVE_INFINITY;
+  const now = Date.now();
+  const dayMs = 86_400_000;
+  if (label === "Today") return now;
+  if (label === "Yesterday") return now - dayMs;
+  const daysAgo = label.match(/^(\d+) days? ago$/);
+  if (daysAgo) return now - Number(daysAgo[1]) * dayMs;
+  const parsed = Date.parse(label);
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+}
 
 // AdminUserListItem (services/api.ts, mirrors user.service.ts's UserListItem)
 // -> AdminUserSummary (types/index.ts, this page's local row shape). Mostly a
@@ -66,23 +102,56 @@ function toAdminUserSummary(item: AdminUserListItem): AdminUserSummary {
     lastName: item.lastName ?? undefined,
     email: item.email ?? undefined,
     phoneNumber: item.phoneNumber ?? undefined,
+    profilePictureFileId: item.profilePictureFileId ?? undefined,
     gender: item.gender,
     dateOfBirthLabel: item.dateOfBirthLabel ?? undefined,
     heightCm: item.heightCm ?? undefined,
-    weightKg: item.weightKg ?? undefined
+    weightKg: item.weightKg ?? undefined,
+    assignedTherapist: item.assignedTherapist ?? null
   };
 }
 
+// One account-table avatar cell: resolves the row's profilePictureFileId to a
+// blob object URL via the shared useProfilePicture hook (the file lives behind
+// the auth'd GET /files/:id/content endpoint, so an <img src> can't point at it
+// directly). A hook can't be called per-row in the map callback, hence this
+// small wrapper — same avatar-badge pattern as the topbar/sidebar chrome
+// (photo when resolved, initials otherwise: no file, still loading, or fetch
+// failed).
+function UserAvatar({ token, fileId, name }: { token: string | null | undefined; fileId?: string; name: string }) {
+  const avatarUrl = useProfilePicture(token, fileId ?? null);
+  return (
+    <span className={`therapist-avatar admin-avatar${avatarUrl ? " with-photo" : ""}`}>
+      {avatarUrl ? <img src={avatarUrl} alt={`${name}'s profile picture`} /> : initialsFromName(name)}
+    </span>
+  );
+}
+
 export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavigateSettings }: AdminUserManagementPageProps) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  // Real logged-in admin for the sidebar/topbar profile chrome, same idiom as
+  // the patient pages (PatientTodayPage.tsx) — replaces the static
+  // data/adminMock.ts "Admin Suda" placeholder.
+  const adminDisplayName = user?.displayName || user?.username || "Admin";
+  const adminInitials = initialsFromName(adminDisplayName);
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
+  // Column-header sorting state (replaces the role-filter dropdown).
+  const [sort, setSort] = useState<{ key: UserSortKey; dir: SortDir }>({ key: "name", dir: "asc" });
+  const toggleSort = (key: UserSortKey) =>
+    setSort((current) => (current.key === key ? { key, dir: current.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUserSummary | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // --- Account Information popup (replaces row-level action buttons) ---------
+  // The whole row opens this popup; edit mode + patient↔therapist assignment
+  // management live inside it (reusing the real POST/DELETE therapist-module
+  // endpoints and PATCH /users/:id for Patient rows).
+  const [infoUser, setInfoUser] = useState<AdminUserSummary | null>(null);
+  const [usersReloadKey, setUsersReloadKey] = useState(0);
 
   useEffect(() => {
     if (!token) return;
@@ -107,17 +176,33 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, usersReloadKey]);
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return users.filter((u) => {
-      const matchesRole = roleFilter === "all" || u.role === roleFilter;
+    const matched = users.filter((u) => {
       const matchesQuery =
         !query || u.name.toLowerCase().includes(query) || u.username.toLowerCase().includes(query);
-      return matchesRole && matchesQuery;
+      return matchesQuery;
     });
-  }, [users, search, roleFilter]);
+
+    const dirFactor = sort.dir === "asc" ? 1 : -1;
+    return [...matched].sort((a, b) => {
+      switch (sort.key) {
+        case "role":
+          return (ROLE_SORT_ORDER[a.role] - ROLE_SORT_ORDER[b.role]) * dirFactor;
+        case "username":
+          return a.username.localeCompare(b.username) * dirFactor;
+        case "status":
+          return (STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status]) * dirFactor;
+        case "lastLogin":
+          return (lastLoginSortKey(a.lastLoginLabel) - lastLoginSortKey(b.lastLoginLabel)) * dirFactor;
+        case "name":
+        default:
+          return a.name.localeCompare(b.name) * dirFactor;
+      }
+    });
+  }, [users, search, sort]);
 
   const therapistCount = users.filter((u) => u.role === "therapist").length;
   const adminCount = users.filter((u) => u.role === "admin").length;
@@ -137,6 +222,8 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
     if (role === "therapist") return "good";
     return "fair";
   }
+
+  const activeTherapists = users.filter((u) => u.role === "therapist" && u.status === "active");
 
   return (
     <section className="therapist-shell">
@@ -158,10 +245,10 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{adminProfile.displayName}</strong>
-                <small>{adminProfile.title}</small>
+                <strong>{adminDisplayName}</strong>
+                <small>System Administrator</small>
               </div>
-              <span className="avatar-badge admin-avatar">{adminProfile.initials}</span>
+              <span className="avatar-badge admin-avatar">{adminInitials}</span>
             </div>
           </div>
         </header>
@@ -219,17 +306,6 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                     aria-label="Search accounts"
                   />
                 </div>
-                <select
-                  className="admin-role-select"
-                  value={roleFilter}
-                  onChange={(event) => setRoleFilter(event.target.value as RoleFilter)}
-                  aria-label="Filter by role"
-                >
-                  <option value="all">All roles</option>
-                  <option value="therapist">Therapist</option>
-                  <option value="admin">Admin</option>
-                  <option value="patient">Patient</option>
-                </select>
                 <button
                   type="button"
                   className="primary-button therapist-add-patient"
@@ -243,15 +319,15 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
               </div>
             </div>
 
-            <div className="therapist-table-scroll">
+            <div className="therapist-table-scroll admin-account-list-scroll">
               <table className="therapist-table">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Role</th>
-                    <th>Username / Phone</th>
-                    <th>Status</th>
-                    <th>Last login</th>
+                    <SortHeader label="Name" sortKey="name" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="Role" sortKey="role" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="Username / Phone" sortKey="username" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="Last login" sortKey="lastLogin" sort={sort} onSort={toggleSort} />
                     <th aria-label="Actions" />
                   </tr>
                 </thead>
@@ -265,24 +341,42 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                   )}
                   {!usersLoading &&
                     filteredUsers.map((user) => (
-                    <tr key={user.id}>
+                    // The whole row is the entry point to the Account Information
+                    // popup — all per-account actions (edit, patient↔therapist
+                    // assignment) live inside that popup now, so the old row-level
+                    // Edit / Enable-Disable / Assign-therapist buttons are gone.
+                    <tr
+                      key={user.id}
+                      className="admin-user-row"
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`Open account information for ${user.name}`}
+                      onClick={() => {
+                        setSuccessMessage(null);
+                        setInfoUser(user);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSuccessMessage(null);
+                          setInfoUser(user);
+                        }
+                      }}
+                    >
                       <td>
                         <div className="therapist-table-patient">
-                          <span className="therapist-avatar admin-avatar">
-                            {user.name
-                              .split(" ")
-                              .map((word) => word[0])
-                              .join("")
-                              .slice(0, 2)
-                              .toUpperCase()}
-                          </span>
+                          <UserAvatar token={token} fileId={user.profilePictureFileId} name={user.name} />
                           <div>
                             <strong>{user.name}</strong>
                             {typeof user.patientCount === "number" && <small>{user.patientCount} patients</small>}
                             {user.licenseNumber && <small>License {user.licenseNumber}</small>}
                             {user.employeeId && <small>Employee ID {user.employeeId}</small>}
-                            {user.role === "patient" && user.gender && user.gender !== "unknown" && (
-                              <small>{user.gender[0].toUpperCase() + user.gender.slice(1)}</small>
+                            {user.role === "patient" && (
+                              <small className={user.assignedTherapist ? "admin-assigned-therapist" : "admin-unassigned-therapist"}>
+                                {user.assignedTherapist
+                                  ? `Assigned to ${user.assignedTherapist.displayName}`
+                                  : "No therapist assigned"}
+                              </small>
                             )}
                           </div>
                         </div>
@@ -297,33 +391,14 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                         </span>
                       </td>
                       <td>{user.lastLoginLabel}</td>
-                      <td>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button
-                            type="button"
-                            className="secondary-button therapist-view-button"
-                            onClick={() => {
-                              setSuccessMessage(null);
-                              setEditingUser(user);
-                            }}
-                          >
-                            <Pencil size={13} /> Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button therapist-view-button"
-                            disabled
-                            title="Enable/disable isn't wired to the backend yet (PATCH /users/:id/status not implemented)."
-                          >
-                            {user.status === "active" ? "Disable" : "Enable"}
-                          </button>
-                        </div>
+                      <td className="admin-row-open-hint" aria-hidden="true">
+                        <ChevronRight size={16} />
                       </td>
                     </tr>
                     ))}
                   {!usersLoading && filteredUsers.length === 0 && (
-                    <tr>
-                      <td colSpan={6} style={{ textAlign: "center", padding: "24px 0" }}>
+                    <tr className="admin-table-empty">
+                      <td colSpan={6}>
                         {users.length === 0 ? "No accounts yet." : "No accounts match your search."}
                       </td>
                     </tr>
@@ -374,19 +449,23 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
         />
       )}
 
-      {editingUser && (
-        <EditAccountModal
+      {infoUser && (
+        <AccountInfoModal
           token={token}
-          user={editingUser}
-          onClose={() => setEditingUser(null)}
-          onSave={(updated, persisted) => {
+          user={infoUser}
+          therapists={activeTherapists}
+          onClose={() => setInfoUser(null)}
+          onUpdated={(updated, persisted) => {
             setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
-            setEditingUser(null);
             setSuccessMessage(
               persisted
                 ? `Account "${updated.username}" updated.`
-                : `Account "${updated.username}" updated (local only — no PATCH /users/:id endpoint exists yet, see UI_MOCKUP_PLAN_NEWDB.md §5).`
+                : `Account "${updated.username}" updated (local only — PATCH /users/:id doesn't accept an Admin editing a ${updated.role} target yet).`
             );
+          }}
+          onAssignmentChanged={(message) => {
+            setUsersReloadKey((key) => key + 1);
+            setSuccessMessage(message);
           }}
         />
       )}
@@ -422,6 +501,179 @@ function StatCard({
       <div className="therapist-stat-value">{value}</div>
       <p className="therapist-stat-label">{label}</p>
     </div>
+  );
+}
+
+// Modal for assigning a patient to a therapist (Admin User Management).
+// Mirrors components/AssignPatientModal.tsx's look & flow (admin-modal shell,
+// search box, per-row Assign button) but reversed: pick a THERAPIST for an
+// already-known patient, and an admin may assign anyone (POST
+// /therapists/:id/patients accepts an admin caller via
+// requireSelfTherapistOrAdmin — the same endpoint the therapist dashboard's
+// self-assignment flow uses, no duplicate backend work).
+function AssignTherapistModal({
+  patient,
+  therapists,
+  busy,
+  onClose,
+  onAssign,
+  onAssigned
+}: {
+  patient: AdminUserSummary;
+  therapists: AdminUserSummary[];
+  busy: boolean;
+  onClose: () => void;
+  // Performs POST /therapists/:therapistId/patients for this patient; throws on failure.
+  onAssign: (therapist: AdminUserSummary) => Promise<void>;
+  onAssigned: (patientName: string, therapistName: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  const query = search.trim().toLowerCase();
+  const filtered = therapists.filter(
+    (t) => !query || t.name.toLowerCase().includes(query) || t.username.toLowerCase().includes(query)
+  );
+
+  const handleAssign = async (therapist: AdminUserSummary) => {
+    setAssignError(null);
+    setAssigningId(therapist.id);
+    try {
+      await onAssign(therapist);
+      onAssigned(patient.name, therapist.name);
+    } catch (err) {
+      setAssignError(err instanceof Error ? err.message : "Couldn't assign the therapist. Please try again.");
+    } finally {
+      setAssigningId(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="therapist-panel-scrim" onClick={onClose} />
+      <div className="admin-modal assign-patient-modal" role="dialog" aria-label="Assign therapist to patient">
+        <div className="therapist-detail-header">
+          <strong>Assign therapist — {patient.name}</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="assign-patient-subtitle">
+          {patient.assignedTherapist
+            ? `Currently assigned to ${patient.assignedTherapist.displayName}. Pick another therapist to reassign (the current assignment is ended first).`
+            : "Pick an active therapist account to assign to this patient."}
+        </p>
+
+        <div className="therapist-search assign-patient-search">
+          <Search size={16} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by name or username…"
+            aria-label="Search therapists"
+            autoFocus
+          />
+        </div>
+
+        {assignError && (
+          <p className="auth-error-banner" role="alert">
+            {assignError}
+          </p>
+        )}
+
+        <div className="assign-patient-list">
+          {therapists.length === 0 && <p className="assign-patient-empty">No therapist accounts exist yet.</p>}
+          {therapists.length > 0 && filtered.length === 0 && (
+            <p className="assign-patient-empty">No therapists match your search.</p>
+          )}
+
+          {filtered.map((therapist) => {
+            const isCurrent = patient.assignedTherapist?.id === therapist.id;
+            return (
+              <div className="assign-patient-row" key={therapist.id}>
+                <div className="assign-patient-row-info">
+                  <span className="therapist-avatar">
+                    {therapist.name
+                      .split(" ")
+                      .map((word) => word[0])
+                      .slice(0, 2)
+                      .join("")
+                      .toUpperCase()}
+                  </span>
+                  <div>
+                    <strong>{therapist.name}</strong>
+                    <small>
+                      {therapist.licenseNumber ? `License ${therapist.licenseNumber}` : therapist.username}
+                      {typeof therapist.patientCount === "number" ? ` Â· ${therapist.patientCount} patients` : ""}
+                    </small>
+                  </div>
+                </div>
+
+                <div className="assign-patient-row-actions">
+                  {isCurrent ? (
+                    <span className="badge-pill good">Current</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={busy || assigningId !== null}
+                      onClick={() => handleAssign(therapist)}
+                    >
+                      <UserPlus size={13} /> {assigningId === therapist.id ? "Assigning…" : "Assign"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Sortable table-header cell: shows the column label plus an ArrowUp/ArrowDown
+// indicator. Clicking toggles asc ↔ desc for that column (starting asc when a
+// different column is first selected).
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort
+}: {
+  label: string;
+  sortKey: UserSortKey;
+  sort: { key: UserSortKey; dir: SortDir };
+  onSort: (key: UserSortKey) => void;
+}) {
+  const isActive = sort.key === sortKey;
+  return (
+    <th aria-sort={isActive ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}>
+      <button
+        type="button"
+        className={`admin-sort-button${isActive ? " active" : ""}`}
+        onClick={() => onSort(sortKey)}
+        title={`Sort by ${label.toLowerCase()} (${isActive ? (sort.dir === "asc" ? "currently A→Z / oldest first" : "currently Z→A / newest first") : "ascending"})`}
+      >
+        {label}
+        <span className="admin-sort-arrow">
+          {isActive ? (
+            sort.dir === "asc" ? (
+              <ArrowUp size={12} />
+            ) : (
+              <ArrowDown size={12} />
+            )
+          ) : (
+            <>
+              <ArrowUp size={9} className="admin-sort-arrow-idle-up" />
+              <ArrowDown size={9} className="admin-sort-arrow-idle-down" />
+            </>
+          )}
+        </span>
+      </button>
+    </th>
   );
 }
 
@@ -1025,3 +1277,526 @@ function EditAccountModal({
     </>
   );
 }
+// Account Information popup (mini profile) — the single entry point for managing
+// an account from this page (the whole table row opens it; the old row-level
+// Edit / Assign-therapist / Unassign buttons moved in here).
+//
+// View mode → Edit mode → Confirm dialog → Save, per role:
+//   Patient   — REAL save via PATCH /users/:id (Admin editing a Patient target,
+//               user-management module's updateUserProfile). Also shows the
+//               patient's assigned therapist and hosts the assign/unassign
+//               management (moved here from the removed row buttons; same real
+//               POST/DELETE /therapists/... endpoints the dashboard uses).
+//   Therapist — license fields and patient count shown; edits stay client-side
+//               only (PATCH /users/:id doesn't accept an Admin editing a
+//               Therapist/Admin target yet — same caveat as the old
+//               EditAccountModal this replaces).
+//   Admin     — employee ID; edits client-side only, same reason.
+// Read-only in every role: role, status, last login, email/phone (no PATCH
+// support for those yet), patient count (derived from assignments).
+function AccountInfoModal({
+  token,
+  user,
+  therapists,
+  onClose,
+  onUpdated,
+  onAssignmentChanged
+}: {
+  token: string | null;
+  user: AdminUserSummary;
+  therapists: AdminUserSummary[];
+  onClose: () => void;
+  onUpdated: (updated: AdminUserSummary, persisted: boolean) => void;
+  onAssignmentChanged: (message: string) => void;
+}) {
+  const isPatient = user.role === "patient";
+  const [mode, setMode] = useState<"view" | "edit">("view");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Edit-mode form state (same fields/structure as the create form, minus
+  // password/role which aren't editable after creation).
+  const [displayName, setDisplayName] = useState(user.name);
+  const [username, setUsername] = useState(user.username);
+  const [firstName, setFirstName] = useState(user.firstName ?? user.name.split(" ")[0] ?? "");
+  const [lastName, setLastName] = useState(user.lastName ?? user.name.split(" ").slice(1).join(" "));
+   const [gender, setGender] = useState<"male" | "female" | "other" | "unknown">(user.gender ?? "unknown");
+  const [dateOfBirth, setDateOfBirth] = useState(user.dateOfBirthLabel ?? "");
+  const [heightCm, setHeightCm] = useState(user.heightCm?.toString() ?? "");
+  const [weightKg, setWeightKg] = useState(user.weightKg?.toString() ?? "");
+  const [licenseNumber, setLicenseNumber] = useState(user.licenseNumber ?? "");
+  const [licenseIssued, setLicenseIssued] = useState(user.licenseIssuedLabel ?? "");
+  const [licenseExpiry, setLicenseExpiry] = useState(user.licenseExpiryLabel ?? "");
+ const [employeeId, setEmployeeId] = useState(user.employeeId ?? "");
+const [submitting, setSubmitting] = useState(false);
+ const [error, setError] = useState<string | null>(null);
+
+ // Patient ↔ therapist assignment management (moved from the removed row buttons).
+ const [showAssignModal, setShowAssignModal] = useState(false);
+const [assignmentBusy, setAssignmentBusy] = useState(false);
+ const [assignmentError, setAssignmentError] = useState<string | null>(null);
+
+ const roleText = user.role === "admin" ? "Admin" : user.role === "therapist" ? "Therapist" : "Patient";
+const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "good" : "fair";
+
+ const startEdit = () => {
+    // Re-seed the form from the latest row data each time edit mode is entered.
+
+    setDisplayName(user.name);
+    setUsername(user.username);
+    setFirstName(user.firstName ?? user.name.split(" ")[0] ?? "");
+    setLastName(user.lastName ?? user.name.split(" ").slice(1).join(" "));
+    setGender(user.gender ?? "unknown");
+    setDateOfBirth(user.dateOfBirthLabel ?? "");
+    setHeightCm(user.heightCm?.toString() ?? "");
+    setWeightKg(user.weightKg?.toString() ?? "");
+    setLicenseNumber(user.licenseNumber ?? "");
+    setLicenseIssued(user.licenseIssuedLabel ?? "");
+    setLicenseExpiry(user.licenseExpiryLabel ?? "");
+    setEmployeeId(user.employeeId ?? "");
+    setError(null);
+    setMode("edit");
+  };
+
+  const cancelEdit = () => {
+    setError(null);
+    setConfirmOpen(false);
+    setMode("view");
+  };
+
+  // Patient: real save — PATCH /users/:id (Admin editing a Patient target..
+  // Therapist/Admin: local-only save (backend doesn't accept those targets yet),
+  // exactly the behavior of the EditAccountModal this replaces.
+
+   const submit = async () => {
+    setError(null);
+    if (isPatient) {
+      if (!firstName.trim() || !lastName.trim() || !username.trim()) {
+        setError("Fill in first name, last name, and phone number.");
+        return;
+      }
+    } else if (!displayName.trim() || !username.trim()) {
+      setError("Fill in display name and username.");
+      return;
+    }
+
+    if (!token) {
+      setError("Your session has expired. Please log in again.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      if (isPatient) {
+        const { user: updated } = await updateUserProfile(token, user.id, {
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          username: username.trim(),
+          gender,
+          dateOfBirth: dateOfBirth.trim() || undefined,
+          heightCm: heightCm.trim() ? Number(heightCm) : undefined,
+          weightKg: weightKg.trim() ? Number(weightKg) : undefined
+        });
+        onUpdated(
+          {
+            ...user,
+            name: updated.displayName,
+            username: updated.username,
+            firstName: updated.firstName ?? undefined,
+            lastName: updated.lastName ?? undefined,
+            gender: updated.gender,
+            dateOfBirthLabel: updated.dateOfBirth ?? undefined,
+            heightCm: updated.heightCm ?? undefined,
+            weightKg: updated.weightKg ?? undefined
+          },
+          true
+        );
+      } else {
+        onUpdated(
+          {
+            ...user,
+            name: displayName.trim(),
+            username: username.trim(),
+            licenseNumber: licenseNumber.trim() || undefined,
+            licenseIssuedLabel: licenseIssued.trim() || undefined,
+            licenseExpiryLabel: licenseExpiry.trim() || undefined,
+            employeeId: employeeId.trim() || undefined
+          },
+          false
+        );
+      }
+      setConfirmOpen(false);
+      setMode("view");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't save changes. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // DELETE /therapists/:id/patients/:patientId — moved here from the removed
+  // row-level Unassign button (same endpoint, and same confirm-then-act flow).
+  const handleUnassign = async () => {
+    if (!token || !user.assignedTherapist) return;
+    if (!window.confirm(`Unassign ${user.assignedTherapist.displayName} from "${user.name}"?`)) return;
+    setAssignmentBusy(true);
+    setAssignmentError(null);
+    try {
+      await unassignPatient(token, user.assignedTherapist.id, user.id);
+      onAssignmentChanged(`${user.assignedTherapist.displayName} was unassigned from "${user.name}".`);
+    } catch (err) {
+      setAssignmentError(err instanceof ApiError ? err.message : "Couldn't unassign the therapist. Please try again.");
+    } finally {
+      setAssignmentBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="therapist-panel-scrim" onClick={onClose} />
+      <div className="admin-modal admin-info-modal" role="dialog" aria-label="Account information">
+        <div className="therapist-detail-header">
+          <strong>Account information</strong>
+          <div className="admin-info-header-actions">
+            {mode === "view" ? (
+              <button type="button" className="secondary-button admin-info-header-btn" onClick={startEdit}>
+                <Pencil size={12} /> Edit
+              </button>
+            ) : (
+              <button type="button" className="secondary-button admin-info-header-btn" onClick={cancelEdit}>
+                <X size={12} /> Cancel
+              </button>
+            )}
+            <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* Mini profile header — consistent across roles */}
+        <div className="admin-info-header">
+          <span className="therapist-avatar admin-avatar admin-info-avatar">
+            {user.name
+              .split(" ")
+              .map((word) => word[0])
+              .join("")
+              .slice(0, 2)
+              .toUpperCase()}
+          </span>
+          <div className="admin-info-header-text">
+            <strong>{user.name}</strong>
+            <div className="admin-info-badges">
+              <span className={`badge-pill ${roleTone}`}>{roleText}</span>
+              <span className={`badge-pill ${user.status === "active" ? "good" : "fair"}`}>
+                {user.status === "active" ? "Active" : "Disabled"}
+              </span>
+            </div>
+          </div> 
+        </div>
+
+        {mode === "view" ? (
+          <>
+            <div className="admin-info-grid">
+              <div className="admin-info-item">
+                <span className="admin-info-label">{isPatient ? "Phone number" : "Username"}</span>
+                <span className="admin-info-value">{user.username}</span>
+              </div>
+              <div className="admin-info-item">
+                <span className="admin-info-label">Last login</span>
+                <span className="admin-info-value">{user.lastLoginLabel}</span>
+              </div>
+              {!isPatient && (
+                <>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">Email</span>
+                    <span className="admin-info-value">{user.email ?? "—"}</span>
+                  </div>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">Contact phone</span>
+                    <span className="admin-info-value">{user.phoneNumber ?? "—"}</span>
+                  </div>
+                </>
+              )}
+              {user.role === "patient" && (
+                <>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">Gender</span>
+                    <span className="admin-info-value">{user.gender && user.gender !== "unknown" ? user.gender[0].toUpperCase() + user.gender.slice(1) : "Unknown"}</span>
+                  </div>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">Date of birth</span>
+                    <span className="admin-info-value">{user.dateOfBirthLabel ?? "—"}</span>
+                  </div>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">Height (cm)</span>
+                    <span className="admin-info-value">{user.heightCm ?? "—"}</span>
+                  </div>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">Weight (kg)</span>
+                    <span className="admin-info-value">{user.weightKg ?? "—"}</span>
+                  </div>
+                </>
+              )}
+              {user.role === "therapist" && (
+                <>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">License number</span>
+                    <span className="admin-info-value">{user.licenseNumber ?? "—"}</span>
+                  </div>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">License issued</span>
+                    <span className="admin-info-value">{user.licenseIssuedLabel ?? "—"}</span>
+                  </div>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">License expiry</span>
+                    <span className="admin-info-value">{user.licenseExpiryLabel ?? "—"}</span>
+                  </div>
+                  <div className="admin-info-item">
+                    <span className="admin-info-label">Patients</span>
+                    <span className="admin-info-value">{typeof user.patientCount === "number" ? user.patientCount : "—"}</span>
+                  </div>
+                </>
+              )}
+              {user.role === "admin" && (
+                <div className="admin-info-item">
+                  <span className="admin-info-label">Employee ID</span>
+                  <span className="admin-info-value">{user.employeeId ?? "—"}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Patient-only management: assigned therapist (moved from row buttons) */}
+            {isPatient && (
+              <div className="admin-info-section">
+                <strong>Assigned therapist</strong>
+                {assignmentError && (
+                  <p className="auth-error-banner admin-info-error" role="alert">
+                    {assignmentError}
+                  </p>
+                )}
+                {user.assignedTherapist ? (
+                  <div className="assign-patient-row">
+                    <div className="assign-patient-row-info">
+                      <span className="therapist-avatar">
+                        {user.assignedTherapist.displayName
+                          .split(" ")
+                          .map((word) => word[0])
+                          .slice(0, 2)
+                          .join("")
+                          .toUpperCase()}
+                      </span>
+                      <div>
+                        <strong>{user.assignedTherapist.displayName}</strong>
+                        <small>{user.assignedTherapist.licenseNumber ? `License ${user.assignedTherapist.licenseNumber}` : "Active therapist"}</small>
+                      </div>
+                    </div>
+                    <div className="assign-patient-row-actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={assignmentBusy}
+                        onClick={() => setShowAssignModal(true)}
+                        title="Assign a different therapist"
+                      >
+                        <UserPlus size={13} /> Change
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={assignmentBusy}
+                        onClick={handleUnassign}
+                        title="Unassign this therapist"
+                      >
+                        <UserMinus size={13} /> {assignmentBusy ? "Working…" : "Unassign"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="assign-patient-row">
+                    <div className="assign-patient-row-info">
+                      <div>
+                        <strong>No therapist assigned</strong>
+                        <small>Assign one so this patient can start rehabilitation.</small>
+                      </div>
+                    </div>
+                    <div className="assign-patient-row-actions">
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={assignmentBusy}
+                        onClick={() => setShowAssignModal(true)}
+                      >
+                        <UserPlus size={13} /> Assign therapist
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="admin-info-editnote">
+              <AlertCircle size={13} />
+              Editing enabled for the fields below. Role, status, and last login can't be changed here.
+            </div>
+
+            {error && (
+              <p className="auth-error-banner admin-info-error" role="alert">
+                <AlertCircle size={14} />
+                {error}
+              </p>
+            )}
+ 
+
+            {isPatient ? (
+              <>
+                <div className="library-toggle-row">
+                  <label>
+                    First name
+                    <input value={firstName} onChange={(event) => setFirstName(event.target.value)} autoComplete="given-name" />
+                  </label>
+                  <label>
+                    Last name
+                    <input value={lastName} onChange={(event) => setLastName(event.target.value)} autoComplete="family-name" />
+                  </label>
+                </div>
+                <label>
+                  Phone number
+                  <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="off" />
+                </label>
+                <div className="library-toggle-row">
+                  <label>
+                    Gender
+                    <select
+                      className="admin-role-select"
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value as "male" | "female" | "other" | "unknown")}
+                    >
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                      <option value="unknown">Unknown</option>
+                    </select>
+                  </label>
+                  <label>
+                    Date of birth
+                    <input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+                  </label>
+                </div>
+                <div className="library-toggle-row">
+                  <label>
+                    Height (cm)
+                    <input type="number" step="0.1" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} placeholder="e.g. 160" />
+                  </label>
+                  <label>
+                    Weight (kg)
+                    <input type="number" step="0.1" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} placeholder="e.g. 58" />
+                  </label>
+                </div>
+              </>
+            ) : (
+              <>
+                <label>
+                  Display name
+                  <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name" />
+                </label>
+                <label>
+                  Username
+                  <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
+                </label>
+              </>
+            )}
+
+            {user.role === "therapist" && (
+              <>
+                <label>
+                  License number
+                  <input value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="e.g. PT-2024-00123" autoComplete="off" />
+                </label>
+                <div className="library-toggle-row">
+                  <label>
+                    License issued
+                    <input type="date" value={licenseIssued} onChange={(e) => setLicenseIssued(e.target.value)} />
+                  </label>
+                  <label>
+                    License expiry
+                    <input type="date" value={licenseExpiry} onChange={(e) => setLicenseExpiry(e.target.value)} />
+                  </label>
+                </div>
+              </>
+            )}
+
+            {user.role === "admin" && (
+              <label>
+                Employee ID
+                <input value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="e.g. EMP-0042" autoComplete="off" />
+              </label>
+            )}
+
+            <div className="admin-info-edit-actions">
+              <button type="button" className="secondary-button" onClick={cancelEdit} disabled={submitting}>
+                Discard
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => setConfirmOpen(true)}
+                disabled={submitting}
+              >
+                {submitting ? "Saving…" : "Confirm changes"}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Confirmation dialog — Confirm runs the real save; Cancel keeps editing */}
+        {confirmOpen && (
+          <>
+            <div className="therapist-panel-scrim admin-info-confirm-scrim" onClick={() => setConfirmOpen(false)} />
+            <div className="admin-modal admin-info-confirm" role="dialog" aria-label="Confirm account changes">
+              <span className="admin-info-confirm-icon">
+                <AlertCircle size={20} />
+              </span>
+              <strong>Save changes?</strong>
+              <p>
+                Update {isPatient ? `${firstName.trim()} ${lastName.trim()}`.trim() || user.name : user.name}&#39;s
+                account information?
+              </p>
+              <div className="admin-info-confirm-actions">
+                <button type="button" className="secondary-button" onClick={() => setConfirmOpen(false)} disabled={submitting}>
+                  Cancel
+                </button>
+                <button type="button" className="primary-button" onClick={submit} disabled={submitting}>
+                  {submitting ? "Saving…" : "Confirm & save"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Assignment picker (reuses the same AssignTherapistModal as the old row flow) */}
+        {showAssignModal && isPatient && (
+          <AssignTherapistModal
+            patient={user}
+            therapists={therapists}
+            busy={assignmentBusy}
+            onClose={() => setShowAssignModal(false)}
+            onAssign={async (therapist) => {
+              if (!token) throw new Error("Your session has expired. Please log in again.");
+              setAssignmentBusy(true);
+              setAssignmentError(null);
+              try {
+                await assignPatient(token, therapist.id, user.id);
+              } finally {
+                setAssignmentBusy(false);
+              }
+            }}
+            onAssigned={(patientName, therapistName) => onAssignmentChanged(`${therapistName} was assigned to "${patientName}".`)}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+

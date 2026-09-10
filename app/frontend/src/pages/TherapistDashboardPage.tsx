@@ -2,14 +2,9 @@ import {
   Activity,
   Bell,
   Clock,
-  Dumbbell,
-  Eye,
-  FileText,
-  MessageSquare,
   Search,
   TrendingUp,
-  Users,
-  X
+  Users
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -24,26 +19,38 @@ import {
   type TherapistDashboardData
 } from "../services/api";
 import { useAuth } from "../store/authStore";
+import { useProfilePicture, useOwnProfilePicture } from "../hooks/useProfilePicture";
 import type { PatientProgressTrend, TherapistPatientSummary } from "../types";
 import { initialsFromName } from "../utils/displayName";
 
 interface TherapistDashboardPageProps {
   onLogout: () => void;
   onNavigate: (label: TherapistNavLabel) => void;
-  // Navigates to the full Patient Detail page (frontend-design.md §5,
-  // pages/PatientDetailPage.tsx) — wired from the slide-over panel's
-  // "View Full Report" button, which was previously a non-functional placeholder.
-  onViewFullReport: (patient: TherapistPatientSummary) => void;
+  onViewPatient: (patient: TherapistPatientSummary) => void;
 }
 
 const WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", { weekday: "long" });
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "long", year: "numeric" });
 
-export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport }: TherapistDashboardPageProps) {
+// One patient-table avatar: resolves the row's profilePictureFileId to a blob
+// object URL via the shared useProfilePicture hook (the file lives behind the
+// auth'd GET /files/:id/content endpoint, so an <img src> can't point at it
+// directly). A hook can't be called per-row in the table's map callback, hence
+// this small wrapper — same pattern as AdminUserManagementPage's UserAvatar:
+// photo when resolved, initials badge otherwise (no file / loading / failed).
+function PatientAvatar({ token, fileId, name }: { token: string | null | undefined; fileId?: string | null; name: string }) {
+  const avatarUrl = useProfilePicture(token, fileId ?? null);
+  return (
+    <span className={`therapist-avatar${avatarUrl ? " with-photo" : ""}`}>
+      {avatarUrl ? <img src={avatarUrl} alt={`${name}'s profile picture`} /> : initialsFromName(name)}
+    </span>
+  );
+}
+
+export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: TherapistDashboardPageProps) {
   const { token, user } = useAuth();
 
   const [search, setSearch] = useState("");
-  const [selectedPatient, setSelectedPatient] = useState<TherapistPatientSummary | null>(null);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
 
   // Real dashboard data (modules/therapist/* on the backend) — replaces the
@@ -129,6 +136,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
     trend && trend.points.length > 1 ? trend.points[trend.points.length - 1].score - trend.points[0].score : null;
 
   const displayName = user?.displayName || user?.username || "Therapist";
+  const ownAvatarUrl = useOwnProfilePicture();
   const today = new Date();
 
   return (
@@ -152,7 +160,9 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                 <strong>{displayName}</strong>
                 <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{initialsFromName(displayName)}</span>
+              <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
+                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
+              </span>
             </div>
           </div>
         </header>
@@ -321,18 +331,17 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                 <thead>
                   <tr>
                     <th>Patient</th>
-                    <th>Condition</th>
+                    <th>Current Plan</th>
                     <th>Last Session</th>
                     <th>Compliance</th>
                     <th>Progress</th>
                     <th>Status</th>
-                    <th aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
                   {!dashboardLoading && filteredPatients.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
+                      <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
                         {patients.length === 0
                           ? "No patients are currently assigned to you."
                           : "No patients match your search."}
@@ -342,14 +351,17 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                   {filteredPatients.map((patient) => (
                     <tr
                       key={patient.id}
-                      className={trendPatientId === patient.id ? "trend-selected" : ""}
-                      onClick={() => setTrendPatientId(patient.id)}
-                      style={{ cursor: "pointer" }}
-                      title="Click to plot this patient's recovery trend above"
+                      className="therapist-patient-table-row"
+                      onClick={() => onViewPatient(patient)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") onViewPatient(patient);
+                      }}
+                      tabIndex={0}
+                      role="button"
                     >
                       <td>
                         <div className="therapist-table-patient">
-                          <span className="therapist-avatar">{patient.avatarInitials}</span>
+                          <PatientAvatar token={token} fileId={patient.profilePictureFileId} name={patient.name} />
                           <div>
                             <strong>{patient.name}</strong>
                             <small>
@@ -379,18 +391,6 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
                           {patient.standing === "active" ? "Active" : "At Risk"}
                         </span>
                       </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="secondary-button therapist-view-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSelectedPatient(patient);
-                          }}
-                        >
-                          <Eye size={13} /> View
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -400,16 +400,6 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewFullReport 
         </main>
       </div>
 
-      {selectedPatient && (
-        <PatientDetailPanel
-          patient={selectedPatient}
-          onClose={() => setSelectedPatient(null)}
-          onViewFullReport={() => {
-            onViewFullReport(selectedPatient);
-            setSelectedPatient(null);
-          }}
-        />
-      )}
     </section>
   );
 }
@@ -474,80 +464,5 @@ function MiniProgressRing({ value, size = 36, strokeWidth = 4 }: { value: number
       </svg>
       <strong>{value}%</strong>
     </span>
-  );
-}
-
-function PatientDetailPanel({
-  patient,
-  onClose,
-  onViewFullReport
-}: {
-  patient: TherapistPatientSummary;
-  onClose: () => void;
-  onViewFullReport: () => void;
-}) {
-  return (
-    <>
-      <div className="therapist-panel-scrim" onClick={onClose} />
-      <aside className="therapist-detail-panel" aria-label="Patient profile">
-        <div className="therapist-detail-header">
-          <strong>Patient Profile</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close patient profile">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="therapist-detail-identity">
-          <span className="therapist-avatar large">{patient.avatarInitials}</span>
-          <div>
-            <strong>{patient.name}</strong>
-            {patient.nameTh && <small className="therapist-detail-nameTh">{patient.nameTh}</small>}
-            <p>{patient.condition}</p>
-            <span className={`badge-pill ${patient.standing === "active" ? "good" : "fair"}`}>
-              {patient.standing === "active" ? "Active" : "At Risk"}
-            </span>
-          </div>
-        </div>
-
-        <div className="therapist-detail-stats">
-          <div>
-            <span>Age</span>
-            <strong>{patient.age} years</strong>
-          </div>
-          <div>
-            <span>Sessions</span>
-            <strong>{patient.sessionsCompleted}</strong>
-          </div>
-          <div>
-            <span>Compliance</span>
-            <strong>{patient.compliancePercent}%</strong>
-          </div>
-          <div>
-            <span>Last Session</span>
-            <strong>{patient.lastSessionLabel}</strong>
-          </div>
-        </div>
-
-        <div className="therapist-detail-progress">
-          <strong>Overall Recovery Progress</strong>
-          <div className="therapist-detail-progress-row">
-            <MiniProgressRing value={patient.progressPercent} size={80} strokeWidth={8} />
-            <p>{patient.summary}</p>
-          </div>
-        </div>
-
-        <div className="therapist-detail-actions">
-          <button type="button" className="primary-button">
-            <Dumbbell size={15} /> Assign New Exercise
-          </button>
-          <button type="button" className="secondary-button">
-            <MessageSquare size={15} /> Send Message
-          </button>
-          <button type="button" className="link-button" onClick={onViewFullReport}>
-            <FileText size={15} /> View Full Report
-          </button>
-        </div>
-      </aside>
-    </>
   );
 }

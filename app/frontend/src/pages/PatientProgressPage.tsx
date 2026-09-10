@@ -1,16 +1,17 @@
-import { Award, CalendarDays, TrendingUp } from "lucide-react";
-import type { ReactNode } from "react";
+import { Award, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Flame, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
 import type { PatientNavLabel } from "../components/PatientSidebar";
+import { useProfilePicture } from "../hooks/useProfilePicture";
 import { ApiError, getPatientPlans } from "../services/api";
 import { useAuth } from "../store/authStore";
-import { initialsFromName } from "../utils/displayName";
-import { trackingIcon, trackingLabel } from "./ProgramEditorPage";
+import { initialsFromName, timeOfDayGreeting } from "../utils/displayName";
+import { trackingIcon } from "./ProgramEditorPage";
+import { ProgressRing } from "./PatientTodayPage";
+import { buildMonthCalendar, calendarPeriodLabel, planMonthRange } from "./PatientDetailPage";
 import { computeStreak, currentDayIndex, dayDateLabel, ISO_DATE_RE } from "../utils/rehabPlan";
 import type {
-  ExerciseLibraryDifficulty,
   HeatmapDayStatus,
   PatientRehabPlan,
   RehabPlanStatus,
@@ -45,18 +46,6 @@ const planStatusLabels: Record<RehabPlanStatus, string> = {
   cancelled: "Cancelled"
 };
 
-const difficultyLabels: Record<ExerciseLibraryDifficulty, string> = {
-  easy: "Easy",
-  medium: "Medium",
-  hard: "Hard"
-};
-
-const difficultyBadgeClass: Record<ExerciseLibraryDifficulty, string> = {
-  easy: "easy",
-  medium: "moderate",
-  hard: "hard"
-};
-
 const exerciseStatusLabels: Record<ScheduledExerciseStatus, string> = {
   pending: "Pending",
   in_progress: "In progress",
@@ -72,38 +61,6 @@ const exerciseStatusBadgeClass: Record<ScheduledExerciseStatus, string> = {
   skipped: "poor",
   cancelled: "poor"
 };
-
-interface CalendarCell {
-  key: string;
-  status: HeatmapDayStatus | null;
-  dateNumber: number | null;
-}
-
-function buildCalendarCells(plan: PatientRehabPlan): CalendarCell[] {
-  if (!ISO_DATE_RE.test(plan.startDateLabel)) {
-    return plan.days.map((day, index) => ({ key: `d${index}`, status: day.status, dateNumber: null }));
-  }
-
-  const startDate = new Date(`${plan.startDateLabel}T00:00:00`);
-  const cells: CalendarCell[] = [];
-
-  for (let i = 0; i < startDate.getDay(); i++) {
-    cells.push({ key: `lead-${i}`, status: null, dateNumber: null });
-  }
-
-  plan.days.forEach((day, index) => {
-    const date = day.dateLabel && ISO_DATE_RE.test(day.dateLabel)
-      ? new Date(`${day.dateLabel}T00:00:00`)
-      : new Date(startDate.getTime() + index * 86400000);
-    cells.push({ key: `day-${index}`, status: day.status, dateNumber: date.getDate() });
-  });
-
-  while (cells.length % 7 !== 0) {
-    cells.push({ key: `trail-${cells.length}`, status: null, dateNumber: null });
-  }
-
-  return cells;
-}
 
 // Mirrors backend session.service.ts's `targetValueLabel()`. Turns a raw JSON
 // target value (which Prisma returns as a JS object/array/primitive/null) into
@@ -196,8 +153,18 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const displayName = user?.displayName ?? user?.username ?? "Patient";
-  const avatarInitials = initialsFromName(displayName);
+  // Server-computed name from GET /patients/:id/plans — the same source of
+  // truth PatientTodayPage uses via /patients/:id/today. The auth-store user
+  // carries no displayName for patients (patient login returns only
+  // id/role/phone/name fields), which is why these pages used to show a bare
+  // "Patient" where the name should be.
+  const [serverPatient, setServerPatient] = useState<{ displayName: string; avatarInitials: string; profilePictureFileId?: string | null } | null>(null);
+
+  // Same fallback chain as PatientTodayPage: server name first, then whatever
+  // the auth store has, then the generic label.
+  const displayName = serverPatient?.displayName ?? user?.displayName ?? user?.username ?? "Patient";
+  const avatarInitials = serverPatient?.avatarInitials ?? initialsFromName(displayName);
+  const avatarUrl = useProfilePicture(token, serverPatient?.profilePictureFileId ?? null);
 
   useEffect(() => {
     if (!token || !user) {
@@ -210,11 +177,12 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
     setLoading(true);
     setError(null);
 
-    getPatientPlans(token, user.id)
+    getPatientPlans(token, user.id, ["active", "completed"])
       .then((res) => {
         if (!cancelled) {
           const mapped = mapServerPlans(res.plans || []);
           setPlans(mapped);
+          setServerPatient(res.patient ?? null);
         }
       })
       .catch((err) => {
@@ -231,16 +199,28 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
     };
   }, [token, user, reloadKey]);
 
-  const activePlans = plans.filter((plan) => plan.status === "active");
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  // The API supplies only active and completed plans for this page. "All"
+  // shows both statuses; a specific plan id scopes the page to that plan.
+  const [selectedPlanId, setSelectedPlanId] = useState<"all" | string>("all");
 
-  // Default to the first active plan if available, otherwise the first plan
-  const selectedPlan =
-    activePlans.find((plan) => plan.id === selectedPlanId) ??
-    activePlans[0] ??
-    plans.find((plan) => plan.id === selectedPlanId) ??
-    plans[0] ??
-    null;
+  // Reset back to "All Plans" if the selected plan disappears (e.g. a
+  // therapist completed/cancelled it) rather than showing an empty page.
+  useEffect(() => {
+    if (selectedPlanId !== "all" && !plans.some((plan) => plan.id === selectedPlanId)) setSelectedPlanId("all");
+  }, [plans, selectedPlanId]);
+
+  // "All" shows every plan returned by the status-filtered API.
+  const visiblePlans =
+    selectedPlanId === "all"
+      ? plans
+      : plans.filter((plan) => plan.id === selectedPlanId);
+
+  // Streak pill shows the best streak among the visible plans (same
+  // convention as PatientTodayPage's "All Plans" view).
+  const streak = visiblePlans.reduce(
+    (best, plan) => Math.max(best, computeStreak(plan.days, currentDayIndex(plan.days))),
+    0
+  );
 
   return (
     <section className="therapist-shell">
@@ -250,23 +230,23 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
         onLogout={onLogout}
         displayName={displayName}
         avatarInitials={avatarInitials}
+        avatarUrl={avatarUrl}
       />
 
       <div className="therapist-workspace">
-        <header className="therapist-topbar">
-          <div>
-            <h1>Progress</h1>
-            <p>How your rehab program is going</p>
+        {/* Compact mobile-friendly header, reusing PatientTodayPage's pt-topbar
+            chrome (avatar + greeting + streak pill) instead of the wide
+            therapist-topbar whose two-column profile block wastes phone space. */}
+        <header className="pt-topbar">
+          <div className="pt-identity">
+            <span className={`avatar-badge pt-avatar${avatarUrl ? " with-photo" : ""}`}>
+              {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : avatarInitials}
+            </span>
+            <div><p className="pt-greeting">{timeOfDayGreeting()},</p><h1>{displayName}</h1></div>
           </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{displayName}</strong>
-                <small>Patient</small>
-              </div>
-              <span className="avatar-badge">{avatarInitials}</span>
-            </div>
-          </div>
+          {visiblePlans.length > 0 && (
+            <span className="streak-pill"><Flame size={15} /> {streak}-day streak</span>
+          )}
         </header>
 
         <main className="therapist-main patient-page-main">
@@ -286,14 +266,15 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
                 Try again
               </button>
             </div>
-          ) : !selectedPlan ? (
+          ) : visiblePlans.length === 0 ? (
             <div className="summary-card">
               <p className="pd-empty-note">No active rehab plan right now &mdash; check History for past plans.</p>
             </div>
           ) : (
             <PlanProgress
-              plan={selectedPlan}
+              plans={visiblePlans}
               allPlans={plans}
+              selectedPlanId={selectedPlanId}
               onSelectPlan={setSelectedPlanId}
             />
           )}
@@ -306,21 +287,255 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
 }
 
 function PlanProgress({
-  plan,
+  plans,
   allPlans,
+  selectedPlanId,
   onSelectPlan
 }: {
-  plan: PatientRehabPlan;
+  plans: PatientRehabPlan[];
   allPlans: PatientRehabPlan[];
-  onSelectPlan: (planId: string) => void;
+  selectedPlanId: "all" | string;
+  onSelectPlan: (planId: "all" | string) => void;
 }) {
-  const calendarCells = buildCalendarCells(plan);
+  // All-Plans view = more than one plan is visible. Group headers (plan name
+  // above each plan's section) only make sense in that combined view.
+  const showAll = selectedPlanId === "all" && plans.length > 1;
+
+  // Aggregated figures across every visible plan for the hero + stats.
+  const totalDays = plans.reduce((sum, plan) => sum + plan.days.length, 0);
+  const totalCompletedDays = plans.reduce(
+    (sum, plan) => sum + plan.days.filter((day) => day.status === "completed").length,
+    0
+  );
+  const completionPercent = totalDays > 0 ? Math.round((totalCompletedDays / totalDays) * 100) : 0;
+  const scores = plans
+    .map((plan) => computePlanAverageScore(plan))
+    .filter((score): score is number => score !== null);
+  const averageScore = scores.length > 0 ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null;
+
+  // ONE schedule display for the whole page: in All-Plans view the visible
+  // plans are merged into a single combined plan (by calendar date where every
+  // plan is dated, otherwise by day order), so the page never shows more than
+  // one calendar at a time.
+  const displayPlan = showAll ? mergePlansForAllView(plans) : plans[0];
+
+  return (
+    <>
+      {allPlans.length > 1 && (
+        // Dropdown plan switcher — always occupies the same single row at the
+        // top of the page regardless of how many plans exist (the old chip row
+        // could overflow/wrap on phones). "All Plans" is the default and merges
+        // every visible plan into ONE shared calendar below.
+        <select
+          className="pp-plan-switcher"
+          value={selectedPlanId}
+          onChange={(event) => onSelectPlan(event.target.value)}
+          aria-label="Select rehabilitation plan"
+        >
+          <option value="all">All Plans</option>
+          {allPlans.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.name}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* Compact hero (Today page's pt-hero-block/hero-progress-card idiom):
+          a small progress ring + days-done copy. In All-Plans view the ring
+          shows aggregate completion across every visible plan. */}
+      <div className="pt-hero-block">
+        <section className="today-main-panel hero-progress-card">
+          <div className="pt-hero-left">
+            <ProgressRing value={completionPercent} label={`${completionPercent}%`} size={46} />
+            <div className="pt-hero-copy">
+              <strong>{totalCompletedDays}/{totalDays} Days done</strong>
+              <span>{showAll ? `${plans.length} active plan${plans.length === 1 ? "" : "s"}` : plans[0].name}</span>
+            </div>
+          </div>
+          {showAll ? (
+            <span className="badge-pill good">All Plans</span>
+          ) : (
+            plans[0] && <span className={`pd-program-status ${plans[0].status}`}>{planStatusLabels[plans[0].status]}</span>
+          )}
+        </section>
+      </div>
+
+      {/* ONE shared calendar + schedule section for whichever plan (or merged
+          set of plans) is selected in the dropdown above. */}
+      <PlanSection plan={displayPlan} />
+
+      {/* Combined summary stat card — Avg Score + Completed Days side by side
+          in one card at the bottom of the page (moved down from the two-up
+          pt-stats-grid that sat under the hero). */}
+      <div className="summary-card pp-summary-stats">
+        <div className="pp-summary-stat">
+          <span className="pt-stat-icon avg"><Award size={18} /></span>
+          <div className="pt-stat-body">
+            <span className="pt-stat-label">Avg Score</span>
+            <strong>
+              {averageScore !== null ? averageScore : "—"}{averageScore !== null ? "%" : ""}{" "}
+              <TrendingUp size={14} className="pt-stat-trend" />
+            </strong>
+          </div>
+        </div>
+        <div className="pp-summary-stat">
+          <span className="pt-stat-icon plan"><CalendarDays size={18} /></span>
+          <div className="pt-stat-body">
+            <span className="pt-stat-label">Completed Days</span>
+            <strong>
+              {totalCompletedDays} <small>of {totalDays}</small>
+            </strong>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Merge several plans into one combined plan-like object for the All-Plans
+// view, so the page can drive a single calendar. Days are merged by calendar
+// date when every day carries a valid ISO date (plans scheduled on different
+// dates align correctly); otherwise they're merged by index order. Day status
+// aggregates: completed/cancelled only when every plan agrees, otherwise
+// in_progress > skipped > pending wins.
+type TaggedExercise = ScheduledExercise & { planName?: string };
+
+function aggregateDayStatus(statuses: Array<HeatmapDayStatus | undefined>): HeatmapDayStatus {
+  const present = statuses.filter(Boolean) as HeatmapDayStatus[];
+  if (present.length === 0) return "pending";
+  if (present.every((status) => status === "completed")) return "completed";
+  if (present.every((status) => status === "cancelled")) return "cancelled";
+  if (present.some((status) => status === "in_progress")) return "in_progress";
+  if (present.some((status) => status === "skipped")) return "skipped";
+  return "pending";
+}
+
+function mergePlansForAllView(plans: PatientRehabPlan[]): PatientRehabPlan {
+  if (plans.length === 1) return plans[0];
+  const fullyDated = plans.every((plan) => plan.days.every((day) => day.dateLabel && ISO_DATE_RE.test(day.dateLabel)));
+
+  if (fullyDated) {
+    const dateKeys: string[] = [];
+    const byDate = new Map<string, { statuses: HeatmapDayStatus[]; exercises: TaggedExercise[] }>();
+    plans.forEach((plan) => {
+      plan.days.forEach((day) => {
+        if (!day.dateLabel) return;
+        let bucket = byDate.get(day.dateLabel);
+        if (!bucket) {
+          bucket = { statuses: [], exercises: [] };
+          byDate.set(day.dateLabel, bucket);
+          dateKeys.push(day.dateLabel);
+        }
+        bucket.statuses.push(day.status);
+        bucket.exercises.push(
+          ...day.exercises.map(
+            (exercise): TaggedExercise => ({
+              ...exercise,
+              id: `${plan.id}:${exercise.id}`,
+              planName: plan.name
+            })
+          )
+        );
+      });
+    });
+    dateKeys.sort();
+    const days = dateKeys.map((date, index) => {
+      const bucket = byDate.get(date)!;
+      return {
+        id: `merged-${date}`,
+        dateLabel: date,
+        status: aggregateDayStatus(bucket.statuses),
+        exercises: bucket.exercises
+      };
+    });
+    const dates = plans.flatMap((plan) => plan.days.map((day) => day.dateLabel!)).sort();
+    return {
+      id: "all",
+      name: "All Plans",
+      status: "active",
+      startDateLabel: dates[0] ?? plans[0].startDateLabel,
+      endDateLabel: dateKeys[dateKeys.length - 1],
+      heatmap: days.map((day) => day.status),
+      days
+    };
+  }
+
+  // Fallback for plans without ISO dates (or mixed): merge by day index.
+  const maxLen = plans.reduce((max, plan) => Math.max(max, plan.days.length), 0);
+  const days = Array.from({ length: maxLen }, (_, index) => {
+    const statuses = plans.map((plan) => plan.days[index]?.status).filter(Boolean) as HeatmapDayStatus[];
+    const exercises = plans.flatMap((plan) =>
+      (plan.days[index]?.exercises ?? []).map(
+        (exercise): TaggedExercise => ({
+          ...exercise,
+          id: `${plan.id}:${exercise.id}`,
+          planName: plan.name
+        })
+      )
+    );
+    const datedLabel = plans.map((plan) => plan.days[index]?.dateLabel).find((label) => label && ISO_DATE_RE.test(label));
+    return {
+      id: `merged-${index}`,
+      dateLabel: datedLabel ?? undefined,
+      status: aggregateDayStatus(statuses),
+      exercises
+    };
+  });
+  const startCandidates = plans.map((plan) => plan.startDateLabel).filter((label) => ISO_DATE_RE.test(label)).sort();
+  return {
+    id: "all",
+    name: "All Plans",
+    status: "active",
+    startDateLabel: startCandidates[0] ?? plans[0]?.startDateLabel ?? "",
+    heatmap: days.map((day) => day.status),
+    days
+  };
+}
+
+// The page's single schedule section: month-navigable calendar, selected
+// day's exercises, and upcoming days — driven by whichever plan (or the
+// merged All-Plans combination) is selected in the dropdown.
+function PlanSection({ plan }: { plan: PatientRehabPlan }) {
   const todayIndex = currentDayIndex(plan.days);
-  const todayDay = plan.days[todayIndex] ?? { status: "pending" as HeatmapDayStatus, exercises: [] };
-  const streak = computeStreak(plan.days, todayIndex);
-  const completedDays = plan.days.filter((day) => day.status === "completed").length;
-  const completionPercent = plan.days.length > 0 ? Math.round((completedDays / plan.days.length) * 100) : 0;
-  const averageScore = computePlanAverageScore(plan);
+  // Viewed month ("YYYY-MM"); null = follow the plan's start month, the same
+  // convention PatientDetailPage's calendar uses (resets when the plan changes).
+  const [viewMonthKey, setViewMonthKey] = useState<string | null>(null);
+  // Clicked calendar day (index into plan.days); null = the current program day.
+  const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
+
+  // Switching plans resets both the viewed month and the day selection so the
+  // section always opens on the new plan's start month / current day.
+  useEffect(() => {
+    setViewMonthKey(null);
+    setSelectedDayIndex(null);
+  }, [plan.id]);
+
+  // Month-navigable schedule calendar, built on PatientDetailPage's exported
+  // month-grid helpers: a full Sun-first 6-row grid with adjacent-month and
+  // out-of-plan days shadowed out. Navigation remains available even when the
+  // viewed month has no scheduled plan days.
+  const monthRange = planMonthRange(plan);
+  const effectiveMonthKey = viewMonthKey ?? monthRange.min;
+  const monthCells = buildMonthCalendar(plan, effectiveMonthKey);
+  const monthLabel = (() => {
+    const [y, m] = effectiveMonthKey.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  })();
+  const prevMonthKey = (() => {
+    const [y, m] = effectiveMonthKey.split("-").map(Number);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+  })();
+  const nextMonthKey = (() => {
+    const [y, m] = effectiveMonthKey.split("-").map(Number);
+    return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+  })();
+
+  // The exercises card follows the selected calendar day, falling back to the
+  // current program day — the same tap-to-inspect interaction as
+  // PatientHistoryPage's clickable calendar.
+  const viewIndex = selectedDayIndex !== null && plan.days[selectedDayIndex] ? selectedDayIndex : todayIndex;
+  const viewDay = plan.days[viewIndex] ?? { status: "pending" as HeatmapDayStatus, exercises: [] };
 
   // Next 2-3 pending days that already have exercises pre-scheduled by a PT
   const comingUp = plan.days
@@ -330,79 +545,68 @@ function PlanProgress({
 
   return (
     <>
-      {allPlans.length > 1 && (
-        <div className="summary-card">
-          <p className="pd-plan-selector-label">Rehabilitation plans</p>
-          <div className="pd-plan-list">
-            {allPlans.map((candidate) => (
-              <button
-                key={candidate.id}
-                type="button"
-                className={`pd-plan-row ${candidate.id === plan.id ? "active" : ""}`}
-                onClick={() => onSelectPlan(candidate.id)}
-              >
-                <strong>{candidate.name}</strong>
-                <span className={`pd-program-status ${candidate.status}`}>{planStatusLabels[candidate.status]}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+      {plan.description && (
+        <p className="pp-plan-description">{plan.description}</p>
       )}
 
       <div className="summary-card">
-        <div className="therapist-chart-heading">
-          <div>
-            <strong>{plan.name}</strong>
-            <p>
-              <span className={`pd-program-status ${plan.status}`}>{planStatusLabels[plan.status]}</span>
-              {plan.startDateLabel && (
-                <>
-                  &nbsp;&middot; {plan.startDateLabel}
-                  {plan.endDateLabel ? ` \u2013 ${plan.endDateLabel}` : ""}
-                </>
-              )}
-            </p>
-          </div>
+        <div className="pd-calendar-header">
+          <button
+            type="button"
+            className="icon-button pd-calendar-nav"
+            onClick={() => setViewMonthKey(prevMonthKey)}
+            aria-label="Previous month"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <strong>{monthLabel}</strong>
+          <button
+            type="button"
+            className="icon-button pd-calendar-nav"
+            onClick={() => setViewMonthKey(nextMonthKey)}
+            aria-label="Next month"
+          >
+            <ChevronRight size={14} />
+          </button>
         </div>
-        {plan.description && <p>{plan.description}</p>}
-      </div>
-
-      <div className="therapist-stat-grid">
-        <StatCard icon={<TrendingUp size={20} />} label="Plan completion" value={`${completionPercent}%`} accent="primary" />
-        <StatCard
-          icon={<Award size={20} />}
-          label="Avg score"
-          value={averageScore !== null ? averageScore : "—"}
-          accent="success"
-        />
-        <StatCard
-          icon={<CalendarDays size={20} />}
-          label="Program day"
-          value={plan.days.length > 0 ? `${todayIndex + 1} / ${plan.days.length}` : "—"}
-          accent="teal"
-        />
-        <StatCard icon={<Award size={20} />} label="Current streak" value={`${streak} day${streak === 1 ? "" : "s"}`} accent="warning" />
-      </div>
-
-      <div className="summary-card">
-        <p className="eyebrow">
-          <CalendarDays size={14} /> {plan.days.length}-day plan
-        </p>
         <div className="pd-calendar-weekdays">
           {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
             <span key={index}>{day}</span>
           ))}
         </div>
         <div className="pd-calendar-grid">
-          {calendarCells.map((cell) => (
-            <div
-              key={cell.key}
-              className={`pd-calendar-cell ${cell.status ?? "blank"}`}
-              title={cell.status ? heatmapLabels[cell.status] : undefined}
-            >
-              {cell.dateNumber ?? ""}
-            </div>
-          ))}
+          {monthCells.map((cell) => {
+            // Same cell-classification rules as PatientDetailPage's schedule
+            // calendar: scheduled days keep their status color even in
+            // adjacent-month cells (softened by .adjacent), everything else is
+            // shadowed out. Tapping a scheduled day selects it below.
+            const hasPlanDay = cell.dayIndex !== null && cell.status !== null;
+            const className = [
+              "pd-calendar-cell",
+              hasPlanDay ? cell.status : "",
+              hasPlanDay && cell.otherMonth ? "adjacent" : "",
+              !hasPlanDay ? (cell.otherMonth ? "other" : cell.outside ? "outside" : "empty") : "",
+              cell.dayIndex !== null ? "clickable" : "",
+              cell.dayIndex !== null && cell.dayIndex === (selectedDayIndex ?? todayIndex) ? "selected" : ""
+            ].join(" ").trim();
+            return (
+              <button
+                key={cell.key}
+                type="button"
+                className={className}
+                title={
+                  hasPlanDay
+                    ? `${cell.iso} · ${heatmapLabels[cell.status!]}${cell.otherMonth ? " (next/prev month)" : ""}`
+                    : cell.otherMonth
+                      ? undefined
+                      : `${cell.iso}${cell.outside ? " · No session scheduled" : ""}`
+                }
+                onClick={() => cell.dayIndex !== null && setSelectedDayIndex(cell.dayIndex)}
+              >
+                {cell.dateNumber ?? ""}
+              </button>
+            );
+          })}
         </div>
         <div className="pd-legend">
           {(["completed", "in_progress", "skipped", "pending", "cancelled"] as HeatmapDayStatus[]).map((status) => (
@@ -412,65 +616,61 @@ function PlanProgress({
             </span>
           ))}
         </div>
+        <p className="pp-calendar-footnote">
+          {calendarPeriodLabel(plan)} &middot; Day {todayIndex + 1} of {plan.days.length}
+          {selectedDayIndex !== null && (
+            <>
+              {" "}
+              <button type="button" className="text-action" onClick={() => setSelectedDayIndex(null)}>
+                Back to today
+              </button>
+            </>
+          )}
+        </p>
       </div>
 
       <div className="summary-card">
-        <p className="eyebrow">{dayDateLabel(plan, todayIndex)}&apos;s exercises</p>
-        {todayDay.exercises.length === 0 ? (
-          <p className="pd-empty-note">No exercises assigned for today yet.</p>
+        <p className="eyebrow">
+          {dayDateLabel(plan, viewIndex)}&apos;s exercises
+          {viewIndex === todayIndex && <span className="next-pill">Today</span>}
+        </p>
+        {viewDay.exercises.length === 0 ? (
+          <p className="pd-empty-note">No exercises assigned for this day.</p>
         ) : (
-          <div className="therapist-table-scroll">
-            <table className="therapist-table">
-              <thead>
-                <tr>
-                  <th>Exercise</th>
-                  <th>Tracking</th>
-                  <th>Target</th>
-                  <th>Difficulty</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {todayDay.exercises.map((exercise) => {
-                  const Icon = trackingIcon[exercise.movementTracking];
-                  return (
-                    <tr key={exercise.id}>
-                      <td>
-                        <strong style={{ color: "var(--text-primary)" }}>{exercise.exerciseName}</strong>
-                        {exercise.versionLabel && <small> &middot; {exercise.versionLabel}</small>}
-                        {exercise.therapistInstruction && (
-                          <>
-                            <br />
-                            <small>{exercise.therapistInstruction}</small>
-                          </>
-                        )}
-                      </td>
-                      <td>
-                        <span className={`pe-exercise-icon tracking-${exercise.movementTracking}`} style={{ width: 28, height: 28 }}>
-                          <Icon size={14} />
-                        </span>{" "}
-                        {trackingLabel[exercise.movementTracking]}
-                      </td>
-                      <td>{exercise.targetValueLabel || "—"}</td>
-                      <td>
-                        {exercise.difficultyLevel ? (
-                          <span className={`difficulty-badge ${difficultyBadgeClass[exercise.difficultyLevel]}`}>
-                            {difficultyLabels[exercise.difficultyLevel]}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td>
-                        <span className={`badge-pill ${exerciseStatusBadgeClass[exercise.status]}`}>
-                          {exerciseStatusLabels[exercise.status]}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          // Compact exercise-card list (PatientTodayPage's mobile idiom) —
+          // replaces the 5-column therapist-table that required horizontal
+          // scrolling on phones. Icon color follows the exercise's tracking
+          // type, and the right-side status dot/badge mirrors Today's rows.
+          <div className="exercise-list" aria-label="Selected day's exercises">
+            {viewDay.exercises.map((exercise) => {
+              const Icon = trackingIcon[exercise.movementTracking];
+              const isDone = exercise.status === "completed";
+              return (
+                <div className={`exercise-card${isDone ? " done" : ""}`} key={exercise.id}>
+                  <span className={`exercise-icon ${isDone ? "done" : `tracking-${exercise.movementTracking}`}`} aria-hidden="true">
+                    {isDone ? <CheckCircle2 size={22} /> : <Icon size={22} />}
+                  </span>
+                  <span className="exercise-card-body">
+                    <span className="exercise-card-title-row">
+                    {/* Exercise name only — version ("v1") and difficulty labels
+                        removed for a cleaner mobile row; long names truncate
+                        with an ellipsis (see .exercise-card-title-row strong). */}
+                    <strong>{exercise.exerciseName}</strong>
+                  </span>
+                  <small>
+                    {exercise.targetValueLabel || "Free form"}
+                    {(exercise as TaggedExercise).planName
+                      ? ` · ${(exercise as TaggedExercise).planName}`
+                      : ""}
+                  </small>
+                    {exercise.therapistInstruction && <small className="exercise-note-text">{exercise.therapistInstruction}</small>}
+                  </span>
+                  <span className={`badge-pill ${exerciseStatusBadgeClass[exercise.status]}`}>
+                    {exerciseStatusLabels[exercise.status]}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -499,27 +699,5 @@ function PlanProgress({
         )}
       </div>
     </>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-  accent = "primary"
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string | number;
-  accent?: "primary" | "teal" | "success" | "warning";
-}) {
-  return (
-    <div className={`summary-card therapist-stat-card accent-${accent}`}>
-      <div className="therapist-stat-top">
-        <span className="therapist-stat-icon">{icon}</span>
-      </div>
-      <div className="therapist-stat-value">{value}</div>
-      <p className="therapist-stat-label">{label}</p>
-    </div>
   );
 }

@@ -26,9 +26,12 @@ interface PatientSidebarProps {
   onLogout: () => void;
   displayName: string;
   avatarInitials: string;
+  // Resolved profile-picture object URL (useProfilePicture) — when present it
+  // replaces the initials badge; initials remain the fallback otherwise.
+  avatarUrl?: string | null;
 }
 
-export function PatientSidebar({ activeLabel, onNavigate, onLogout, displayName, avatarInitials }: PatientSidebarProps) {
+export function PatientSidebar({ activeLabel, onNavigate, onLogout, displayName, avatarInitials, avatarUrl }: PatientSidebarProps) {
   return (
     <aside className="therapist-sidebar">
       <div className="therapist-brand">
@@ -54,7 +57,9 @@ export function PatientSidebar({ activeLabel, onNavigate, onLogout, displayName,
       </nav>
 
       <div className="therapist-sidebar-profile">
-        <span className="avatar-badge">{avatarInitials}</span>
+        <span className={`avatar-badge${avatarUrl ? " with-photo" : ""}`}>
+          {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : avatarInitials}
+        </span>
         <div>
           <strong>{displayName}</strong>
           <small>Patient</small>

@@ -1,13 +1,27 @@
 import { Request, Response, NextFunction } from "express";
+import type { PatientRehabilitationPlansStatus } from "@prisma/client";
+import { ValidationError } from "../../common/errors";
 import * as service from "./rehab.service";
+
+const PLAN_STATUSES: PatientRehabilitationPlansStatus[] = ["draft", "active", "completed", "cancelled"];
 
 export async function getPatientPlans(req: Request, res: Response, next: NextFunction) {
   try {
     const patientId = String(req.params.patientId);
     const actorId = req.user!.sub;
     const actorRole = req.user!.role;
-    const plans = await service.getPatientPlans(patientId, actorId, actorRole);
-    res.json({ plans });
+    const rawStatuses = typeof req.query.statuses === "string" ? req.query.statuses.split(",") : undefined;
+    const statuses = rawStatuses?.map((status) => status.trim()).filter(Boolean);
+    if (statuses?.some((status) => !PLAN_STATUSES.includes(status as PatientRehabilitationPlansStatus))) {
+      throw new ValidationError("statuses contains an invalid rehabilitation plan status.");
+    }
+    const result = await service.getPatientPlans(
+      patientId,
+      actorId,
+      actorRole,
+      statuses as PatientRehabilitationPlansStatus[] | undefined
+    );
+    res.json({ plans: result.plans, patient: result.patient });
   } catch (err) {
     next(err);
   }
@@ -72,6 +86,17 @@ export async function postScheduleDay(req: Request, res: Response, next: NextFun
   }
 }
 
+export async function deleteScheduleDayHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const actorId = req.user!.sub;
+    const dayId = String(req.params.dayId);
+    await service.deleteScheduleDay(actorId, dayId);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function patchScheduleDay(req: Request, res: Response, next: NextFunction) {
   try {
     const actorId = req.user!.sub;
@@ -91,6 +116,40 @@ export async function postScheduledExercise(req: Request, res: Response, next: N
     const payload = req.body;
     const ex = await service.createScheduledExercise(actorId, dayId, payload);
     res.status(201).json({ scheduledExercise: ex });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function patchScheduledExerciseOrder(req: Request, res: Response, next: NextFunction) {
+  try {
+    const actorId = req.user!.sub;
+    const dayId = String(req.params.dayId);
+    const exerciseIds = req.body?.exerciseIds;
+    const day = await service.updateScheduledExerciseOrder(actorId, dayId, exerciseIds);
+    res.json({ day });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function patchScheduledExercise(req: Request, res: Response, next: NextFunction) {
+  try {
+    const actorId = req.user!.sub;
+    const exerciseId = String(req.params.exerciseId);
+    const result = await service.updateScheduledExercise(actorId, exerciseId, req.body);
+    res.json({ scheduledExercise: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteScheduledExercise(req: Request, res: Response, next: NextFunction) {
+  try {
+    const actorId = req.user!.sub;
+    const exerciseId = String(req.params.exerciseId);
+    await service.deleteScheduledExercise(actorId, exerciseId);
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -130,6 +189,17 @@ export async function addPlanAttachment(req: Request, res: Response, next: NextF
   }
 }
 
+export async function deletePlanHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const actorId = req.user!.sub;
+    const planId = String(req.params.planId);
+    const result = await service.deletePlan(actorId, planId);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function removePlanAttachment(req: Request, res: Response, next: NextFunction) {
   try {
     const actorId = req.user!.sub;
@@ -151,4 +221,3 @@ export async function getFile(req: Request, res: Response, next: NextFunction) {
     next(err);
   }
 }
-

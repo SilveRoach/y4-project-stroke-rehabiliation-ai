@@ -9,7 +9,7 @@ async function test() {
 
   for (const u of users) {
     if (u.role === "patient") {
-      const plans = await getPatientPlans(u.id, u.id, "patient");
+      const { plans } = await getPatientPlans(u.id, u.id, "patient");
       console.log(`PATIENT: ${u.username} (${u.firstName} ${u.lastName}), PLANS: ${plans.length}`);
       for (const p of plans) {
         console.log(`Plan: ${p.name}, Status: ${p.status}, Days: ${p.scheduleDays.length}`);

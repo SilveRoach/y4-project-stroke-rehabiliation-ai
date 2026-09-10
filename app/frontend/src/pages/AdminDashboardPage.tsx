@@ -21,9 +21,11 @@ import { ReactNode, useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
-import { adminProfile, adminUsers, roleDistributionData, systemLogs, weeklyActivityData } from "../data/adminMock";
+import { adminUsers, roleDistributionData, systemLogs, weeklyActivityData } from "../data/adminMock";
 import { checkHealth } from "../services/api";
 import type { HealthStatus } from "../services/api";
+import { useAuth } from "../store/authStore";
+import { initialsFromName } from "../utils/displayName";
 
 interface AdminDashboardPageProps {
   onLogout: () => void;
@@ -32,6 +34,9 @@ interface AdminDashboardPageProps {
 }
 
 export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettings }: AdminDashboardPageProps) {
+  const { user } = useAuth();
+  const adminDisplayName = user?.displayName || user?.username || "Admin";
+  const adminInitials = initialsFromName(adminDisplayName);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
 
@@ -75,10 +80,10 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{adminProfile.displayName}</strong>
-                <small>{adminProfile.title}</small>
+                <strong>{adminDisplayName}</strong>
+                <small>System Administrator</small>
               </div>
-              <span className="avatar-badge admin-avatar">{adminProfile.initials}</span>
+              <span className="avatar-badge admin-avatar">{adminInitials}</span>
             </div>
           </div>
         </header>

@@ -32,6 +32,10 @@ export interface AuthResult {
         // common/formatting.ts's displayName(). Lets the Therapist dashboard's
         // topbar/sidebar show a real name instead of always the raw username.
         displayName: string;
+        // users.profile_picture_file_id — lets the therapist pages' topbar and
+        // sidebar avatars show the logged-in user's uploaded picture without a
+        // separate profile fetch.
+        profilePictureFileId: string | null;
       };
 }
 
@@ -259,6 +263,7 @@ export async function login(
       role: user.role,
       username: user.username,
       displayName: formatDisplayName(user),
+      profilePictureFileId: user.profilePictureFileId
     },
   };
 }

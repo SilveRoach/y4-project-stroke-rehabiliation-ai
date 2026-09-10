@@ -106,7 +106,7 @@ export function PatientExerciseInstructionPage({
     <section className="therapist-shell">
       <PatientSidebar activeLabel="Home" onNavigate={onNavigate} onLogout={onLogout} displayName={patientName} avatarInitials={avatarInitials} />
       <div className="therapist-workspace">
-        <header className="therapist-topbar">
+        <header className="therapist-topbar pei-topbar">
           <div>
             <button type="button" className="sidebar-link" onClick={onBack}><ArrowLeft size={16} /> Back to today</button>
             <p className="eyebrow">Exercise instruction</p>

@@ -109,3 +109,22 @@ export async function assignPatientHandler(req: Request, res: Response, next: Ne
     next(err);
   }
 }
+
+// --- New: DELETE /therapists/:id/patients/:patientId — end the patient's active
+// assignment. The owning therapist may unassign themselves; an admin may
+// unassign anyone (requireSelfTherapistOrAdmin).
+export async function unassignPatientHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const therapistId = requireParam(req, "id");
+    requireSelfTherapistOrAdmin(req, therapistId);
+    if (!req.user) throw new UnauthenticatedError();
+
+    const patientId = requireParam(req, "patientId");
+
+    await therapistService.unassignPatient(therapistId, patientId, req.user.sub);
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}

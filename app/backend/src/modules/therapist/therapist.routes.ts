@@ -11,7 +11,8 @@ import {
   getTherapistDashboardHandler,
   getTherapistPatientsHandler,
   listAllPatientsHandler,
-  assignPatientHandler
+  assignPatientHandler,
+  unassignPatientHandler
 } from "./therapist.controller";
 
 export const therapistRouter = Router();
@@ -25,5 +26,7 @@ therapistRouter.get("/patients/:id/report", requireAuth, getPatientReportHandler
 
 // Search / list all patients (active + disabled) — available to authenticated users
 therapistRouter.get("/patients", requireAuth, listAllPatientsHandler);
-// Assign a patient to a therapist (therapist may only assign themselves) — body: { patientId }
+// Assign a patient to a therapist (therapist may only assign themselves; admin may assign anyone) — body: { patientId }
 therapistRouter.post("/therapists/:id/patients", requireAuth, assignPatientHandler);
+// End a patient's active assignment (owning therapist may self-unassign; admin may unassign anyone)
+therapistRouter.delete("/therapists/:id/patients/:patientId", requireAuth, unassignPatientHandler);

@@ -10,11 +10,8 @@ import type { PickedFile, PickedFileType } from "../types";
 // one FilePicker per existing file plus a trailing empty one to add another (see
 // pages/PatientDetailPage.tsx).
 //
-// IMPORTANT: there is no upload backend yet (no `files` table endpoint exists in
-// src/backend). "Uploading" is a client-side progress simulation and the resulting
-// previewUrl is a local `URL.createObjectURL` blob URL, not a server-hosted file —
-// it only lasts this browser tab/session. Flagged here rather than silently
-// presented as a real upload.
+// Consumers that need persistence can provide onUpload. Existing consumers
+// without it retain the local preview behavior.
 
 interface FilePickerProps {
   value: PickedFile | null;
@@ -29,6 +26,7 @@ interface FilePickerProps {
   // mockup's "used in context" panels.
   compact?: boolean;
   label?: string;
+  onUpload?: (file: File, localPreviewUrl: string) => Promise<PickedFile>;
 }
 
 interface UploadingState {
@@ -84,7 +82,8 @@ export function FilePicker({
   accept = DEFAULT_ACCEPT,
   maxSizeMB = DEFAULT_MAX_SIZE_MB,
   compact = false,
-  label
+  label,
+  onUpload
 }: FilePickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState<UploadingState | null>(null);
@@ -112,6 +111,19 @@ export function FilePicker({
       type === "video" ? await readVideoDuration(previewUrl).then((s) => (s ? formatDuration(s) : undefined)) : undefined;
 
     setUploading({ fileName: file.name, progress: 0 });
+
+    if (onUpload) {
+      try {
+        const uploaded = await onUpload(file, previewUrl);
+        setUploading(null);
+        onAttach(uploaded);
+      } catch (uploadError) {
+        URL.revokeObjectURL(previewUrl);
+        setUploading(null);
+        setError(uploadError instanceof Error ? uploadError.message : "Could not upload this file.");
+      }
+      return;
+    }
 
     const start = Date.now();
     const durationMs = 700 + Math.random() * 500;

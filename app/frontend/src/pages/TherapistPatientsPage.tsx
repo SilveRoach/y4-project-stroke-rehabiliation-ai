@@ -1,9 +1,11 @@
-import { Eye, Search, UserPlus } from "lucide-react";
+import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { ApiError, getTherapistPatients } from "../services/api";
+import { ApiError, getAllPatients } from "../services/api";
 import { useAuth } from "../store/authStore";
+import { useOwnProfilePicture } from "../hooks/useProfilePicture";
+import type { AllPatientListItem } from "../services/api";
 import type { TherapistPatientSummary } from "../types";
 import { initialsFromName } from "../utils/displayName";
 
@@ -23,27 +25,22 @@ interface TherapistPatientsPageProps {
   onViewPatient: (patient: TherapistPatientSummary) => void;
 }
 
-type StandingFilter = "all" | "active" | "at_risk";
+type AccountFilter = "all" | "active" | "inactive" | "assigned";
 
-const standingFilters: Array<{ key: StandingFilter; label: string }> = [
+const accountFilters: Array<{ key: AccountFilter; label: string }> = [
   { key: "all", label: "All" },
   { key: "active", label: "Active" },
-  { key: "at_risk", label: "At risk" }
+  { key: "inactive", label: "Inactive" },
+  { key: "assigned", label: "Assigned to me" }
 ];
-
-function complianceTone(percent: number): "good" | "fair" | "poor" {
-  if (percent >= 80) return "good";
-  if (percent >= 60) return "fair";
-  return "poor";
-}
 
 export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: TherapistPatientsPageProps) {
   const { token, user } = useAuth();
 
   const [search, setSearch] = useState("");
-  const [standingFilter, setStandingFilter] = useState<StandingFilter>("all");
+  const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
 
-  const [patients, setPatients] = useState<TherapistPatientSummary[]>([]);
+  const [patients, setPatients] = useState<AllPatientListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +51,7 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
     setLoading(true);
     setError(null);
 
-    getTherapistPatients(token, user.id)
+    getAllPatients(token)
       .then((data) => {
         if (!cancelled) setPatients(data.patients);
       })
@@ -80,7 +77,7 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
       const patient = ce.detail as unknown as any;
       if (!patient || !user) return;
       // Only prepend if the assigned-to therapist is the current user
-      if (patient.id && patient.id !== undefined && (patient.assignedTherapistId === user.id || (patient.id && patient))) {
+          if (patient.id && (patient.assignedTherapistId === user.id || patient.id)) {
         setPatients((prev) => {
           if (prev.find((p) => p.id === patient.id)) return prev;
           return [patient, ...prev];
@@ -96,13 +93,29 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
     const query = search.trim().toLowerCase();
     return patients.filter((patient) => {
       const matchesQuery =
-        !query || patient.name.toLowerCase().includes(query) || patient.condition.toLowerCase().includes(query);
-      const matchesStanding = standingFilter === "all" || patient.standing === standingFilter;
-      return matchesQuery && matchesStanding;
+        !query ||
+        [
+          patient.name,
+          patient.username,
+          patient.phoneNumber,
+          patient.condition,
+          patient.assignedTherapistName
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query);
+      const matchesStatus =
+       accountFilter === "all" ||
+       (accountFilter === "active" && patient.status === "active") ||
+       (accountFilter === "inactive" && patient.status !== "active") ||
+       (accountFilter === "assigned" && patient.assignedTherapistId === user?.id);
+      return matchesQuery && matchesStatus;
     });
-  }, [search, standingFilter, patients]);
+  }, [search, accountFilter, patients, user?.id]);
 
   const displayName = user?.displayName || user?.username || "Therapist";
+  const ownAvatarUrl = useOwnProfilePicture();
 
   return (
     <section className="therapist-shell">
@@ -112,7 +125,7 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
         <header className="therapist-topbar">
           <div>
             <h1>Patients</h1>
-            <p>{loading ? "Loading your caseload…" : `${patients.length} patients on your caseload`}</p>
+            <p>{loading ? "Loading patients…" : `${patients.length} patients in the system`}</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
@@ -120,7 +133,9 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
                 <strong>{displayName}</strong>
                 <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{initialsFromName(displayName)}</span>
+              <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
+                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
+              </span>
             </div>
           </div>
         </header>
@@ -133,34 +148,28 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
           )}
 
           <div className="summary-card therapist-patient-card">
-            <div className="therapist-patient-toolbar">
+            <div className="library-toolbar therapist-patient-toolbar">
+              <label className="library-search">
+                <Search size={16} />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search by name, username, phone, or therapist"
+                  aria-label="Search patients by name, username, phone, condition, or therapist"
+                />
+              </label>
               <div className="library-filter-chips">
-                {standingFilters.map((chip) => (
+                {accountFilters.map((chip) => (
                   <button
                     key={chip.key}
                     type="button"
-                    className={`library-filter-chip ${standingFilter === chip.key ? "active" : ""}`}
-                    onClick={() => setStandingFilter(chip.key)}
+                    className={`library-filter-chip ${accountFilter === chip.key ? "active" : ""}`}
+                    onClick={() => setAccountFilter(chip.key)}
                   >
                     {chip.label}
                   </button>
                 ))}
-              </div>
-              <div className="therapist-patient-toolbar-actions">
-                <div className="therapist-search">
-                  <Search size={16} />
-                  <input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search patients…"
-                    aria-label="Search patients"
-                  />
-                </div>
-                {/* Stub: no patient-creation endpoint exists yet — kept as a visible
-                    but inert affordance matching the Dashboard's identical button. */}
-                <button type="button" className="primary-button therapist-add-patient" disabled title="Add patient not wired up yet">
-                  <UserPlus size={14} /> Add Patient
-                </button>
               </div>
             </div>
 
@@ -169,23 +178,35 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
                 <thead>
                   <tr>
                     <th>Patient</th>
-                    <th>Condition</th>
-                    <th>Last Session</th>
-                    <th>Compliance</th>
-                    <th>Status</th>
-                    <th aria-label="Actions" />
+                    <th>Assigned to</th>
+                    <th>Account status</th>
+                    <th>Current active plan</th>
+                    <th>Last exercise session</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!loading && filteredPatients.length === 0 && (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
-                        {patients.length === 0 ? "No patients are currently assigned to you." : "No patients match your search."}
+                      <td colSpan={5} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
+                        {patients.length === 0
+                          ? "No patient accounts have been created yet."
+                          : search.trim()
+                            ? "No patients match your search."
+                            : "No patients match this filter."}
                       </td>
                     </tr>
                   )}
                   {filteredPatients.map((patient) => (
-                    <tr key={patient.id}>
+                    <tr
+                      key={patient.id}
+                      className="therapist-patient-table-row"
+                      onClick={() => onViewPatient(patient)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") onViewPatient(patient);
+                      }}
+                      tabIndex={0}
+                      role="button"
+                    >
                       <td>
                         <div className="therapist-table-patient">
                           <span className="therapist-avatar">{patient.avatarInitials}</span>
@@ -197,33 +218,16 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
                           </div>
                         </div>
                       </td>
-                      <td>{patient.condition}</td>
-                      <td>{patient.lastSessionLabel}</td>
                       <td>
-                        <div className="therapist-compliance-bar">
-                          <span className="therapist-compliance-track">
-                            <span
-                              className={`therapist-compliance-fill ${complianceTone(patient.compliancePercent)}`}
-                              style={{ width: `${patient.compliancePercent}%` }}
-                            />
-                          </span>
-                          <span className="therapist-compliance-value">{patient.compliancePercent}%</span>
-                        </div>
+                        {patient.assignedTherapistName || <span className="therapist-table-muted">Unassigned</span>}
                       </td>
                       <td>
-                        <span className={`badge-pill ${patient.standing === "active" ? "good" : "fair"}`}>
-                          {patient.standing === "active" ? "Active" : "At Risk"}
+                        <span className={`badge-pill ${patient.status === "active" ? "good" : "fair"}`}>
+                          {patient.status === "active" ? "Active" : patient.status === "suspended" ? "Suspended" : "Inactive"}
                         </span>
                       </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="secondary-button therapist-view-button"
-                          onClick={() => onViewPatient(patient)}
-                        >
-                          <Eye size={13} /> View
-                        </button>
-                      </td>
+                      <td>{patient.condition || "No active plan"}</td>
+                      <td>{patient.lastSessionLabel || "No exercise session yet"}</td>
                     </tr>
                   ))}
                 </tbody>

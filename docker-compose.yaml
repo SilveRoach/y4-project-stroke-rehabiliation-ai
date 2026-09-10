@@ -7,7 +7,7 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./backend/media:/app/media
+      - ./app/backend/media:/app/media
     env_file: .env
     restart: unless-stopped
 

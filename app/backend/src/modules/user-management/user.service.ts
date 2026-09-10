@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { ConflictError, NotFoundError, ValidationError } from "../../common/errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../common/errors";
 import { displayName, relativeDateLabel } from "../../common/formatting";
 import { prisma } from "../../config/prisma";
 
@@ -232,6 +232,9 @@ export interface UserListItem {
   lastLoginLabel: string;
   email: string | null;
   phoneNumber: string | null;
+  // users.profile_picture_file_id (files-row id) — powers the account table's
+  // profile-picture avatar on AdminUserManagementPage (initials fallback).
+  profilePictureFileId?: string | null;
   // Therapist-only.
   licenseNumber?: string | null;
   licenseIssuedLabel?: string | null;
@@ -292,7 +295,8 @@ export async function listUsers(): Promise<UserListItem[]> {
       status: toAccountStatus(user.status),
       lastLoginLabel: lastLoginLabel(user.lastLoginAt),
       email: user.email,
-      phoneNumber: user.phoneNumber
+      phoneNumber: user.phoneNumber,
+      profilePictureFileId: user.profilePictureFileId
     };
 
     if (user.role === "therapist" && user.therapist) {
@@ -354,6 +358,9 @@ export interface UserProfileDto {
   address?: string | null;
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
+  // Id of the user's profile-picture `files` row — the Settings pages resolve
+  // it to pixels via GET /files/:fileId/content.
+  profilePictureFileId?: string | null;
   assignedTherapist?: {
     id: string;
     displayName: string;
@@ -378,6 +385,9 @@ export interface UpdateProfileInput {
   address?: string;
   emergencyContactName?: string;
   emergencyContactPhone?: string;
+  // Self-profile picture: the id of a `files` row (uploaded first via
+  // POST /files) that must be an image. null clears the current picture.
+  profilePictureFileId?: string | null;
 }
 
 /** Date -> "yyyy-MM-dd" for an <input type="date">'s value, or null if unset. */
@@ -438,7 +448,8 @@ function toProfileDto(user: NonNullable<Awaited<ReturnType<typeof fetchUserWithT
     email: user.email,
     phoneNumber: user.phoneNumber,
     createdAtLabel: relativeDateLabel(user.createdAt),
-    createdAtIso: user.createdAt.toISOString().slice(0, 10)
+    createdAtIso: user.createdAt.toISOString().slice(0, 10),
+    profilePictureFileId: user.profilePictureFileId
   };
 
   if (user.role === "therapist" && user.therapist) {
@@ -491,6 +502,7 @@ export async function updateUserProfile(
     email?: string | null;
     phoneNumber?: string | null;
     username?: string;
+    profilePictureFileId?: string | null;
   } = {};
 
   if (input.firstName !== undefined) {
@@ -525,6 +537,21 @@ export async function updateUserProfile(
     if (existingPhone) throw new ConflictError("An account with this phone number already exists.");
     userData.username = cleanPhone;
     userData.phoneNumber = cleanPhone;
+  }
+
+  // Profile-picture assignment: the id must reference a `files` row the caller
+  // uploaded that is an image (the same "only your own files" rule the exercise
+  // demo-video flow enforces). null (explicit) clears the current picture.
+  if (input.profilePictureFileId !== undefined) {
+    if (input.profilePictureFileId === null) {
+      userData.profilePictureFileId = null;
+    } else {
+      const file = await prisma.file.findUnique({ where: { id: input.profilePictureFileId } });
+      if (!file) throw new ValidationError("The selected profile picture file does not exist.");
+      if (file.fileType !== "image") throw new ValidationError("The profile picture must be an image file.");
+      if (file.uploadedBy !== actorId) throw new ForbiddenError("You can only use files you uploaded.");
+      userData.profilePictureFileId = file.id;
+    }
   }
 
   const therapistData: { licenseNumber?: string | null; licenseIssuedDate?: Date | null; licenseExpiryDate?: Date | null } =

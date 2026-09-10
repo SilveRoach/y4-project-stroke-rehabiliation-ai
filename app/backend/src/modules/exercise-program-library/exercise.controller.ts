@@ -42,7 +42,8 @@ function parseExerciseInput(req: Request): ExerciseInput {
     description: body.description,
     movementTracking: body.movementTracking as ExerciseInput["movementTracking"],
     difficultyLevel: body.difficultyLevel as ExerciseInput["difficultyLevel"],
-    baseCriteria: body.baseCriteria
+    baseCriteria: body.baseCriteria,
+    demoVideoFileId: body.demoVideoFileId
   };
 }
 

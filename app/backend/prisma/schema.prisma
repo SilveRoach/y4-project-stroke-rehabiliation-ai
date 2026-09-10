@@ -321,14 +321,13 @@ model PatientTherapistAssignment {
   assignedByUser User? @relation("AssignmentAssignedBy", fields: [assignedBy], references: [id])
   endedByUser    User? @relation("AssignmentEndedBy", fields: [endedBy], references: [id])
 
-  // NOTE: newdb2.txt's index is `(patient_id, status) [unique]`, i.e. unique on the
-  // *pair* — not a partial unique index scoped to status = 'active' like newdb.txt had.
-  // That only blocks an exact duplicate (same patient, same status) rather than
-  // enforcing "one active assignment per patient." Preserved as written; flag if this
-  // was meant to carry over newdb.txt's stricter one-active-slot guarantee — Prisma's
-  // schema-level @@unique can't express a partial/filtered index, so that guarantee
-  // would need a raw migration (CREATE UNIQUE INDEX ... WHERE status = 'active').
-  @@unique([patientId, status])
+  // One ACTIVE assignment per patient is enforced by a partial unique index in
+  // the database (CREATE UNIQUE INDEX ... WHERE status = 'active' — see the
+  // fix_patient_therapist_assignment_unique migration). Prisma's schema-level
+  // @@unique can't express a partial/filtered index, so it's intentionally NOT
+  // declared here. The old @@unique([patientId, status]) pair index is gone: it
+  // also limited patients to a single 'ended' row ever, which broke the second
+  // unassign of a re-assigned patient (FR-THR-01's assign/unassign cycle).
   @@map("patient_therapist_assignments")
 }
 

@@ -8,6 +8,8 @@ import type { RecordingResult } from "./hooks/useSessionRecording";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
 import { AdminUserManagementPage } from "./pages/AdminUserManagementPage";
+import { ExerciseCreationPage } from "./pages/ExerciseCreationPage";
+import { ExerciseAiPage } from "./pages/ExerciseAiPage";
 import { ExerciseLibraryPage } from "./pages/ExerciseLibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PatientDetailPage } from "./pages/PatientDetailPage";
@@ -26,11 +28,14 @@ import { TherapistPatientsPage } from "./pages/TherapistPatientsPage";
 import { TherapistSessionsPage } from "./pages/TherapistSessionsPage";
 import { TherapistSettingsPage } from "./pages/TherapistSettingsPage";
 import { AuthProvider, useAuth } from "./store/authStore";
+import { getExerciseLibrary } from "./services/api";
 import type { PatientTodayExercise } from "./services/api";
 import {
   markScheduledExerciseCompleted
 } from "./utils/patientToday";
 import type {
+  ExerciseLibraryItem,
+  ExerciseTrackingType,
   PatientExercise,
   PatientRehabPlan,
   PendingSessionAttempt,
@@ -52,6 +57,8 @@ type View =
   | "therapist-dashboard"
   | "therapist-patients"
   | "therapist-library"
+  | "exercise-creation"
+  | "exercise-ai"
   | "therapist-sessions"
   | "therapist-settings"
   | "patient-detail"
@@ -73,12 +80,15 @@ function homeViewForRole(role: Role): View {
 }
 
 function AppShell() {
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
   const [view, setView] = useState<View>(() => (user ? homeViewForRole(user.role) : "login"));
   const [sessionPaused, setSessionPaused] = useState(false);
   const [lowConfidence, setLowConfidence] = useState(false);
   const [detailPatient, setDetailPatient] = useState<TherapistPatientSummary | null>(null);
   const [reviewSession, setReviewSession] = useState<SessionHistoryEntry | null>(null);
+  // Patient name for a review opened from the cross-patient Sessions log (where
+  // no detailPatient is loaded). null when opened from Patient Detail.
+  const [reviewPatientName, setReviewPatientName] = useState<string | null>(null);
   // Plan currently open in Program Editor (PT_EXERCISE_PATH_MOCKUP_PLAN.md §4.4).
   // PatientDetailPage still owns its own plans[] as local state (unchanged) —
   // pendingPlanUpdate is how Program Editor's Save hands one edited plan back down
@@ -86,6 +96,11 @@ function AppShell() {
   // PatientDetailPage.tsx's pendingPlanUpdate effect for the merge.
   const [editingPlan, setEditingPlan] = useState<PatientRehabPlan | null>(null);
   const [pendingPlanUpdate, setPendingPlanUpdate] = useState<PatientRehabPlan | null>(null);
+
+  // State carried into ExerciseCreationPage (either a selected existing exercise or new exercise basics).
+  const [selectedExercise, setSelectedExercise] = useState<ExerciseLibraryItem | null>(null);
+  const [creationName, setCreationName] = useState("");
+  const [creationTracking, setCreationTracking] = useState<ExerciseTrackingType>("pose");
 
   // CAMERA_TRACKING_MOCKUP_PLAN.md §6.6 — lifted from a plain module-level import
   // into state so a confirmed upload (see handleConfirmUpload below) can actually
@@ -168,6 +183,7 @@ function AppShell() {
       exerciseName: activeExercise.name,
       exerciseNameTh: activeExercise.nameTh,
       videoBlobUrl: URL.createObjectURL(result.blob),
+      videoBlob: result.blob,
       videoFileName: `${fileSlug}-attempt.${extension}`,
       videoSizeLabel: formatVideoSize(result.blob.size),
       videoMimeType: result.mimeType,
@@ -212,8 +228,11 @@ function AppShell() {
     setView("patient-detail");
   };
 
-  const openSessionReview = (session: SessionHistoryEntry) => {
+  const openSessionReview = (session: SessionHistoryEntry, patientName?: string) => {
     setReviewSession(session);
+    // Sessions opened from the cross-patient log aren't tied to a
+    // detailPatient — remember the log's own patient name for the review page.
+    setReviewPatientName(patientName ?? null);
     setView("session-result-review");
   };
 
@@ -238,6 +257,24 @@ function AppShell() {
     if (label === "Exercise Library") setView("therapist-library");
     if (label === "Sessions") setView("therapist-sessions");
     if (label === "Settings") setView("therapist-settings");
+  };
+
+  const handleOpenScheduledExercise = async (exerciseLibraryId: string) => {
+    if (!token) return;
+    try {
+      const response = await getExerciseLibrary(token);
+      const exercise = response.exercises.find((item) => item.id === exerciseLibraryId);
+      if (!exercise) {
+        window.alert("Exercise details could not be found.");
+        return;
+      }
+      setSelectedExercise(exercise);
+      setCreationName(exercise.name);
+      setCreationTracking(exercise.movementTracking);
+      setView("exercise-creation");
+    } catch {
+      window.alert("Could not load exercise details.");
+    }
   };
 
   // Same idea as handleTherapistNavigate above, for the patient-role sidebar/
@@ -348,7 +385,7 @@ function AppShell() {
             setView("login");
           }}
           onNavigate={handleTherapistNavigate}
-          onViewFullReport={openPatientDetail}
+          onViewPatient={openPatientDetail}
         />
       )}
       {view === "therapist-patients" && (
@@ -368,6 +405,49 @@ function AppShell() {
             setView("login");
           }}
           onNavigate={handleTherapistNavigate}
+          onCreateNew={(name, tracking) => {
+            setSelectedExercise(null);
+            setCreationName(name);
+            setCreationTracking(tracking);
+            setView("exercise-creation");
+          }}
+          onSelectExercise={(exercise) => {
+            setSelectedExercise(exercise);
+            setCreationName(exercise.name);
+            setCreationTracking(exercise.movementTracking);
+            setView("exercise-creation");
+          }}
+        />
+      )}
+      {view === "exercise-creation" && (
+        <ExerciseCreationPage
+          exercise={selectedExercise}
+          initialName={creationName}
+          initialTracking={creationTracking}
+          onBack={() => {
+            setSelectedExercise(null);
+            setView("therapist-library");
+          }}
+          onSaved={() => {
+            setSelectedExercise(null);
+            setView("therapist-library");
+          }}
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
+          onNavigate={handleTherapistNavigate}
+          onOpenAi={() => setView("exercise-ai")}
+        />
+      )}
+      {view === "exercise-ai" && (
+        <ExerciseAiPage
+          onBack={() => setView("exercise-creation")}
+          onLogout={() => {
+            logout();
+            setView("login");
+          }}
+          onNavigate={handleTherapistNavigate}
         />
       )}
       {view === "therapist-sessions" && (
@@ -377,6 +457,7 @@ function AppShell() {
             setView("login");
           }}
           onNavigate={handleTherapistNavigate}
+          onReviewSession={(session) => openSessionReview(session, session.patientName)}
         />
       )}
       {view === "therapist-settings" && (
@@ -398,6 +479,7 @@ function AppShell() {
           }}
           onNavigate={handleTherapistNavigate}
           onReviewSession={openSessionReview}
+          onOpenExercise={handleOpenScheduledExercise}
           onOpenProgramEditor={openProgramEditor}
           pendingPlanUpdate={pendingPlanUpdate}
         />
@@ -417,10 +499,10 @@ function AppShell() {
           onNavigate={handleTherapistNavigate}
         />
       )}
-      {view === "session-result-review" && reviewSession && detailPatient && (
+      {view === "session-result-review" && reviewSession && (
         <SessionResultReviewPage
-          review={getSessionReview(reviewSession, detailPatient.name)}
-          onBack={() => setView("patient-detail")}
+          review={getSessionReview(reviewSession, detailPatient?.name ?? reviewPatientName ?? "Patient")}
+          onBack={() => setView(detailPatient ? "patient-detail" : "therapist-sessions")}
           onLogout={() => {
             logout();
             setView("login");

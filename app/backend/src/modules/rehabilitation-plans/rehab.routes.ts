@@ -12,6 +12,8 @@ rehabPlansRouter.post("/patients/:patientId/plans", requireAuth, requireRole("th
 rehabPlansRouter.get("/plans/:planId", requireAuth, controller.getPlan);
 rehabPlansRouter.patch("/plans/:planId", requireAuth, requireRole("therapist"), controller.patchPlan);
 rehabPlansRouter.patch("/plans/:planId/status", requireAuth, requireRole("therapist"), controller.patchPlanStatus);
+// Hard delete (full cascade of days/exercises/results/attachments).
+rehabPlansRouter.delete("/plans/:planId", requireAuth, requireRole("therapist"), controller.deletePlanHandler);
 
 // Attachments
 rehabPlansRouter.get("/patients/:patientId/attachments", requireAuth, controller.getPatientAttachments);
@@ -24,8 +26,11 @@ rehabPlansRouter.post("/plans/:planId/schedule-days", requireAuth, requireRole("
 rehabPlansRouter.patch("/schedule-days/:dayId", requireAuth, requireRole("therapist"), controller.patchScheduleDay);
 
 // Scheduled exercises
+rehabPlansRouter.delete("/schedule-days/:dayId", requireAuth, requireRole("therapist"), controller.deleteScheduleDayHandler);
 rehabPlansRouter.post("/schedule-days/:dayId/exercises", requireAuth, requireRole("therapist"), controller.postScheduledExercise);
+rehabPlansRouter.patch("/schedule-days/:dayId/exercises/order", requireAuth, requireRole("therapist"), controller.patchScheduledExerciseOrder);
 rehabPlansRouter.patch("/scheduled-exercises/:exerciseId/status", requireAuth, requireRole("therapist"), controller.patchScheduledExerciseStatus);
+rehabPlansRouter.patch("/scheduled-exercises/:exerciseId", requireAuth, requireRole("therapist"), controller.patchScheduledExercise);
+rehabPlansRouter.delete("/scheduled-exercises/:exerciseId", requireAuth, requireRole("therapist"), controller.deleteScheduledExercise);
 
 export default rehabPlansRouter;
-

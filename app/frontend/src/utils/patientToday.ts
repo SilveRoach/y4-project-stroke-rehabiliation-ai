@@ -1,4 +1,5 @@
-import type { ExerciseTrackingType, PatientExercise, PatientRehabPlan, ScheduledExercise, TrackingType } from "../types";
+import type { ExerciseTrackingType, PatientExercise, PatientRehabPlan, ScheduleDay, ScheduledExercise, TrackingType } from "../types";
+import type { PatientTodayPlan } from "../services/api";
 import { currentDayIndex, dayIsoDate, ISO_DATE_RE } from "./rehabPlan";
 
 // Shared Home-page ("Today") derivation logic — PATIENT_TODAY_MOCKUP_PLAN.md §2.1/
@@ -13,19 +14,23 @@ export interface TodayExerciseGroup {
   exercises: ScheduledExercise[];
 }
 
-// One group per *active* plan that actually has exercises scheduled today (§2.1:
-// no plan switcher on Home, so a plan with nothing scheduled today just doesn't
-// show up rather than rendering an empty group). Plans with more than one active
-// plan overlapping produce more than one group — PatientTodayPage.tsx renders a
-// group header only when there's more than one.
+// One group per *active* plan that actually has exercises scheduled for TODAY's
+// calendar date (§2.1: no plan switcher on Home). The day is matched by its real
+// scheduled date (day.dateLabel) rather than the plan's "current day" fallback —
+// so a plan whose next pending day falls tomorrow contributes no group today,
+// and overlapping plans only surface the exercises actually due today. Plans
+// with more than one active plan overlapping produce more than one group —
+// PatientTodayPage.tsx renders a group header only when there's more than one.
 export function getTodayExerciseGroups(plans: PatientRehabPlan[]): TodayExerciseGroup[] {
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   return plans
     .filter((plan) => plan.status === "active")
     .map((plan) => {
-      const dayIndex = currentDayIndex(plan.days);
+      const dayIndex = plan.days.findIndex((day) => day.dateLabel === todayStr);
       return { planId: plan.id, planName: plan.name, dayIndex, exercises: plan.days[dayIndex]?.exercises ?? [] };
     })
-    .filter((group) => group.exercises.length > 0);
+    .filter((group) => group.dayIndex !== -1 && group.exercises.length > 0);
 }
 
 // Resolves a Start Session click against today's grouped exercises
@@ -139,6 +144,72 @@ export function buildExerciseDateSet(plans: PatientRehabPlan[]): Set<string> {
   return dates;
 }
 
+// --- Per-date completion status for the Home strip/calendar ---
+// Unlike buildExerciseDateSet (a plain yes/no "is anything scheduled"), the
+// scrollable strip needs to say whether that day's exercises were actually
+// *done* — completed (green), missing (red, scheduled but not fully done), or
+// no exercise that day at all (dark gray). Merged across every *visible* plan
+// (the caller passes selectedPlanId's filtered list), so switching the plan
+// chip updates these colors too, not just which dots show up.
+//
+// Takes the page's real data shape (PatientTodayPlan from
+// GET /patients/:id/today): scheduled dates come from plan.scheduleDates with
+// each date's real day status in plan.dateStatuses (rehabilitation_schedule_days
+// status — completed/skipped/etc.). A date is "completed" when the backend says
+// the schedule day completed; "missing" for past dates that weren't (skipped,
+// cancelled, or still pending/in_progress after their day passed); future
+// scheduled dates report "none" until their day arrives. Today's own cell uses
+// today's exercise statuses when available (all done → completed), falling back
+// to the day status. Completed wins over missing when several plans share a date.
+export type DayCellStatus = "completed" | "missing" | "none";
+
+export function buildExerciseDateStatusMap(plans: PatientTodayPlan[]): Map<string, DayCellStatus> {
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const statusMap = new Map<string, DayCellStatus>();
+  const outrank = (current: DayCellStatus | undefined, next: DayCellStatus): DayCellStatus => {
+    if (current === "completed" || next === "completed") return "completed";
+    // Two plans both still pending on a future date must stay "none" (no
+    // exercise yet) — collapsing none+none to "missing" painted not-yet-due
+    // overlapping days red as if they'd been missed.
+    if ((current ?? "none") === "none" && next === "none") return "none";
+    return "missing";
+  };
+
+  plans.forEach((plan) => {
+    // Today's completion, when this plan has a "today" day with exercises.
+    let todayStatus: DayCellStatus | null = null;
+    if (plan.today && plan.today.exercises.length > 0) {
+      const total = plan.today.exercises.length;
+      const completed = plan.today.exercises.filter((exercise) => exercise.status === "completed").length;
+      todayStatus = completed >= total ? "completed" : "missing";
+    }
+
+    plan.scheduleDates.forEach((iso) => {
+      if (!ISO_DATE_RE.test(iso)) return;
+      // Real day status from the backend decides completed vs missed — a past
+      // day whose schedule_day row is "completed" must show as completed, not
+      // defaulted to missed (the old behavior, since scheduleDates carried no
+      // statuses at all).
+      const dayStatus = plan.dateStatuses[iso];
+      let status: DayCellStatus;
+      if (dayStatus === "completed") {
+        status = "completed";
+      } else if (iso === todayIso && todayStatus) {
+        status = todayStatus;
+      } else if (iso > todayIso) {
+        status = "none";
+      } else {
+        // Past (or today without a today-block) and not completed — skipped,
+        // cancelled, or never finished.
+        status = "missing";
+      }
+      statusMap.set(iso, outrank(statusMap.get(iso), status));
+    });
+  });
+  return statusMap;
+}
+
 // Sun-first month grid (leading/trailing padding cells), same layout convention
 // as PatientHistoryPage.tsx's buildMonthCalendarCells — every day of the viewed
 // month renders, marked has-exercise or not, regardless of which plan (if any)
@@ -167,6 +238,83 @@ export function buildMonthExerciseCells(exerciseDates: Set<string>, viewed: View
 
 export function viewedMonthLabel(viewed: ViewedMonth): string {
   return new Date(viewed.year, viewed.month, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+// Adapter that reshapes the Today payload into the PatientRehabPlan shape the
+// Progress page's month calendar (PatientDetailPage's buildMonthCalendar/
+// planMonthRange) consumes. Day statuses come from the same completed/missing/
+// none derivation the strip uses (completed → completed, missing → skipped,
+// none/scheduled → pending), and the union of every visible plan's schedule
+// dates defines the plan range the month navigation is constrained to.
+export function buildScheduleCalendarPlan(
+  plans: PatientTodayPlan[],
+  statusMap: Map<string, DayCellStatus>
+): PatientRehabPlan {
+  const dates = Array.from(new Set(plans.flatMap((plan) => plan.scheduleDates)))
+    .filter((iso) => ISO_DATE_RE.test(iso))
+    .sort();
+  const days: ScheduleDay[] = dates.map((iso) => {
+    const stripStatus = statusMap.get(iso);
+    return {
+      id: `cal-${iso}`,
+      dateLabel: iso,
+      status: stripStatus === "completed" ? "completed" : stripStatus === "missing" ? "skipped" : "pending",
+      exercises: []
+    };
+  });
+  return {
+    id: plans.length === 1 ? plans[0].id : "all",
+    name: plans.length === 1 ? plans[0].name : "All Plans",
+    status: "active",
+    startDateLabel: dates[0] ?? "",
+    endDateLabel: dates[dates.length - 1],
+    heatmap: days.map((day) => day.status),
+    days
+  };
+}
+
+// --- Scrollable "today ± 10 days" exercise strip for Home's default calendar view ---
+// Per the person's request: the strip covers 10 days before today through 10
+// days after (21 cells total) and scrolls freely both directions — CSS handles
+// the horizontal scroll (.week-strip is overflow-x, not a fixed 7-col grid),
+// this just builds the flat list of cells to render. PatientTodayPage.tsx
+// scrolls/snaps today's cell to the strip's horizontal *center* on load and on
+// plan-switch, then tracks whichever cell is closest to center as the person
+// scrolls or taps one (the "centered" blue highlight) — each cell's own fill
+// color comes from `status` (completed/missing/none) independent of whether
+// it's the centered one.
+
+export interface TodayExerciseStripCell {
+  key: string;
+  iso: string;
+  dateNumber: number;
+  weekdayLabel: string;
+  status: DayCellStatus;
+  isToday: boolean;
+}
+
+export function buildTodayExerciseStripCells(
+  dateStatusMap: Map<string, DayCellStatus>,
+  todayIso: string,
+  daysBefore = 10,
+  daysAfter = 10
+): TodayExerciseStripCell[] {
+  const start = new Date(`${todayIso}T00:00:00`);
+  const cells: TodayExerciseStripCell[] = [];
+  for (let i = -daysBefore; i <= daysAfter; i++) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    cells.push({
+      key: iso,
+      iso,
+      dateNumber: date.getDate(),
+      weekdayLabel: date.toLocaleDateString("en-US", { weekday: "short" }),
+      status: dateStatusMap.get(iso) ?? "none",
+      isToday: i === 0
+    });
+  }
+  return cells;
 }
 
 // Defaults the calendar to the month containing the primary (first active) plan's

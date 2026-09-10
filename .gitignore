@@ -690,3 +690,6 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/node,react,nextjs,windows,macos,linux,pydev,python,jupyternotebooks,pycharm,java,git,web,test
+
+# User-uploaded media (mounted into the backend container at /app/media)
+app/backend/media/

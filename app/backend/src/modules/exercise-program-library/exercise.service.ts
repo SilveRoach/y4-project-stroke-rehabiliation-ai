@@ -33,12 +33,6 @@
 //      (data/exerciseLibraryMock.ts) assumed one existed; real responses from
 //      this module simply omit `nameTh`.
 //
-//   3. No file-upload backend exists anywhere in this codebase (no `files`
-//      table endpoint — see FilePicker.tsx's own comment). `demoVideoFileId` is
-//      therefore never set by this module; `hasDemoVideo` is derived as
-//      `demoVideoFileId !== null` and will always read false for anything
-//      created through these endpoints until an upload endpoint exists.
-//
 //   4. api-design.md documents POST /exercises/:id/versions (bump to a new
 //      version) and PATCH /exercises/:id/publish (draft -> active) and
 //      PATCH /exercises/:id/archive, but has NO route for "edit a draft's
@@ -85,6 +79,13 @@ export interface ExerciseLibraryItemDto {
   movementTracking: ExerciseTrackingType;
   difficultyLevel: ExerciseDifficulty;
   hasDemoVideo: boolean;
+  demoVideoFileId: string | null;
+  demoVideoFile?: {
+    id: string;
+    originalName: string;
+    mimeType: string | null;
+    fileSize: number | null;
+  } | null;
   baseCriteria: ExerciseBaseCriteria;
   status: ExerciseStatus;
   createdAtLabel: string;
@@ -99,13 +100,17 @@ export interface ExerciseInput {
   movementTracking: ExerciseTrackingType;
   difficultyLevel: ExerciseDifficulty;
   baseCriteria?: ExerciseBaseCriteria;
+  demoVideoFileId?: string | null;
 }
 
 type ExerciseRow = Awaited<ReturnType<typeof fetchRowById>>;
 
 // --- Shared row fetch / include -------------------------------------------
 
-const WITH_CREATOR = { createdByUser: true } as const;
+const WITH_CREATOR = {
+  createdByUser: true,
+  demoVideoFile: { select: { id: true, originalName: true, mimeType: true, fileSize: true } }
+} as const;
 
 async function fetchRowById(id: string) {
   return prisma.exerciseLibrary.findUnique({ where: { id }, include: WITH_CREATOR });
@@ -142,6 +147,15 @@ function buildItem(familyRows: NonNullable<ExerciseRow>[]): ExerciseLibraryItemD
     movementTracking: latest.movementTracking,
     difficultyLevel: latest.difficultyLevel,
     hasDemoVideo: latest.demoVideoFileId !== null,
+    demoVideoFileId: latest.demoVideoFileId,
+    demoVideoFile: latest.demoVideoFile
+      ? {
+          id: latest.demoVideoFile.id,
+          originalName: latest.demoVideoFile.originalName,
+          mimeType: latest.demoVideoFile.mimeType,
+          fileSize: latest.demoVideoFile.fileSize === null ? null : Number(latest.demoVideoFile.fileSize)
+        }
+      : null,
     baseCriteria: toBaseCriteria(latest.baseCriteria),
     status: latest.status,
     createdAtLabel: relativeDateLabel(latest.createdAt),
@@ -163,7 +177,7 @@ const TRACKING_TYPES: ExerciseTrackingType[] = ["pose", "virtual_grip", "none"];
 const DIFFICULTIES: ExerciseDifficulty[] = ["easy", "medium", "hard"];
 
 function sanitizeInput(input: ExerciseInput): Required<Pick<ExerciseInput, "name" | "movementTracking" | "difficultyLevel">> &
-  Pick<ExerciseInput, "description" | "baseCriteria"> {
+  Pick<ExerciseInput, "description" | "baseCriteria" | "demoVideoFileId"> {
   const name = input.name?.trim() ?? "";
   if (!name) throw new ValidationError("Exercise name is required.");
   if (name.length > 150) throw new ValidationError("Exercise name must be 150 characters or fewer.");
@@ -180,8 +194,17 @@ function sanitizeInput(input: ExerciseInput): Required<Pick<ExerciseInput, "name
     description: input.description?.trim() ?? "",
     movementTracking: input.movementTracking,
     difficultyLevel: input.difficultyLevel,
-    baseCriteria: input.baseCriteria ?? {}
+    baseCriteria: input.baseCriteria ?? {},
+    demoVideoFileId: input.demoVideoFileId ?? null
   };
+}
+
+async function validateDemoVideoFile(therapistId: string, fileId: string | null) {
+  if (!fileId) return;
+  const file = await prisma.file.findUnique({ where: { id: fileId } });
+  if (!file) throw new ValidationError("Demo video file not found.");
+  if (file.fileType !== "video") throw new ValidationError("The selected demo file must be a video.");
+  if (file.uploadedBy !== therapistId) throw new ForbiddenError("You can only use files you uploaded.");
 }
 
 // --- GET /exercises -----------------------------------------------------------
@@ -228,6 +251,7 @@ export async function getExerciseById(
 
 export async function createExercise(therapistId: string, input: ExerciseInput): Promise<ExerciseLibraryItemDto> {
   const clean = sanitizeInput(input);
+  await validateDemoVideoFile(therapistId, clean.demoVideoFileId ?? null);
 
   const row = await prisma.exerciseLibrary.create({
     data: {
@@ -237,6 +261,7 @@ export async function createExercise(therapistId: string, input: ExerciseInput):
       movementTracking: clean.movementTracking,
       difficultyLevel: clean.difficultyLevel,
       baseCriteria: clean.baseCriteria as Prisma.InputJsonValue,
+      demoVideoFileId: clean.demoVideoFileId,
       status: "draft",
       createdBy: therapistId
     },
@@ -263,6 +288,7 @@ export async function updateExerciseDraft(
   }
 
   const clean = sanitizeInput(input);
+  await validateDemoVideoFile(therapistId, clean.demoVideoFileId ?? null);
   const updated = await prisma.exerciseLibrary.update({
     where: { id },
     data: {
@@ -270,7 +296,8 @@ export async function updateExerciseDraft(
       description: clean.description || null,
       movementTracking: clean.movementTracking,
       difficultyLevel: clean.difficultyLevel,
-      baseCriteria: clean.baseCriteria as Prisma.InputJsonValue
+      baseCriteria: clean.baseCriteria as Prisma.InputJsonValue,
+      demoVideoFileId: clean.demoVideoFileId
     },
     include: WITH_CREATOR
   });
@@ -300,6 +327,7 @@ export async function createExerciseVersion(
   }
 
   const clean = sanitizeInput(input);
+  await validateDemoVideoFile(therapistId, clean.demoVideoFileId ?? null);
   const rootId = familyRootId(row);
   const family = await fetchFamily(rootId);
   const nextVersionNumber = Math.max(...family.map((v) => v.versionNumber)) + 1;
@@ -318,6 +346,7 @@ export async function createExerciseVersion(
         movementTracking: clean.movementTracking,
         difficultyLevel: clean.difficultyLevel,
         baseCriteria: clean.baseCriteria as Prisma.InputJsonValue,
+        demoVideoFileId: clean.demoVideoFileId,
         status: "draft",
         createdBy: therapistId
       }

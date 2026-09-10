@@ -234,8 +234,8 @@ export function PatientSessionPage({
               it rendered before this plan. */}
           {camera.status === "streaming" && !sessionStarted && (
             <div className="session-preroll">
-              <FramingGuide />
               <p>Position yourself in frame · ยืนให้อยู่ในกรอบกล้อง</p>
+              <FramingGuide />
               <button type="button" className="primary-button" onClick={handleStart}>
                 Start · เริ่ม
               </button>
@@ -402,10 +402,12 @@ function SessionProgressRing({ value, label }: { value: number; label: string })
 
 // §2.1 — dashed person-silhouette outline shown during the pre-session preroll,
 // reusing the same overlay SVG viewBox/color language as PoseOverlay/HandOverlay
-// below rather than a new visual style.
+// below rather than a new visual style. Cropped to the UPPER half of the body
+// (head/shoulders/arms/torso) via the viewBox — the full-body outline extended
+// past what a seated/upper-body exercise session actually frames.
 function FramingGuide() {
   return (
-    <svg className="framing-guide" viewBox="0 0 260 360" aria-hidden="true">
+    <svg className="framing-guide" viewBox="0 0 260 210" aria-hidden="true">
       <circle cx="130" cy="70" r="34" />
       <path d="M74 190 Q70 130 130 122 Q190 130 186 190 L196 300 Q196 320 176 320 L146 320 L146 230 L114 230 L114 320 L84 320 Q64 320 64 300 Z" />
     </svg>

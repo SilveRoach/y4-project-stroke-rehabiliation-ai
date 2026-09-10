@@ -1,9 +1,10 @@
-import { AlertCircle, CheckCircle2, LogOut, Pencil, Phone, Save, User, X } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, LogOut, Pencil, Phone, Save, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
 import type { PatientNavLabel } from "../components/PatientSidebar";
+import { useProfilePicture, useProfilePictureUpload } from "../hooks/useProfilePicture";
 import {
   ApiError,
   getUserProfile,
@@ -74,6 +75,19 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  // --- Profile picture (real upload via the backend files module) ---
+  // Flow: pick an image -> POST /files (multer, files module) -> PATCH /users/:id
+  // { profilePictureFileId } -> the user row points at the files row. Pixels come
+  // back via GET /files/:fileId/content (auth'd fetch -> blob -> object URL),
+  // resolved by the shared useProfilePicture hook.
+  const profilePicFileId = profile?.profilePictureFileId ?? null;
+  const profilePicUrl = useProfilePicture(token, profilePicFileId);
+  const picUpload = useProfilePictureUpload(token, authUser?.id ?? null, (updated) => {
+    setProfile(updated);
+    setSavedSuccess(true);
+    window.setTimeout(() => setSavedSuccess(false), 3000);
+  });
+
   const beforeEditRef = useRef(form);
 
   useEffect(() => {
@@ -130,6 +144,12 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
     setSavedSuccess(false);
     setSaveError(null);
     setIsEditing(true);
+    // Move focus into the first editable field once the inputs have rendered,
+    // so entering edit mode is immediately obvious (keyboard/mobile users
+    // land straight in the form instead of hunting for it).
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(".ps-card input, .ps-card select")?.focus();
+    });
   };
 
   const discardChanges = () => {
@@ -202,6 +222,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
         onLogout={onLogout}
         displayName={displayName}
         avatarInitials={avatarInitials}
+        avatarUrl={profilePicUrl}
       />
 
       <div className="therapist-workspace">
@@ -216,7 +237,9 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                 <strong>{displayName}</strong>
                 <small>Patient</small>
               </div>
-              <span className="avatar-badge">{avatarInitials}</span>
+              <span className={`avatar-badge${profilePicUrl ? " with-photo" : ""}`}>
+                {profilePicUrl ? <img src={profilePicUrl} alt={`${displayName}'s profile picture`} /> : avatarInitials}
+              </span>
             </div>
           </div>
         </header>
@@ -234,17 +257,53 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
               </button>
             </div>
           ) : (
-            <form className="ps-card" onSubmit={handleSubmit}>
-              <div className="ps-avatar-circle">{avatarInitials}</div>
+            <form className={`ps-card${isEditing ? " editing" : ""}`} onSubmit={handleSubmit}>
+              <div className={`ps-avatar-circle lg${profilePicUrl ? " with-photo" : ""}`}>
+                {profilePicUrl ? (
+                  <img className="ps-avatar-img" src={profilePicUrl} alt={`${displayName}'s profile picture`} />
+                ) : (
+                  avatarInitials
+                )}
+              </div>
 
-              {saveError && (
+              {/* Real profile-picture upload: POST /files -> PATCH /users/:id
+                  { profilePictureFileId }. Hidden input + camera-button keeps the
+                  existing card layout. */}
+              <input
+                ref={picUpload.inputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={picUpload.handleFileChange}
+              />
+              <button
+                type="button"
+                className="ps-avatar-upload"
+                onClick={picUpload.openFilePicker}
+                disabled={picUpload.uploading}
+              >
+                <Camera size={13} />{" "}
+                {picUpload.uploading
+                  ? "Uploading…"
+                  : profilePicUrl
+                    ? "Change photo"
+                    : "Upload photo"}
+              </button>
+
+              {isEditing && (
+                <span className="ps-editing-pill">
+                  <Pencil size={12} /> Editing profile
+                </span>
+              )}
+
+              {(saveError || picUpload.uploadError) && (
                 <div
                   className="summary-card"
                   role="alert"
                   style={{ borderColor: "var(--danger, #d33)", margin: "0 20px 16px", width: "calc(100% - 40px)" }}
                 >
                   <p style={{ margin: 0, color: "var(--danger, #d33)", display: "flex", alignItems: "center", gap: 6 }}>
-                    <AlertCircle size={16} /> {saveError}
+                    <AlertCircle size={16} /> {saveError ?? picUpload.uploadError}
                   </p>
                 </div>
               )}

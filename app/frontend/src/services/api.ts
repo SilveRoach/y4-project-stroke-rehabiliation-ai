@@ -41,7 +41,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
     response = await fetch(`${BASE_URL}${path}`, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...options.headers
       }
     });
@@ -72,6 +72,9 @@ export interface AuthUser {
   phoneNumber?: string;
   username?: string;
   displayName?: string;
+  // users.profile_picture_file_id — present for therapist/admin logins; lets
+  // the sidebar/topbar avatars show the logged-in user's uploaded picture.
+  profilePictureFileId?: string | null;
 }
 
 export interface AuthResponse {
@@ -175,6 +178,9 @@ export interface AdminUserListItem {
   lastLoginLabel: string;
   email: string | null;
   phoneNumber: string | null;
+  // users.profile_picture_file_id (files-row id) — powers the account table's
+  // profile-picture avatar on AdminUserManagementPage (initials fallback).
+  profilePictureFileId?: string | null;
   // Therapist-only.
   licenseNumber?: string | null;
   licenseIssuedLabel?: string | null;
@@ -187,6 +193,10 @@ export interface AdminUserListItem {
   dateOfBirthLabel?: string | null;
   heightCm?: number | null;
   weightKg?: number | null;
+  // Patient-only: the therapist from the patient's ACTIVE
+  // patient_therapist_assignments row (null when unassigned). Powers the
+  // assign/unassign therapist UI on AdminUserManagementPage.
+  assignedTherapist?: { id: string; displayName: string; licenseNumber?: string | null } | null;
 }
 
 export function getUsers(token: string): Promise<{ users: AdminUserListItem[] }> {
@@ -234,6 +244,33 @@ export function getTherapistPatients(
   });
 }
 
+export interface AllPatientListItem {
+  id: string;
+  name: string;
+  displayName: string;
+  username: string;
+  age: number;
+  condition: string;
+  lastSessionLabel: string;
+  sessionsCompleted: number;
+  avatarInitials: string;
+  progressPercent: number;
+  compliancePercent: number;
+  standing: "active" | "at_risk";
+  summary: string;
+  phoneNumber?: string | null;
+  status: "active" | "inactive" | "suspended";
+  assignedTherapistId?: string | null;
+  assignedTherapistName?: string | null;
+}
+
+export function getAllPatients(token: string, query?: string): Promise<{ patients: AllPatientListItem[] }> {
+  const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+  return apiRequest<{ patients: AllPatientListItem[] }>(`/patients${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
 export function getPatientProgressTrend(token: string, patientId: string): Promise<PatientProgressTrend> {
   return apiRequest<PatientProgressTrend>(`/patients/${patientId}/report`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -269,13 +306,27 @@ export function assignPatient(
   });
 }
 
+// DELETE /therapists/:id/patients/:patientId — ends the patient's ACTIVE
+// assignment (status → 'ended' + ended_at/ended_by). Authorization matches
+// assign: the owning therapist may self-unassign, an admin may unassign anyone.
+// Used by AdminUserManagementPage's unassign button.
+export function unassignPatient(
+  token: string,
+  therapistId: string,
+  patientId: string
+): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/therapists/${therapistId}/patients/${patientId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
 // --- Exercise Library (frontend-design.md §6, revised per
 // UI_MOCKUP_PLAN_NEWDB.md §2.5) ---
 // Backed by modules/exercise-program-library/* on the backend — replaces the
 // former data/exerciseLibraryMock.ts import (exerciseLibrary). See that
-// module's exercise.service.ts for the documented schema gaps (no nameTh, no
-// file-upload backend so hasDemoVideo never persists as true, and the
-// parentExerciseId "points at the family root" convention). One route,
+// module's exercise.service.ts for the documented schema gaps (no nameTh and
+// the parentExerciseId "points at the family root" convention). One route,
 // PATCH /exercises/:id, isn't in docs/04-design/api-design.md at all — it was
 // added there to support editing a still-draft exercise in place, which this
 // page's UI already assumed was possible.
@@ -286,6 +337,82 @@ export interface ExerciseInputPayload {
   movementTracking: ExerciseTrackingType;
   difficultyLevel: ExerciseLibraryDifficulty;
   baseCriteria: ExerciseBaseCriteria;
+  demoVideoFileId?: string | null;
+}
+
+export interface UploadedFile {
+  id: string;
+  fileType: "image" | "video" | "document" | "audio" | "other";
+  originalName: string;
+  storedName: string;
+  mimeType: string | null;
+  fileSize: number | null;
+  storagePath: string;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
+export function uploadFile(token: string, file: File): Promise<{ file: UploadedFile }> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiRequest<{ file: UploadedFile }>("/files", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body
+  });
+}
+
+// PATCH /performance-results/:id/scoring — therapist PT score/feedback and the
+// AI-vs-PT final-score decision for one recorded attempt. Returns the updated
+// attempt in the same shape as getScheduleDayReview's attempts.
+export function updateAttemptScoring(
+  token: string,
+  resultId: string,
+  payload: {
+    ptScore?: number | null;
+    ptFeedback?: string | null;
+    finalScore?: number | null;
+    evaluationSource?: "ai" | "pt" | "manual";
+  }
+): Promise<{ attempt: {
+    id: string;
+    attemptNumber: number;
+    aiScore: number | null;
+    aiFeedback: string | null;
+    ptScore: number | null;
+    ptFeedback: string | null;
+    finalScore: number | null;
+    evaluationSource: "ai" | "pt" | "manual" | null;
+    referenceVideoFileId: string | null;
+    completedAtIso: string | null;
+  } }> {
+  return apiRequest(`/performance-results/${resultId}/scoring`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getFileContent(token: string, fileId: string): Promise<Blob> {
+  const response = await fetch(`${BASE_URL}/files/${fileId}/content`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as ApiErrorBody | null;
+    throw new ApiError(response.status, body?.error?.message ?? "The file could not be loaded.", body?.error?.code);
+  }
+  return response.blob();
+}
+
+export async function getFileThumbnail(token: string, fileId: string): Promise<Blob> {
+  const response = await fetch(`${BASE_URL}/files/${fileId}/thumbnail`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as ApiErrorBody | null;
+    throw new ApiError(response.status, body?.error?.message ?? "The video thumbnail could not be loaded.", body?.error?.code);
+  }
+  return response.blob();
 }
 
 export function getExerciseLibrary(token: string): Promise<{ exercises: ExerciseLibraryItem[] }> {
@@ -379,6 +506,9 @@ export interface UserProfile {
   address?: string | null;
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
+  // Id of the user's profile-picture `files` row (upload via POST /files,
+  // resolve to pixels via GET /files/:fileId/content).
+  profilePictureFileId?: string | null;
   assignedTherapist?: {
     id: string;
     displayName: string;
@@ -403,6 +533,9 @@ export interface UpdateProfilePayload {
   address?: string;
   emergencyContactName?: string;
   emergencyContactPhone?: string;
+  // Assign a previously-uploaded image file (via uploadFile()) as the profile
+  // picture; null clears it. The backend validates ownership + file type.
+  profilePictureFileId?: string | null;
 }
 
 export function getUserProfile(token: string, userId: string): Promise<{ user: UserProfile }> {
@@ -454,18 +587,35 @@ export interface PatientTodayExercise {
   status: "pending" | "in_progress" | "completed" | "skipped" | "cancelled";
 }
 
+// A single active plan's own "current day" — each active plan computes this
+// independently, so a patient with multiple concurrent active plans gets one
+// per plan instead of a single cross-plan pick.
+export interface PatientTodayPlanDay {
+  scheduleDayId: string;
+  scheduledDate: string;
+  status: "pending" | "in_progress" | "completed" | "skipped" | "cancelled";
+  dayNumber: number;
+  streak: number;
+  therapistNote: string | null;
+  exercises: PatientTodayExercise[];
+}
+
+export interface PatientTodayPlan {
+  id: string;
+  name: string;
+  totalDays: number;
+  scheduleDates: string[];
+  // Real per-date day status (rehabilitation_schedule_days.status) for every
+  // date in scheduleDates — lets the calendar mark past days actually
+  // COMPLETED as completed instead of assuming every past day was missed.
+  dateStatuses: Record<string, "pending" | "in_progress" | "completed" | "skipped" | "cancelled">;
+  today: PatientTodayPlanDay | null;
+}
+
 export interface PatientTodayData {
-  patient: { id: string; displayName: string; avatarInitials: string };
-  scheduleDay: {
-    id: string;
-    scheduledDate: string;
-    status: "pending" | "in_progress" | "completed" | "skipped" | "cancelled";
-    dayNumber: number;
-    streak: number;
-    therapistNote: string | null;
-    plan: { id: string; name: string; totalDays: number; scheduleDates: string[] };
-    exercises: PatientTodayExercise[];
-  } | null;
+  patient: { id: string; displayName: string; avatarInitials: string; profilePictureFileId?: string | null };
+  activePlans: { id: string; name: string }[];
+  plans: PatientTodayPlan[];
   stats: { averageScore: number | null; completedSessions: number };
 }
 
@@ -498,6 +648,80 @@ export function getPatientScheduledExerciseInstruction(
   return apiRequest<{ scheduledExercise: PatientScheduledExerciseInstruction }>(`/scheduled-exercises/${scheduledExerciseId}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
+}
+
+// §2.7 — real review data for one schedule day (assigned therapist or admin).
+// Attempts come newest-first per exercise; referenceVideoFileId is the server
+// files-row id of the patient's recorded video (streamed via getFileContent).
+export function getScheduleDayReview(
+  token: string,
+  dayId: string
+): Promise<{
+  review: {
+    sessionId: string;
+    patientName: string;
+    dateLabel: string;
+    dayLabel: string;
+    exercises: Array<{
+      id: string;
+      scheduledExerciseId: string;
+      exerciseName: string;
+      exerciseVersionLabel: string;
+      attempts: Array<{
+        id: string;
+        attemptNumber: number;
+        aiScore: number | null;
+        aiFeedback: string | null;
+        ptScore: number | null;
+        ptFeedback: string | null;
+        finalScore: number | null;
+        evaluationSource: "ai" | "pt" | "manual" | null;
+        referenceVideoFileId: string | null;
+        completedAtIso: string | null;
+      }>;
+    }>;
+  };
+}> {
+  return apiRequest<{ review: any }>(`/schedule-days/${dayId}/results`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }) as any;
+}
+
+// §6.7 — real attempt submission: uploads the recorded video (multipart) and
+// creates the exercise_performance_results row server-side, marking the
+// scheduled exercise (and its day, once all its exercises are done) completed.
+export async function submitExerciseResult(
+  token: string,
+  scheduledExerciseId: string,
+  video: Blob,
+  fileName: string,
+  mimeType: string,
+  payload: { aiScore?: number; aiFeedback?: string }
+): Promise<{
+  result: { id: string; attemptNumber: number; aiScore: number | null; aiFeedback: string | null; referenceVideoFileId: string | null };
+  scheduledExerciseStatus: string;
+  scheduleDayStatus: string | null;
+}> {
+  const body = new FormData();
+  body.append("file", video, fileName);
+  if (payload.aiScore !== undefined) body.append("aiScore", String(payload.aiScore));
+  if (payload.aiFeedback !== undefined) body.append("aiFeedback", payload.aiFeedback);
+
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/scheduled-exercises/${scheduledExerciseId}/results`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body
+    });
+  } catch {
+    throw new ApiError(0, "Could not reach the server. Check your connection and try again.");
+  }
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => null)) as ApiErrorBody | null;
+    throw new ApiError(response.status, errorBody?.error?.message ?? `Upload failed (${response.status})`, errorBody?.error?.code);
+  }
+  return response.json();
 }
 
 export async function getPatientScheduledExerciseDemoVideo(token: string, scheduledExerciseId: string): Promise<Blob> {
@@ -590,8 +814,26 @@ export function getAdminDashboard(token: string): Promise<AdminDashboardData> {
 
 // --- Patient rehabilitation plans (Patient Detail page) ---------------------
 // GET /patients/:patientId/plans
-export function getPatientPlans(token: string, patientId: string): Promise<{ plans: any[] }> {
-  return apiRequest<{ plans: any[] }>(`/patients/${patientId}/plans`, {
+// `patient` mirrors session.service.ts's /patients/:id/today payload — a
+// server-computed display name/initials so patient-side pages can show the
+// real name even when the auth-store user carries no displayName.
+export interface GetPatientPlansResponse {
+  plans: any[];
+  patient?: {
+    displayName: string;
+    avatarInitials: string;
+    profilePictureFileId?: string | null;
+    assignedTherapist?: { id: string; displayName: string } | null;
+  };
+}
+
+export function getPatientPlans(
+  token: string,
+  patientId: string,
+  statuses?: Array<"draft" | "active" | "completed" | "cancelled">
+): Promise<GetPatientPlansResponse> {
+  const query = statuses && statuses.length > 0 ? `?statuses=${statuses.join(",")}` : "";
+  return apiRequest<GetPatientPlansResponse>(`/patients/${patientId}/plans${query}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
 }
@@ -613,6 +855,25 @@ export function createPatientPlan(
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload)
+  });
+}
+
+// DELETE /plans/:planId — hard-deletes the plan and everything attached to it
+// (schedule days, scheduled exercises, recorded performance results, plan
+// attachments). Destructive: unlike cancelling, session history is wiped too.
+export function deletePlan(token: string, planId: string): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/plans/${planId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+// DELETE /schedule-days/:dayId — removes one schedule day (and its exercises
+// + recorded results) without touching the plan's start/end dates.
+export function deleteScheduleDay(token: string, dayId: string): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/schedule-days/${dayId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
   });
 }
 
@@ -695,6 +956,37 @@ export function createScheduledExercise(
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload)
+  });
+}
+
+export function patchScheduledExercise(
+  token: string,
+  exerciseId: string,
+  payload: { targetValue: string | number | null }
+): Promise<{ scheduledExercise: any }> {
+  return apiRequest<{ scheduledExercise: any }>(`/scheduled-exercises/${exerciseId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteScheduledExercise(token: string, exerciseId: string): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/scheduled-exercises/${exerciseId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export function reorderScheduledExercises(
+  token: string,
+  dayId: string,
+  exerciseIds: string[]
+): Promise<{ day: any }> {
+  return apiRequest<{ day: any }>(`/schedule-days/${dayId}/exercises/order`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ exerciseIds })
   });
 }
 

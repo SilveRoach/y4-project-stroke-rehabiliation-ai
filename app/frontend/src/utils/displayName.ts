@@ -19,3 +19,15 @@ export function initialsFromName(name: string): string {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
+/**
+ * Time-of-day greeting for the patient pages' shared topbar ("Good morning,
+ * {name}"). Originally written inline in PatientTodayPage.tsx, moved here so
+ * Progress and History render the exact same header chrome as Home/Today.
+ */
+export function timeOfDayGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}

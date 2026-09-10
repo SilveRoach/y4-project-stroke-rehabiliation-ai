@@ -1,5 +1,5 @@
-import { AlertTriangle, Ban, Bell, CheckCircle2, Dumbbell, Eye, Hand, Plus, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Ban, Bell, CheckCircle2, Dumbbell, Hand, Plus, Search, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { FilePicker } from "../components/FilePicker";
 import { TherapistSidebar } from "../components/TherapistSidebar";
@@ -9,12 +9,14 @@ import {
   archiveExercise,
   createExercise,
   createExerciseVersion,
+  getFileThumbnail,
   getExerciseLibrary,
   publishExercise,
   updateExerciseDraft,
   type ExerciseInputPayload
 } from "../services/api";
 import { useAuth } from "../store/authStore";
+import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import { initialsFromName } from "../utils/displayName";
 import type {
   ExerciseBaseCriteria,
@@ -43,15 +45,6 @@ import type {
 //   - No nameTh column — the version-history mock had Thai names, real rows never
 //     will, so `nameTh` is simply never rendered here (dropped from this page
 //     entirely rather than always showing an empty string).
-//   - No file-upload backend anywhere in this codebase — the demo-video
-//     FilePicker below still works for picking a *local* preview during this
-//     browser session (same caveat FilePicker.tsx already documents for every
-//     other page that uses it), but nothing is sent to the backend for it: the
-//     create/edit/version calls never include a file reference, so
-//     `hasDemoVideo` on a freshly created/edited real exercise will always come
-//     back `false` from the server on next load, even if a file was picked in
-//     this session. Flagged rather than silently pretending the picked file
-//     persisted.
 //   - Editing a still-`draft` exercise's fields in place goes to
 //     `PATCH /exercises/:id`, an endpoint added beyond api-design.md — see that
 //     file's own header comment.
@@ -59,27 +52,21 @@ import type {
 interface ExerciseLibraryPageProps {
   onLogout: () => void;
   onNavigate: (label: TherapistNavLabel) => void;
+  // Called after the therapist fills in Step 1 of the "New exercise" flow
+  // (name + movement tracking). The library page delegates the remaining
+  // creation form to ExerciseCreationPage, which lives at a separate view.
+  onCreateNew?: (name: string, tracking: ExerciseTrackingType) => void;
+  // Called when the user clicks on an exercise card or clicks View/Edit.
+  // Navigates to the comprehensive ExerciseCreationPage for that exercise.
+  onSelectExercise?: (exercise: ExerciseLibraryItem) => void;
 }
 
 type StatusFilter = "all" | ExerciseLibraryStatus;
-
-const statusFilters: Array<{ key: StatusFilter; label: string }> = [
-  { key: "all", label: "All" },
-  { key: "active", label: "Active" },
-  { key: "draft", label: "Draft" },
-  { key: "archived", label: "Archived" }
-];
 
 const trackingLabels: Record<ExerciseTrackingType, string> = {
   pose: "Pose tracking",
   virtual_grip: "Virtual grip",
   none: "No AI tracking"
-};
-
-const difficultyLabels: Record<ExerciseLibraryDifficulty, string> = {
-  easy: "Easy",
-  medium: "Medium",
-  hard: "Hard"
 };
 
 const trackingIcon: Record<ExerciseTrackingType, typeof Dumbbell> = {
@@ -94,7 +81,7 @@ function statusLabel(status: ExerciseLibraryStatus): string {
   return "Archived";
 }
 
-export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPageProps) {
+export function ExerciseLibraryPage({ onLogout, onNavigate, onCreateNew, onSelectExercise }: ExerciseLibraryPageProps) {
   const { token, user } = useAuth();
 
   const [exercises, setExercises] = useState<ExerciseLibraryItem[]>([]);
@@ -102,12 +89,15 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
   const [error, setError] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [editingExercise, setEditingExercise] = useState<ExerciseLibraryItem | "new" | null>(null);
   const [historyExercise, setHistoryExercise] = useState<ExerciseLibraryItem | null>(null);
   // Read-only detail view (separate from Edit) — lets the therapist inspect an
   // exercise's full details, including archived ones, without opening the form
   // and risking an accidental edit/version-bump.
   const [viewingExercise, setViewingExercise] = useState<ExerciseLibraryItem | null>(null);
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
+  const thumbnailUrlsRef = useRef<Record<string, string>>({});
 
   // `reloadToken` just forces the effect below to re-run after a mutation
   // (create/edit/archive) — simpler than duplicating the fetch/cancellation
@@ -124,7 +114,25 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
 
     getExerciseLibrary(token)
       .then((data) => {
-        if (!cancelled) setExercises(data.exercises);
+        if (!cancelled) {
+          setExercises(data.exercises);
+          Object.values(thumbnailUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+          thumbnailUrlsRef.current = {};
+          setThumbnailUrls({});
+          data.exercises.forEach((exercise) => {
+            if (!exercise.demoVideoFileId) return;
+            getFileThumbnail(token, exercise.demoVideoFileId)
+              .then((blob) => {
+                if (cancelled) return;
+                const url = URL.createObjectURL(blob);
+                thumbnailUrlsRef.current[exercise.id] = url;
+                setThumbnailUrls((current) => ({ ...current, [exercise.id]: url }));
+              })
+              .catch(() => {
+                // Keep the existing placeholder when a thumbnail cannot be generated.
+              });
+          });
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -137,32 +145,29 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
 
     return () => {
       cancelled = true;
+      Object.values(thumbnailUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+      thumbnailUrlsRef.current = {};
     };
   }, [token, user, reloadToken]);
 
   const filteredExercises = useMemo(() => {
-    if (statusFilter === "all") return exercises;
-    return exercises.filter((exercise) => exercise.status === statusFilter);
-  }, [exercises, statusFilter]);
-
-  const [archivingId, setArchivingId] = useState<string | null>(null);
-  const [archiveError, setArchiveError] = useState<string | null>(null);
-
-  const handleArchive = async (exerciseId: string) => {
-    if (!token) return;
-    setArchivingId(exerciseId);
-    setArchiveError(null);
-    try {
-      await archiveExercise(token, exerciseId);
-      refetch();
-    } catch (err) {
-      setArchiveError(err instanceof ApiError ? err.message : "Couldn't archive this exercise. Please try again.");
-    } finally {
-      setArchivingId(null);
-    }
-  };
+    const query = searchQuery.trim().toLocaleLowerCase();
+    return exercises.filter((exercise) => {
+      const matchesStatus = statusFilter === "all" || exercise.status === statusFilter;
+      const searchableText = [
+        exercise.name,
+        trackingLabels[exercise.movementTracking],
+        exercise.movementTracking,
+        exercise.createdByName || "Therapist"
+      ]
+        .join(" ")
+        .toLocaleLowerCase();
+      return matchesStatus && (!query || searchableText.includes(query));
+    });
+  }, [exercises, searchQuery, statusFilter]);
 
   const displayName = user?.displayName || user?.username || "Therapist";
+  const ownAvatarUrl = useOwnProfilePicture();
 
   return (
     <section className="therapist-shell">
@@ -183,32 +188,45 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
                 <strong>{displayName}</strong>
                 <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{initialsFromName(displayName)}</span>
+              <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
+                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
+              </span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main">
-          {(error || archiveError) && (
+          {error && (
             <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 16 }}>
-              <p style={{ margin: 0 }}>{error ?? archiveError}</p>
+              <p style={{ margin: 0 }}>{error}</p>
             </div>
           )}
 
           <div className="summary-card">
             <div className="library-toolbar">
-              <div className="library-filter-chips">
-                {statusFilters.map((chip) => (
-                  <button
-                    key={chip.key}
-                    type="button"
-                    className={`library-filter-chip ${statusFilter === chip.key ? "active" : ""}`}
-                    onClick={() => setStatusFilter(chip.key)}
-                  >
-                    {chip.label}
-                  </button>
-                ))}
-              </div>
+              <label className="library-search">
+                <Search size={16} />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search by name, type, or creator"
+                  aria-label="Search exercises by name, type, or creator"
+                />
+              </label>
+              <label className="library-status-filter">
+                <span>Status</span>
+                <select
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+                  aria-label="Filter exercises by status"
+                >
+                  <option value="all">All</option>
+                  <option value="active">Active</option>
+                  <option value="draft">Draft</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </label>
               <button type="button" className="primary-button" onClick={() => setEditingExercise("new")}>
                 <Plus size={16} /> New exercise
               </button>
@@ -217,81 +235,69 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
 
           {!loading && filteredExercises.length === 0 ? (
             <p className="pd-empty-note">
-              {exercises.length === 0 ? "No exercises have been created yet." : "No exercises match this filter."}
+              {exercises.length === 0
+                ? "No exercises have been created yet."
+                : searchQuery.trim()
+                  ? "No exercises match your search."
+                  : "No exercises match this filter."}
             </p>
           ) : (
             <div className="library-grid">
               {filteredExercises.map((exercise) => {
                 const Icon = trackingIcon[exercise.movementTracking];
-                const isOwner = user ? (exercise.createdById === user.id || user.role === "admin") : false;
                 return (
-                  <div key={exercise.id} className={`library-card ${exercise.status === "archived" ? "is-archived" : ""}`}>
-                    <div className="library-card-top">
-                      <span className={`library-card-icon tracking-${exercise.movementTracking}`}>
-                        <Icon size={22} />
+                  <div
+                    key={exercise.id}
+                    className={`library-card ${exercise.status === "archived" ? "is-archived" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onSelectExercise?.(exercise)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelectExercise?.(exercise);
+                      }
+                    }}
+                    title="Open exercise editor"
+                  >
+                    <div className="library-card-media">
+                      {thumbnailUrls[exercise.id] ? (
+                        <img
+                          className="library-card-thumbnail library-card-video-thumbnail"
+                          src={thumbnailUrls[exercise.id]}
+                          alt={`${exercise.name} demo video thumbnail`}
+                        />
+                      ) : (
+                        <div className="library-card-thumbnail">
+                          <Icon size={30} />
+                          <span>{exercise.hasDemoVideo ? "Demo video" : "No demo video"}</span>
+                        </div>
+                      )}
+                      <span className={`library-card-type tracking-${exercise.movementTracking}`}>
+                        {trackingLabels[exercise.movementTracking]}
                       </span>
-                      <div>
-                        <strong className="library-card-title">{exercise.name}</strong>
-                        <p className="library-card-sub">
-                          {trackingLabels[exercise.movementTracking]} &middot; {difficultyLabels[exercise.difficultyLevel]}
-                        </p>
-                      </div>
                     </div>
 
-                    <div className="library-card-badges">
+                    <div className="library-card-details">
+                      <strong className="library-card-title">{exercise.name}</strong>
+                      <span>Created by {exercise.createdByName || "Therapist"}</span>
                       <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
-                      <span className="library-version-badge">v{exercise.versionNumber}</span>
-                      {exercise.createdById && (
-                        <span
-                          className="library-version-badge"
-                          style={{
-                            background: isOwner ? "rgba(46, 117, 89, 0.12)" : "rgba(100, 116, 139, 0.12)",
-                            color: isOwner ? "var(--primary, #2e7559)" : "var(--text-secondary, #64748b)"
-                          }}
-                        >
-                          {isOwner ? "My Exercise" : `By ${exercise.createdByName || "Therapist"}`}
-                        </span>
-                      )}
                       {exercise.versions.length > 1 ? (
                         <button
                           type="button"
                           className="text-action library-card-history-link"
-                          onClick={() => setHistoryExercise(exercise)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setHistoryExercise(exercise);
+                          }}
                         >
                           History
                         </button>
                       ) : (
-                        <span className="library-card-history-link" style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>
-                          No versions yet
-                        </span>
+                        <span className="library-card-history-link" style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>No history</span>
                       )}
                     </div>
 
-                    <div className="library-card-actions">
-                      <button type="button" className="text-action" onClick={() => setViewingExercise(exercise)}>
-                        <Eye size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-                        View
-                      </button>
-                      {exercise.status === "archived" ? (
-                        <span style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>Kept for history &middot; read-only</span>
-                      ) : isOwner ? (
-                        <>
-                          <button type="button" className="text-action" onClick={() => setEditingExercise(exercise)}>
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="text-action danger"
-                            disabled={archivingId === exercise.id}
-                            onClick={() => handleArchive(exercise.id)}
-                          >
-                            {archivingId === exercise.id ? "Archiving…" : "Archive"}
-                          </button>
-                        </>
-                      ) : (
-                        <span style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>Read-only</span>
-                      )}
-                    </div>
                   </div>
                 );
               })}
@@ -308,6 +314,14 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
             setEditingExercise(null);
             refetch();
           }}
+          onCreateNew={
+            editingExercise === "new" && onCreateNew
+              ? (name, tracking) => {
+                  setEditingExercise(null);
+                  onCreateNew(name, tracking);
+                }
+              : undefined
+          }
         />
       )}
 
@@ -322,8 +336,13 @@ export function ExerciseLibraryPage({ onLogout, onNavigate }: ExerciseLibraryPag
           onEdit={
             viewingExercise.status !== "archived" && (user?.role === "admin" || viewingExercise.createdById === user?.id)
               ? () => {
-                  setEditingExercise(viewingExercise);
+                  const target = viewingExercise;
                   setViewingExercise(null);
+                  if (onSelectExercise) {
+                    onSelectExercise(target);
+                  } else {
+                    setEditingExercise(target);
+                  }
                 }
               : undefined
           }
@@ -410,7 +429,7 @@ function ExerciseDetailPanel({ exercise, onClose, onEdit, onViewHistory }: Exerc
               </div>
             </div>
             <p className="library-history-criteria">
-              {trackingLabels[exercise.movementTracking]} &middot; {difficultyLabels[exercise.difficultyLevel]}
+              {trackingLabels[exercise.movementTracking]}
             </p>
           </div>
 
@@ -471,12 +490,19 @@ interface ExerciseFormModalProps {
   // owns the authoritative post-save state (the server response), not a
   // locally-constructed ExerciseLibraryItem.
   onSaved: () => void;
+  // Two-step flow: when set, the "new exercise" modal only collects name +
+  // movement tracking and calls this instead of saving. The full details form
+  // lives at ExerciseCreationPage. Only provided when exercise===null (new).
+  onCreateNew?: (name: string, tracking: ExerciseTrackingType) => void;
 }
 
-function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProps) {
+function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: ExerciseFormModalProps) {
   const { token, user } = useAuth();
   const isOwner = !exercise || (user ? (exercise.createdById === user.id || user.role === "admin") : false);
   const isEditingActive = exercise?.status === "active";
+  // Two-step mode: when onCreateNew is provided and this is a new exercise,
+  // the modal only collects name + movement tracking then calls onCreateNew.
+  const isTwoStep = !exercise && !!onCreateNew;
 
   const [name, setName] = useState(exercise?.name ?? "");
   const [description, setDescription] = useState(exercise?.description ?? "");
@@ -537,7 +563,16 @@ function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProp
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || !token) return;
+    if (!name.trim()) return;
+
+    // Two-step: new exercise with a dedicated creation page — just hand off
+    // name + tracking type and let ExerciseCreationPage collect the rest.
+    if (isTwoStep) {
+      onCreateNew!(name.trim(), movementTracking);
+      return;
+    }
+
+    if (!token) return;
 
     const baseCriteria: ExerciseBaseCriteria = {};
     if (movementTracking === "pose") {
@@ -662,115 +697,107 @@ function ExerciseFormModal({ exercise, onClose, onSaved }: ExerciseFormModalProp
             <input value={name} onChange={(event) => setName(event.target.value)} required />
           </label>
 
-          <label>
-            Description
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
-          </label>
-
           <div className="library-toggle-row">
             <label>
               Movement tracking
-              <div className="library-segmented">
+              <select
+                className="creation-select"
+                value={movementTracking}
+                onChange={(event) => setMovementTracking(event.target.value as ExerciseTrackingType)}
+              >
                 {(["pose", "virtual_grip", "none"] as ExerciseTrackingType[]).map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={movementTracking === option ? "active" : ""}
-                    onClick={() => setMovementTracking(option)}
-                  >
+                  <option key={option} value={option}>
                     {trackingLabels[option]}
-                  </button>
+                  </option>
                 ))}
-              </div>
-            </label>
-
-            <label>
-              Difficulty
-              <div className="library-segmented">
-                {(["easy", "medium", "hard"] as ExerciseLibraryDifficulty[]).map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={difficultyLevel === option ? "active" : ""}
-                    onClick={() => setDifficultyLevel(option)}
-                  >
-                    {difficultyLabels[option]}
-                  </button>
-                ))}
-              </div>
+              </select>
             </label>
           </div>
 
-          <label>
-            Demo video
-            <FilePicker value={demoFile} onAttach={setDemoFile} onRemove={() => setDemoFile(null)} accept="video/*" />
-          </label>
+          {/* Two-step mode: stop here and hand off to ExerciseCreationPage */}
+          {isTwoStep ? (
+            <button type="submit" className="primary-button full-width" disabled={!name.trim()}>
+              Continue →
+            </button>
+          ) : (
+            <>
+              <label>
+                Description
+                <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
+              </label>
 
-          <div>
-            <p className="filepicker-label" style={{ marginBottom: 8 }}>
-              Base criteria &mdash; {trackingLabels[movementTracking]} fields
-            </p>
-            <div className="library-criteria-grid">
-              {movementTracking === "pose" && (
-                <>
-                  <label>
-                    Target angle (&deg;)
-                    <input
-                      type="number"
-                      value={targetAngleDeg}
-                      onChange={(event) => setTargetAngleDeg(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Repetitions
-                    <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
-                  </label>
-                  <label>
-                    Hold (seconds)
-                    <input type="number" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} />
-                  </label>
-                </>
-              )}
-              {movementTracking === "virtual_grip" && (
-                <>
-                  <label>
-                    Target grip strength
-                    <input
-                      type="number"
-                      value={targetGripStrength}
-                      onChange={(event) => setTargetGripStrength(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Repetitions
-                    <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
-                  </label>
-                  <label>
-                    Hold (seconds)
-                    <input type="number" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} />
-                  </label>
-                </>
-              )}
-              {movementTracking === "none" && (
-                <label>
-                  Repetitions
-                  <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
-                </label>
-              )}
-            </div>
-          </div>
+              <label>
+                Demo video
+                <FilePicker value={demoFile} onAttach={setDemoFile} onRemove={() => setDemoFile(null)} accept="video/*" />
+              </label>
 
-          <button type="submit" className="primary-button full-width" disabled={saving || (!isOwner && !!exercise)}>
-            {saving
-              ? "Saving…"
-              : exercise
-                ? !isOwner
-                  ? "Read-only (not creator)"
-                  : isEditingActive
-                    ? `Save as v${exercise.versionNumber + 1} \u00b7 draft`
-                    : "Save changes"
-                : "Save as v1 \u00b7 draft"}
-          </button>
+              <div>
+                <p className="filepicker-label" style={{ marginBottom: 8 }}>
+                  Base criteria &mdash; {trackingLabels[movementTracking]} fields
+                </p>
+                <div className="library-criteria-grid">
+                  {movementTracking === "pose" && (
+                    <>
+                      <label>
+                        Target angle (&deg;)
+                        <input
+                          type="number"
+                          value={targetAngleDeg}
+                          onChange={(event) => setTargetAngleDeg(event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Repetitions
+                        <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
+                      </label>
+                      <label>
+                        Hold (seconds)
+                        <input type="number" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} />
+                      </label>
+                    </>
+                  )}
+                  {movementTracking === "virtual_grip" && (
+                    <>
+                      <label>
+                        Target grip strength
+                        <input
+                          type="number"
+                          value={targetGripStrength}
+                          onChange={(event) => setTargetGripStrength(event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Repetitions
+                        <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
+                      </label>
+                      <label>
+                        Hold (seconds)
+                        <input type="number" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} />
+                      </label>
+                    </>
+                  )}
+                  {movementTracking === "none" && (
+                    <label>
+                      Repetitions
+                      <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              <button type="submit" className="primary-button full-width" disabled={saving || (!isOwner && !!exercise)}>
+                {saving
+                  ? "Saving…"
+                  : exercise
+                    ? !isOwner
+                      ? "Read-only (not creator)"
+                      : isEditingActive
+                        ? `Save as v${exercise.versionNumber + 1} \u00b7 draft`
+                        : "Save changes"
+                    : "Save as v1 \u00b7 draft"}
+              </button>
+            </>
+          )}
         </form>
       </div>
     </>

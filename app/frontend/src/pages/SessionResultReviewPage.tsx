@@ -7,19 +7,48 @@
 // evaluationSource/finalScore. Reached from Patient Detail's per-session
 // "Review ›" action.
 //
-// Real, client-side only (same pattern as every other still-mock page): the PT
-// score/feedback edits and the AI-vs-PT decision update local component state
-// seeded from data/sessionReviewMock.ts. No exercise_performance_results backend
-// endpoint exists yet — see UI_MOCKUP_PLAN_NEWDB.md §5: the running schema doesn't
-// even have the ai_score/pt_score/evaluation_source/final_score columns this page
-// is designed against yet, only a single `score` field.
+// Real: the PT score/feedback edits and the AI-vs-PT decision persist for real
+// recorded attempts via PATCH /performance-results/:id/scoring (assigned
+// therapist or admin) — see session.service.ts's updateAttemptScoring. Only
+// synthesized/mock fallback attempts (no server row) remain client-side only.
 
 import { ArrowLeft, Bell, Video } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
+import { ApiError, getFileContent, getScheduleDayReview, updateAttemptScoring } from "../services/api";
+import { useAuth } from "../store/authStore";
 import { therapistProfile } from "../data/therapistMock";
-import type { ExercisePerformanceAttempt, SessionExerciseReview, SessionReviewData } from "../types";
+import type {
+  ExercisePerformanceAttempt,
+  SessionExerciseReview,
+  SessionReviewData
+} from "../types";
+
+// Maps the real GET /schedule-days/:id/results payload onto the page's
+// SessionExerciseReview/attempt shape. The video comes through as a server
+// files-row id (referenceVideoFileId) — AttemptReview streams it via
+// getFileContent and renders a real <video> player in place of the placeholder.
+function mapRealReviewToExercises(real: any): SessionExerciseReview[] {
+  return (real.exercises ?? []).map((exercise: any) => ({
+    id: exercise.id,
+    scheduledExerciseId: exercise.scheduledExerciseId,
+    exerciseName: exercise.exerciseName,
+    exerciseVersionLabel: exercise.exerciseVersionLabel,
+    attempts: (exercise.attempts ?? []).map((attempt: any) => ({
+      id: attempt.id,
+      attemptNumber: attempt.attemptNumber,
+      referenceVideo: null,
+      referenceVideoFileId: attempt.referenceVideoFileId ?? null,
+      aiScore: attempt.aiScore ?? undefined,
+      aiFeedback: attempt.aiFeedback ?? undefined,
+      ptScore: attempt.ptScore ?? undefined,
+      ptFeedback: attempt.ptFeedback ?? undefined,
+      finalScore: attempt.finalScore ?? undefined,
+      evaluationSource: attempt.evaluationSource ?? undefined
+    }))
+  }));
+}
 
 interface SessionResultReviewPageProps {
   review: SessionReviewData;
@@ -29,8 +58,43 @@ interface SessionResultReviewPageProps {
 }
 
 export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate }: SessionResultReviewPageProps) {
+  const { token } = useAuth();
   const [exercises, setExercises] = useState<SessionExerciseReview[]>(review.exercises);
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | undefined>(review.exercises[0]?.id);
+
+  // Real attempts: the review payload handed in from App.tsx is mock/synthesized
+  // (data/sessionReviewMock.ts). Fetch the REAL exercise_performance_results for
+  // this schedule day and swap them in when they exist — mock data stays as the
+  // fallback for seeded days that never had a real recorded attempt. The real
+  // attempt ids are recorded in persistedAttemptIds: only those can be scored
+  // for real (PATCH /performance-results/:id/scoring) — mock/synthesized
+  // attempts have no server row, so their edits stay client-side.
+  const [persistedAttemptIds, setPersistedAttemptIds] = useState<Set<string>>(new Set());
+  const [scoringStatus, setScoringStatus] = useState<{ tone: "saved" | "error"; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getScheduleDayReview(token, review.sessionId)
+      .then((res) => {
+        if (cancelled) return;
+        const mapped = mapRealReviewToExercises(res.review);
+        if (mapped.length > 0) {
+          setExercises(mapped);
+          setSelectedExerciseId(mapped[0].id);
+          setPersistedAttemptIds(
+            new Set(mapped.flatMap((exercise) => exercise.attempts.map((attempt) => attempt.id)))
+          );
+        }
+      })
+      .catch(() => {
+        // Not found / not permitted / no real attempts — keep the fallback data.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, review.sessionId]);
+
   const [selectedAttemptByExercise, setSelectedAttemptByExercise] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const exercise of review.exercises) {
@@ -43,6 +107,12 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate }
   const selectedAttemptId = selectedExercise ? selectedAttemptByExercise[selectedExercise.id] : undefined;
   const selectedAttempt = selectedExercise?.attempts.find((attempt) => attempt.id === selectedAttemptId) ?? selectedExercise?.attempts[0];
 
+  // Applies a scoring patch locally, and persists it to
+  // PATCH /performance-results/:id/scoring when the attempt is a real server
+  // row (mock/synthesized fallback attempts stay client-side only). PT
+  // edits are debounced per attempt by the caller (the inputs fire per
+  // keystroke — debounce keeps request volume sane); the final-score decision
+  // buttons persist immediately.
   const updateAttempt = (exerciseId: string, attemptId: string, patch: Partial<ExercisePerformanceAttempt>) => {
     setExercises((current) =>
       current.map((exercise) =>
@@ -56,6 +126,26 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate }
             }
       )
     );
+
+    const scoringPatch: Record<string, unknown> = {};
+    for (const key of ["ptScore", "ptFeedback", "finalScore", "evaluationSource"] as const) {
+      if (key in patch) scoringPatch[key] = patch[key];
+    }
+    if (Object.keys(scoringPatch).length === 0) return;
+    if (!token || !persistedAttemptIds.has(attemptId)) return;
+
+    setScoringStatus({ tone: "saved", message: "Saving…" });
+    window.clearTimeout(scoringTimerRef.current);
+    scoringTimerRef.current = window.setTimeout(() => {
+      updateAttemptScoring(token, attemptId, scoringPatch)
+        .then(() => setScoringStatus({ tone: "saved", message: "Scoring saved" }))
+        .catch((err) => {
+          setScoringStatus({
+            tone: "error",
+            message: err instanceof ApiError ? err.message : "Couldn't save your scoring. Please try again."
+          });
+        });
+    }, 600);
   };
 
   const useAiScore = (exerciseId: string, attempt: ExercisePerformanceAttempt) => {
@@ -67,6 +157,9 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate }
     if (attempt.ptScore == null) return;
     updateAttempt(exerciseId, attempt.id, { finalScore: attempt.ptScore, evaluationSource: "pt" });
   };
+
+  // Debounce handle for PT-scoring persistence (see updateAttempt).
+  const scoringTimerRef = useRef<number | undefined>(undefined);
 
   return (
     <section className="therapist-shell">
@@ -140,10 +233,25 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate }
                 {selectedAttempt && (
                   <AttemptReview
                     attempt={selectedAttempt}
+                    token={token}
                     onUpdate={(patch) => updateAttempt(selectedExercise.id, selectedAttempt.id, patch)}
                     onUseAiScore={() => useAiScore(selectedExercise.id, selectedAttempt)}
                     onUseMyScore={() => useMyScore(selectedExercise.id, selectedAttempt)}
                   />
+                )}
+
+                {/* PT-scoring persistence feedback — "Saved" after the debounced
+                    PATCH resolves, or the API's error message if it fails. Only
+                    real (server-persisted) attempts can be saved; synthesized
+                    fallback attempts are local-only. */}
+                {scoringStatus && (
+                  <p
+                    className="pd-modal-hint"
+                    role="status"
+                    style={{ color: scoringStatus.tone === "error" ? "var(--danger, #d33)" : undefined }}
+                  >
+                    {scoringStatus.message}
+                  </p>
                 )}
               </>
             )
@@ -156,11 +264,13 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate }
 
 function AttemptReview({
   attempt,
+  token,
   onUpdate,
   onUseAiScore,
   onUseMyScore
 }: {
   attempt: ExercisePerformanceAttempt;
+  token?: string | null;
   onUpdate: (patch: Partial<ExercisePerformanceAttempt>) => void;
   onUseAiScore: () => void;
   onUseMyScore: () => void;
@@ -168,14 +278,59 @@ function AttemptReview({
   const finalLabel =
     attempt.evaluationSource === "pt" ? "PT-reviewed" : attempt.evaluationSource === "manual" ? "Manual" : "AI-scored";
 
+  // Stream the patient's recorded attempt video: the real attempt carries a
+  // server files-row id (referenceVideoFileId) — fetch the bytes via the auth'd
+  // GET /files/:fileId/content endpoint and render a real player. Mock attempts
+  // (no file id) keep the placeholder box.
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState(false);
+
+  useEffect(() => {
+    const fileId = attempt.referenceVideoFileId ?? null;
+    if (!token || !fileId) {
+      setVideoUrl(null);
+      setVideoError(false);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setVideoUrl(null);
+    setVideoError(false);
+    getFileContent(token, fileId)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setVideoUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setVideoError(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [token, attempt.referenceVideoFileId]);
+
+  const videoLabel = attempt.referenceVideo?.fileName
+    ? attempt.referenceVideo.fileName
+    : videoUrl
+      ? "Patient's recorded attempt"
+      : videoError
+        ? "Couldn't load the patient's recording"
+        : "No reference video attached yet";
+
   return (
     <div className="srr-layout">
       <div className="srr-video-col">
-        <p className="pd-record-attachments-label">Reference video</p>
-        <div className="srr-video-placeholder">
-          <Video size={26} />
-        </div>
-        <p>{attempt.referenceVideo ? attempt.referenceVideo.fileName : "No reference video attached yet"}</p>
+        <p className="pd-record-attachments-label">Patient recording · วิดีโอของผู้ป่วย</p>
+        {videoUrl ? (
+          <video className="sud-video" src={videoUrl} controls playsInline />
+        ) : (
+          <div className="srr-video-placeholder">
+            {videoError ? null : <Video size={26} />}
+          </div>
+        )}
+        <p>{videoLabel}</p>
       </div>
 
       <div>

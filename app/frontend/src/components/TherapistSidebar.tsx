@@ -1,6 +1,7 @@
 import { Activity, Dumbbell, Home, Settings, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../store/authStore";
+import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import { initialsFromName } from "../utils/displayName";
 
 // Shared sidebar for every therapist-role page (Dashboard, Patients, Sessions,
@@ -25,6 +26,9 @@ interface TherapistSidebarProps {
   activeLabel: TherapistNavLabel;
   onNavigate: (label: TherapistNavLabel) => void;
   onLogout: () => void;
+  // Resolved profile-picture object URL (useProfilePicture) — when present it
+  // replaces the initials badge; initials remain the fallback otherwise.
+  avatarUrl?: string | null;
 }
 
 const navItems: Array<{ icon: ComponentType<{ size?: number }>; label: TherapistNavLabel }> = [
@@ -35,10 +39,15 @@ const navItems: Array<{ icon: ComponentType<{ size?: number }>; label: Therapist
   { icon: Settings, label: "Settings" }
 ];
 
-export function TherapistSidebar({ activeLabel, onNavigate, onLogout }: TherapistSidebarProps) {
+export function TherapistSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: TherapistSidebarProps) {
   const { user } = useAuth();
   const displayName = user?.displayName || user?.username || "Therapist";
   const initials = initialsFromName(displayName);
+  // Resolve the logged-in therapist's own picture from the auth store, so every
+  // page sharing this sidebar shows the photo without passing props. Pages that
+  // resolve it themselves (patient pages) can still override via the prop.
+  const ownAvatarUrl = useOwnProfilePicture();
+  const resolvedAvatarUrl = avatarUrl ?? ownAvatarUrl;
 
   return (
     <aside className="therapist-sidebar">
@@ -65,7 +74,9 @@ export function TherapistSidebar({ activeLabel, onNavigate, onLogout }: Therapis
       </nav>
 
       <div className="therapist-sidebar-profile">
-        <span className="avatar-badge">{initials}</span>
+        <span className={`avatar-badge${resolvedAvatarUrl ? " with-photo" : ""}`}>
+          {resolvedAvatarUrl ? <img src={resolvedAvatarUrl} alt={`${displayName}'s profile picture`} /> : initials}
+        </span>
         <div>
           <strong>{displayName}</strong>
           <small>Physical Therapist</small>

@@ -1,8 +1,9 @@
-import { Pencil, Phone, Save, ShieldCheck, User, X } from "lucide-react";
+import { Pencil, Phone, Save, ShieldCheck, User, X, Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
+import { useProfilePicture, useProfilePictureUpload } from "../hooks/useProfilePicture";
 import { ApiError, getUserProfile, updateUserProfile, type UpdateProfilePayload, type UserProfile } from "../services/api";
 import { useAuth } from "../store/authStore";
 import { initialsFromName } from "../utils/displayName";
@@ -160,7 +161,7 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
       setProfile(result.user);
       setForm(formFromProfile(result.user));
       // Keeps the sidebar/topbar's name in sync without a re-login.
-      updateUser({ displayName: result.user.displayName });
+      updateUser({ displayName: result.user.displayName, profilePictureFileId: result.user.profilePictureFileId });
       setIsEditing(false);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2500);
@@ -173,9 +174,20 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
 
   const displayName = profile?.displayName || user?.displayName || user?.username || "Therapist";
 
+  // --- Profile picture (same flow as PatientSettingsPage): pick -> POST /files
+  // -> PATCH /users/:id { profilePictureFileId }; pixels via useProfilePicture.
+  const avatarUrl = useProfilePicture(token, profile?.profilePictureFileId ?? null);
+  const picUpload = useProfilePictureUpload(token, user?.id ?? null, (updated) => {
+    setProfile(updated);
+    // Syncs the picture across every sidebar/topbar immediately (auth store).
+    updateUser({ profilePictureFileId: updated.profilePictureFileId });
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 2500);
+  });
+
   return (
     <section className="therapist-shell">
-      <TherapistSidebar activeLabel="Settings" onNavigate={onNavigate} onLogout={onLogout} />
+      <TherapistSidebar activeLabel="Settings" onNavigate={onNavigate} onLogout={onLogout} avatarUrl={avatarUrl} />
 
       <div className="therapist-workspace">
         <header className="therapist-topbar">
@@ -189,23 +201,56 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
                 <strong>{displayName}</strong>
                 <small>Physical Therapist</small>
               </div>
-              <span className="avatar-badge">{initialsFromName(displayName)}</span>
+              <span className={`avatar-badge${avatarUrl ? " with-photo" : ""}`}>
+                {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
+              </span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main settings-main ps-main">
-          {(loadError || saveError) && (
+          {(loadError || saveError || picUpload.uploadError) && (
             <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 16 }}>
-              <p style={{ margin: 0 }}>{loadError ?? saveError}</p>
+              <p style={{ margin: 0 }}>{loadError ?? saveError ?? picUpload.uploadError}</p>
             </div>
           )}
 
           {loading ? (
             <p className="pd-empty-note">Loading…</p>
           ) : (
-            <form className="ps-card" onSubmit={handleSubmit}>
-              <div className="ps-avatar-circle">{initialsFromName(displayName)}</div>
+            <form className={`ps-card${isEditing ? " editing" : ""}`} onSubmit={handleSubmit}>
+              <div className={`ps-avatar-circle${avatarUrl ? " with-photo" : ""}`}>
+                {avatarUrl ? (
+                  <img className="ps-avatar-img" src={avatarUrl} alt={`${displayName}'s profile picture`} />
+                ) : (
+                  initialsFromName(displayName)
+                )}
+              </div>
+
+              {/* Same real profile-picture upload as PatientSettingsPage: hidden
+                  input + camera-button keeps the existing card layout. */}
+              <input
+                ref={picUpload.inputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={picUpload.handleFileChange}
+              />
+              <button
+                type="button"
+                className="ps-avatar-upload"
+                onClick={picUpload.openFilePicker}
+                disabled={picUpload.uploading}
+              >
+                <Camera size={13} />{" "}
+                {picUpload.uploading ? "Uploading…" : avatarUrl ? "Change photo" : "Upload photo"}
+              </button>
+
+              {isEditing && (
+                <span className="ps-editing-pill">
+                  <Pencil size={12} /> Editing profile
+                </span>
+              )}
 
               <div className="ps-panels">
                 <section className="ps-panel">

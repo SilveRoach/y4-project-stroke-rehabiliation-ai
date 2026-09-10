@@ -1,9 +1,12 @@
-import { Pencil, Phone, Save, Shield, User, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { Pencil, Phone, Save, Shield, User, X, Camera } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
-import { adminProfile } from "../data/adminMock";
+import { useProfilePicture, useProfilePictureUpload } from "../hooks/useProfilePicture";
+import { ApiError, getUserProfile, type UserProfile } from "../services/api";
+import { useAuth } from "../store/authStore";
+import { initialsFromName } from "../utils/displayName";
 
 // Sidebar "Settings" page — profile + employee ID + contact info, built on
 // pages/TherapistSettingsPage.tsx's view/edit-toggle layout (avatar circle over a
@@ -45,9 +48,45 @@ function formatDateLabel(iso: string): string {
 }
 
 export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUsers }: AdminSettingsPageProps) {
+  // Real logged-in admin for the topbar/sidebar profile chrome and the form's
+  // pre-filled display name — mirrors PatientSettingsPage.tsx's idiom of
+  // sourcing the shared chrome from the auth store instead of a static mock.
+  const { token, user } = useAuth();
+  const authDisplayName = user?.displayName || user?.username || "Admin";
+
+  // --- Real profile picture (same flow as Patient/TherapistSettingsPage) ---
+  // The other form fields remain local-only stubs, but the picture is real:
+  // GET /users/:id supplies profilePictureFileId, upload goes through
+  // POST /files -> PATCH /users/:id, pixels via useProfilePicture.
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [uploadBanner, setUploadBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    let cancelled = false;
+    getUserProfile(token, user.id)
+      .then((res) => {
+        if (!cancelled) setProfile(res.user);
+      })
+      .catch((err) => {
+        // The picture is chrome, not the page's core form — a failed load just
+        // leaves the initials fallback.
+        if (!cancelled && err instanceof ApiError) setUploadBanner(err.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user]);
+
+  const avatarUrl = useProfilePicture(token, profile?.profilePictureFileId ?? null);
+  const picUpload = useProfilePictureUpload(token, user?.id ?? null, (updated) => {
+    setProfile(updated);
+    setUploadBanner(null);
+  });
+
   const [form, setForm] = useState<AdminProfileForm>({
-    displayName: adminProfile.displayName,
-    title: adminProfile.title,
+    displayName: authDisplayName,
+    title: "System Administrator",
     employeeId: "EMP-0001",
     email: "suda.admin@rehabclinic.example",
     phoneNumber: "0898765432",
@@ -91,7 +130,7 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
 
   return (
     <section className="therapist-shell">
-      <AdminSidebar activeLabel="Settings" onNavigate={handleNavigate} onLogout={onLogout} />
+      <AdminSidebar activeLabel="Settings" onNavigate={handleNavigate} onLogout={onLogout} avatarUrl={avatarUrl} />
 
       <div className="therapist-workspace">
         <header className="therapist-topbar">
@@ -103,16 +142,53 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{form.displayName}</strong>
-                <small>{form.title}</small>
+                <small>System Administrator</small>
               </div>
-              <span className="avatar-badge admin-avatar">{adminProfile.initials}</span>
+              <span className={`avatar-badge admin-avatar${avatarUrl ? " with-photo" : ""}`}>
+                {avatarUrl ? <img src={avatarUrl} alt={`${form.displayName}'s profile picture`} /> : initialsFromName(form.displayName)}
+              </span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main settings-main ps-main">
-          <form className="ps-card" onSubmit={handleSubmit}>
-            <div className="ps-avatar-circle">{adminProfile.initials}</div>
+          {(uploadBanner || picUpload.uploadError) && (
+            <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 16 }}>
+              <p style={{ margin: 0 }}>{uploadBanner ?? picUpload.uploadError}</p>
+            </div>
+          )}
+
+          <form className={`ps-card${isEditing ? " editing" : ""}`} onSubmit={handleSubmit}>
+            <div className={`ps-avatar-circle${avatarUrl ? " with-photo" : ""}`}>
+              {avatarUrl ? (
+                <img className="ps-avatar-img" src={avatarUrl} alt={`${form.displayName}'s profile picture`} />
+              ) : (
+                initialsFromName(form.displayName)
+              )}
+            </div>
+
+            {/* Same real profile-picture upload as Patient/TherapistSettingsPage. */}
+            <input
+              ref={picUpload.inputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={picUpload.handleFileChange}
+            />
+            <button
+              type="button"
+              className="ps-avatar-upload"
+              onClick={picUpload.openFilePicker}
+              disabled={picUpload.uploading}
+            >
+              <Camera size={13} /> {picUpload.uploading ? "Uploading…" : avatarUrl ? "Change photo" : "Upload photo"}
+            </button>
+
+            {isEditing && (
+              <span className="ps-editing-pill">
+                <Pencil size={12} /> Editing profile
+              </span>
+            )}
 
             <div className="ps-panels">
               <section className="ps-panel">

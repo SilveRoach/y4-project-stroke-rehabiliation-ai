@@ -59,6 +59,19 @@ export type PatientStanding = "active" | "at_risk";
 export interface TherapistPatientSummary {
   id: string;
   name: string;
+  username?: string;
+  email?: string | null;
+  phoneNumber?: string | null;
+  accountStatus?: string;
+  lastLoginLabel?: string;
+  gender?: string;
+  dateOfBirth?: string | null;
+  heightCm?: number | null;
+  weightKg?: number | null;
+  address?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  profilePictureFileId?: string | null;
   nameTh?: string;
   age: number;
   condition: string;
@@ -69,6 +82,8 @@ export interface TherapistPatientSummary {
   standing: PatientStanding;
   avatarInitials: string;
   summary: string;
+  assignedTherapistId?: string | null;
+  assignedTherapistName?: string | null;
 }
 
 export interface WeeklySessionPoint {
@@ -145,6 +160,10 @@ export interface AdminUserSummary {
   // for that role, so a second phoneNumber field would be redundant there.
   email?: string;
   phoneNumber?: string;
+  // users.profile_picture_file_id (files-row id) — resolved to a blob URL per
+  // row via useProfilePicture for the account table's avatar (initials
+  // fallback when unset/loading/failed).
+  profilePictureFileId?: string;
   // Patient-only, matching the `patients` DBML the user supplied 2026-08-08
   // (supersedes the earlier date_of_birth/affected_side guess, which was sourced
   // from the OLD schema.prisma's Patient model before this DBML was shared).
@@ -161,6 +180,11 @@ export interface AdminUserSummary {
   dateOfBirthLabel?: string;
   heightCm?: number;
   weightKg?: number;
+  // Patient-only: the therapist from the patient's ACTIVE
+  // patient_therapist_assignments row (null/undefined when unassigned).
+  // Mirrors AdminUserListItem.assignedTherapist; powers the assign/unassign
+  // therapist UI on AdminUserManagementPage.
+  assignedTherapist?: { id: string; displayName: string; licenseNumber?: string | null } | null;
 }
 
 export interface WeeklyActivityPoint {
@@ -220,6 +244,13 @@ export interface ExerciseLibraryItem {
   difficultyLevel: ExerciseLibraryDifficulty;
 
   hasDemoVideo: boolean;
+  demoVideoFileId?: string | null;
+  demoVideoFile?: {
+    id: string;
+    originalName: string;
+    mimeType: string | null;
+    fileSize: number | null;
+  } | null;
   baseCriteria: ExerciseBaseCriteria;
 
   status: ExerciseLibraryStatus;
@@ -238,9 +269,8 @@ export interface ExerciseLibraryItem {
 // medical_history_attachments, exercise_library.demo_video_file_id,
 // exercise_performance_results.reference_video. Mirrors
 // docs/04-design/mockups/file-picker.html. Component in
-// components/FilePicker.tsx. No upload backend exists yet, so `previewUrl` is
-// always a local (client-side) object URL, never a server-hosted one — flagged in
-// the component's comments, not silently presented as a real upload.
+// components/FilePicker.tsx. Upload-backed pickers use the server file id in
+// `id`; mock-backed consumers may continue to use their local ids.
 
 export type PickedFileType = "image" | "video";
 
@@ -473,9 +503,12 @@ export type EvaluationDecisionSource = "ai" | "pt" | "manual";
 export interface ExercisePerformanceAttempt {
   id: string;
   attemptNumber: number;
-  // Placeholder only — no reference_video upload backend exists (see FilePicker's
-  // scope note). null for attempts pre-seeded without a mock video.
+  // Placeholder only for mock attempts — real attempts (from
+  // GET /schedule-days/:id/results) carry the server files-row id here, which
+  // the review page streams via GET /files/:fileId/content.
   referenceVideo: PickedFile | null;
+  referenceVideoFileId?: string | null;
+  videoBlobUrl?: string | null;
 
   aiScore?: number;
   aiFeedback?: string;
@@ -513,17 +546,20 @@ export interface SessionReviewData {
 }
 
 // --- Session video capture / upload confirm (CAMERA_TRACKING_MOCKUP_PLAN.md §6).
-// Client-side shape mirroring what a confirmed upload would send to
-// exercise_performance_results (newdb.txt) — see the plan's §6.1 schema-mapping
-// table. Held in App.tsx between PatientSessionPage's STOP/handoff and
-// SessionUploadConfirmPage's Confirm/Retry/Discard actions. No upload endpoint
-// exists yet (§6.7), so this never leaves the browser tab — videoBlobUrl is
-// always a local URL.createObjectURL() reference, never server-hosted.
+// Client-side shape for what a confirmed upload sends to
+// POST /scheduled-exercises/:id/results (backend session-results module) — see
+// the plan's §6.1 schema-mapping table. Held in App.tsx between
+// PatientSessionPage's STOP/handoff and SessionUploadConfirmPage's
+// Confirm/Retry/Discard actions. The raw video Blob rides along here (the
+// object URL is only for preview) so Confirm can actually upload it.
 export interface PendingSessionAttempt {
   scheduledExerciseId: string;
   exerciseName: string;
   exerciseNameTh?: string;
   videoBlobUrl: string;
+  // The real recording bytes — sent to POST /scheduled-exercises/:id/results on
+  // Confirm and stored via the backend files module.
+  videoBlob: Blob;
   videoFileName: string;
   videoSizeLabel: string;
   videoMimeType: string;
