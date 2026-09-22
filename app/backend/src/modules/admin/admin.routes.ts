@@ -3,8 +3,10 @@
 
 import { Router } from "express";
 import { requireAuth, requireRole } from "../../middleware/auth.middleware";
-import { getAdminDashboardHandler } from "./admin.controller";
+import { getAdminDashboardHandler, syncSchedulesHandler } from "./admin.controller";
 
 export const adminRouter = Router();
 
 adminRouter.get("/admin/dashboard", requireAuth, requireRole("admin"), getAdminDashboardHandler);
+adminRouter.post("/admin/sync-schedules", requireAuth, requireRole("admin"), syncSchedulesHandler);
+

@@ -28,6 +28,7 @@
 //      schedule_days` row = one session. Platform-wide here (no patientId
 //      filter), vs. those two modules' per-therapist/per-patient scoping.
 
+import { displayName, relativeTimeLabel } from "../../common/formatting";
 import { prisma } from "../../config/prisma";
 
 export interface AdminDashboardStats {
@@ -49,10 +50,23 @@ export interface RoleCount {
   count: number;
 }
 
+export interface AdminActivityLogEntry {
+  id: string;
+  type: "create" | "edit";
+  table: "user" | "exercise" | "plan";
+  objectName: string;
+  timeLabel: string;
+  timestamp: string;
+  byWho: string;
+  level?: "info" | "warning" | "error";
+  message?: string;
+}
+
 export interface AdminDashboardData {
   stats: AdminDashboardStats;
   weeklyActivity: WeeklyActivityPoint[];
   roleDistribution: RoleCount[];
+  logs: AdminActivityLogEntry[];
 }
 
 const WEEKLY_CHART_DAYS = 7;
@@ -130,12 +144,331 @@ async function computeWeeklyActivity(): Promise<WeeklyActivityPoint[]> {
   return points;
 }
 
-export async function getAdminDashboard(): Promise<AdminDashboardData> {
-  const [stats, weeklyActivity, roleDistribution] = await Promise.all([
-    computeStats(),
-    computeWeeklyActivity(),
-    computeRoleDistribution()
+async function computeActivityLogs(): Promise<AdminActivityLogEntry[]> {
+  const [users, exercises, plans] = await Promise.all([
+    prisma.user.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: {
+        createdByUser: {
+          select: { firstName: true, lastName: true, username: true }
+        },
+        updatedByUser: {
+          select: { firstName: true, lastName: true, username: true }
+        }
+      }
+    }),
+    prisma.exerciseLibrary.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: {
+        createdByUser: {
+          select: { firstName: true, lastName: true, username: true }
+        }
+      }
+    }),
+    prisma.patientRehabilitationPlan.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: {
+        createdByUser: {
+          select: { firstName: true, lastName: true, username: true }
+        },
+        updatedByUser: {
+          select: { firstName: true, lastName: true, username: true }
+        }
+      }
+    })
   ]);
 
-  return { stats, weeklyActivity, roleDistribution };
+  const entries: AdminActivityLogEntry[] = [];
+
+  for (const u of users) {
+    const userName = displayName(u);
+    const creatorName = u.createdByUser ? displayName(u.createdByUser) : "System";
+    entries.push({
+      id: `user-create-${u.id}`,
+      type: "create",
+      table: "user",
+      objectName: userName,
+      timeLabel: relativeTimeLabel(u.createdAt),
+      timestamp: u.createdAt.toISOString(),
+      byWho: creatorName,
+      level: "info",
+      message: `Created ${u.role} account for ${userName}`
+    });
+
+    if (u.updatedAt && Math.abs(u.updatedAt.getTime() - u.createdAt.getTime()) > 1000) {
+      const updaterName = u.updatedByUser ? displayName(u.updatedByUser) : creatorName;
+      entries.push({
+        id: `user-edit-${u.id}-${u.updatedAt.getTime()}`,
+        type: "edit",
+        table: "user",
+        objectName: userName,
+        timeLabel: relativeTimeLabel(u.updatedAt),
+        timestamp: u.updatedAt.toISOString(),
+        byWho: updaterName,
+        level: "info",
+        message: `Updated account details for ${userName}`
+      });
+    }
+  }
+
+  for (const ex of exercises) {
+    const isEdit = (ex.versionNumber && ex.versionNumber > 1) || Boolean(ex.parentExerciseId);
+    const creatorName = ex.createdByUser ? displayName(ex.createdByUser) : "System";
+    const exerciseLabel = ex.versionNumber > 1 ? `${ex.name} (v${ex.versionNumber})` : ex.name;
+    entries.push({
+      id: `exercise-${ex.id}`,
+      type: isEdit ? "edit" : "create",
+      table: "exercise",
+      objectName: exerciseLabel,
+      timeLabel: relativeTimeLabel(ex.createdAt),
+      timestamp: ex.createdAt.toISOString(),
+      byWho: creatorName,
+      level: "info",
+      message: isEdit
+        ? `Created version ${ex.versionNumber} for exercise '${ex.name}'`
+        : `Created exercise '${ex.name}'`
+    });
+  }
+
+  for (const plan of plans) {
+    const creatorName = plan.createdByUser ? displayName(plan.createdByUser) : "System";
+    entries.push({
+      id: `plan-create-${plan.id}`,
+      type: "create",
+      table: "plan",
+      objectName: plan.name,
+      timeLabel: relativeTimeLabel(plan.createdAt),
+      timestamp: plan.createdAt.toISOString(),
+      byWho: creatorName,
+      level: "info",
+      message: `Created rehabilitation plan '${plan.name}'`
+    });
+
+    if (plan.updatedAt && Math.abs(plan.updatedAt.getTime() - plan.createdAt.getTime()) > 1000) {
+      const updaterName = plan.updatedByUser ? displayName(plan.updatedByUser) : creatorName;
+      entries.push({
+        id: `plan-edit-${plan.id}-${plan.updatedAt.getTime()}`,
+        type: "edit",
+        table: "plan",
+        objectName: plan.name,
+        timeLabel: relativeTimeLabel(plan.updatedAt),
+        timestamp: plan.updatedAt.toISOString(),
+        byWho: updaterName,
+        level: "info",
+        message: `Updated rehabilitation plan '${plan.name}'`
+      });
+    }
+  }
+
+  entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  return entries.slice(0, 100);
 }
+
+export async function getAdminDashboard(): Promise<AdminDashboardData> {
+  const [stats, weeklyActivity, roleDistribution, logs] = await Promise.all([
+    computeStats(),
+    computeWeeklyActivity(),
+    computeRoleDistribution(),
+    computeActivityLogs()
+  ]);
+
+  return { stats, weeklyActivity, roleDistribution, logs };
+}
+
+export interface SyncSchedulesResult {
+  success: boolean;
+  message: string;
+  today: string;
+  updatedDaysCount: number;
+  updatedExercisesCount: number;
+  summary: {
+    daysSkipped: number;
+    daysCompleted: number;
+    daysPending: number;
+    daysInProgress: number;
+    exercisesSkipped: number;
+    exercisesPending: number;
+    exercisesCompleted: number;
+  };
+}
+
+export async function syncScheduleStatuses(actorId?: string, clientToday?: string): Promise<SyncSchedulesResult> {
+  const todayStr =
+    clientToday && /^\d{4}-\d{2}-\d{2}$/.test(clientToday)
+      ? clientToday
+      : new Date().toISOString().slice(0, 10);
+
+  const scheduleDays = await prisma.rehabilitationScheduleDay.findMany({
+    include: {
+      scheduledExercises: {
+        include: {
+          performanceResults: {
+            select: { id: true }
+          }
+        }
+      }
+    }
+  });
+
+  const now = new Date();
+
+  const exercisesToSkipped: string[] = [];
+  const exercisesToPending: string[] = [];
+  const exercisesToCompleted: string[] = [];
+
+  const daysToSkipped: string[] = [];
+  const daysToCompleted: string[] = [];
+  const daysToPending: string[] = [];
+  const daysToInProgress: string[] = [];
+
+  for (const day of scheduleDays) {
+    const dayDateStr = day.scheduledDate.toISOString().slice(0, 10);
+    const isPast = dayDateStr < todayStr;
+    const isToday = dayDateStr === todayStr;
+    const isFuture = dayDateStr > todayStr;
+
+    const simulatedExerciseStatuses: string[] = [];
+
+    for (const ex of day.scheduledExercises) {
+      const hasPerformance = ex.performanceResults && ex.performanceResults.length > 0;
+      let targetExStatus: string = ex.status;
+
+      if (hasPerformance) {
+        targetExStatus = "completed";
+      } else if (ex.status === "cancelled") {
+        targetExStatus = "cancelled";
+      } else if (isPast) {
+        if (ex.status !== "completed") {
+          targetExStatus = "skipped";
+        }
+      } else if (isToday) {
+        if (ex.status === "skipped") {
+          targetExStatus = "pending";
+        }
+      } else if (isFuture) {
+        if (ex.status === "skipped" || ex.status === "in_progress") {
+          targetExStatus = "pending";
+        }
+      }
+
+      if (targetExStatus !== ex.status) {
+        if (targetExStatus === "skipped") exercisesToSkipped.push(ex.id);
+        else if (targetExStatus === "pending") exercisesToPending.push(ex.id);
+        else if (targetExStatus === "completed") exercisesToCompleted.push(ex.id);
+      }
+
+      simulatedExerciseStatuses.push(targetExStatus);
+    }
+
+    let targetDayStatus: string = day.status;
+
+    if (day.status === "cancelled") {
+      targetDayStatus = "cancelled";
+    } else {
+      const totalExercises = simulatedExerciseStatuses.length;
+      const completedExercises = simulatedExerciseStatuses.filter((s) => s === "completed").length;
+      const inProgressExercises = simulatedExerciseStatuses.filter((s) => s === "in_progress").length;
+      const allCompleted = totalExercises > 0 && completedExercises === totalExercises;
+
+      if (allCompleted) {
+        targetDayStatus = "completed";
+      } else if (isPast) {
+        if (day.status !== "completed") {
+          targetDayStatus = "skipped";
+        }
+      } else if (isToday) {
+        if (completedExercises > 0 || inProgressExercises > 0) {
+          targetDayStatus = "in_progress";
+        } else {
+          if (day.status === "skipped") {
+            targetDayStatus = "pending";
+          }
+        }
+      } else if (isFuture) {
+        if (day.status === "skipped" || day.status === "in_progress") {
+          targetDayStatus = "pending";
+        }
+      }
+    }
+
+    if (targetDayStatus !== day.status) {
+      if (targetDayStatus === "skipped") daysToSkipped.push(day.id);
+      else if (targetDayStatus === "completed") daysToCompleted.push(day.id);
+      else if (targetDayStatus === "pending") daysToPending.push(day.id);
+      else if (targetDayStatus === "in_progress") daysToInProgress.push(day.id);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (exercisesToSkipped.length > 0) {
+      await tx.scheduledExercise.updateMany({
+        where: { id: { in: exercisesToSkipped } },
+        data: { status: "skipped", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
+      });
+    }
+    if (exercisesToPending.length > 0) {
+      await tx.scheduledExercise.updateMany({
+        where: { id: { in: exercisesToPending } },
+        data: { status: "pending", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
+      });
+    }
+    if (exercisesToCompleted.length > 0) {
+      await tx.scheduledExercise.updateMany({
+        where: { id: { in: exercisesToCompleted } },
+        data: { status: "completed", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
+      });
+    }
+
+    if (daysToSkipped.length > 0) {
+      await tx.rehabilitationScheduleDay.updateMany({
+        where: { id: { in: daysToSkipped } },
+        data: { status: "skipped", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
+      });
+    }
+    if (daysToCompleted.length > 0) {
+      await tx.rehabilitationScheduleDay.updateMany({
+        where: { id: { in: daysToCompleted } },
+        data: { status: "completed", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
+      });
+    }
+    if (daysToPending.length > 0) {
+      await tx.rehabilitationScheduleDay.updateMany({
+        where: { id: { in: daysToPending } },
+        data: { status: "pending", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
+      });
+    }
+    if (daysToInProgress.length > 0) {
+      await tx.rehabilitationScheduleDay.updateMany({
+        where: { id: { in: daysToInProgress } },
+        data: { status: "in_progress", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
+      });
+    }
+  });
+
+  const updatedDaysCount =
+    daysToSkipped.length + daysToCompleted.length + daysToPending.length + daysToInProgress.length;
+  const updatedExercisesCount =
+    exercisesToSkipped.length + exercisesToPending.length + exercisesToCompleted.length;
+
+  return {
+    success: true,
+    message: `Synchronized ${updatedDaysCount} schedule day(s) and ${updatedExercisesCount} scheduled exercise(s) for reference date ${todayStr}.`,
+    today: todayStr,
+    updatedDaysCount,
+    updatedExercisesCount,
+    summary: {
+      daysSkipped: daysToSkipped.length,
+      daysCompleted: daysToCompleted.length,
+      daysPending: daysToPending.length,
+      daysInProgress: daysToInProgress.length,
+      exercisesSkipped: exercisesToSkipped.length,
+      exercisesPending: exercisesToPending.length,
+      exercisesCompleted: exercisesToCompleted.length
+    }
+  };
+}
+
+

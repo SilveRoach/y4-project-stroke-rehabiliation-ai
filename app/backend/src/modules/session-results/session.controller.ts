@@ -46,7 +46,14 @@ export async function getTherapistSessionsHandler(req: Request, res: Response, n
     if (req.user.role !== "admin" && !(req.user.role === "therapist" && req.user.sub === id)) {
       throw new ForbiddenError("You can only view your own session log.");
     }
-    const sessions = await sessionService.getTherapistSessions(id);
+    // Optional narrowing scopes from the query string: ?patientId=<uuid> scopes
+    // the log to one assigned patient, ?planId=<uuid> to one of that patient's
+    // plans (PatientDetailPage passes both so its history matches the plan
+    // selected in the UI). Both are enforced against the therapist's own
+    // assignments inside the service.
+    const patientId = typeof req.query.patientId === "string" ? req.query.patientId : undefined;
+    const planId = typeof req.query.planId === "string" ? req.query.planId : undefined;
+    const sessions = await sessionService.getTherapistSessions(id, { patientId, planId });
     res.json({ sessions });
   } catch (err) {
     next(err);

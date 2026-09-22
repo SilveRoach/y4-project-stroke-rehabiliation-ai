@@ -1,4 +1,4 @@
-import { Search, UserPlus, X } from "lucide-react";
+import { Search, UserMinus, UserPlus, X } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../store/authStore";
 import type { PatientListItem, TherapistPatientSummary } from "../types";
@@ -112,6 +112,49 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
     }
   };
 
+  // Remove a patient currently assigned to THIS therapist — DELETE
+  // /therapists/:id/patients/:patientId (same endpoint the admin page's
+  // unassign button uses). Stays in the modal and refreshes the list so the
+  // row flips back to the green "Assign to me" state.
+  const handleUnassign = async (patientId: string) => {
+    setAssignError(null);
+    setAssigningId(patientId);
+    if (!token) {
+      setAssignError("Authentication required.");
+      setAssigningId(null);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/v1/therapists/${therapistId}/patients/${patientId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
+      }
+
+      try {
+        window.dispatchEvent(new CustomEvent("patientUnassigned", { detail: { patientId } }));
+      } catch (e) {
+        // ignore
+      }
+
+      // Refresh so the row shows "Unassigned" with the green Assign button.
+      const refreshed = await fetch("/api/v1/patients", { headers: { Authorization: `Bearer ${token}` } });
+      if (refreshed.ok) {
+        const d = (await refreshed.json()) as { patients: PatientListItem[] };
+        setPatients(d.patients);
+      }
+    } catch (err) {
+      setAssignError(err instanceof Error ? err.message : "Couldn't remove patient. Please try again.");
+    } finally {
+      setAssigningId(null);
+    }
+  };
+
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
@@ -124,7 +167,8 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
         </div>
 
         <p className="assign-patient-subtitle">
-          Search every patient on the server. You can only assign yourself to a patient who doesn't have a therapist yet.
+          Search every patient on the server. Assign yourself to a patient who doesn't have a therapist yet, or remove
+          a patient you're currently assigned to.
         </p>
 
         <div className="therapist-search assign-patient-search">
@@ -150,6 +194,13 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
         )}
 
         <div className="assign-patient-list">
+          <div className="assign-patient-header">
+            <span>Patient</span>
+            <span>Status</span>
+            <span>Assigned to</span>
+            <span className="assign-patient-header-action">Action</span>
+          </div>
+
           {loading && <p className="assign-patient-empty">Loading patients…</p>}
 
           {!loading && filteredPatients.length === 0 && (
@@ -163,33 +214,57 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
               const isMine = patient.assignedTherapistId === therapistId;
               const isTakenByOther = Boolean(patient.assignedTherapistId) && !isMine;
               const isUnassigned = !patient.assignedTherapistId;
+              const busy = assigningId === patient.id;
 
               return (
                 <div className="assign-patient-row" key={patient.id}>
                   <div className="assign-patient-row-info">
-                    <span className="therapist-avatar">{(patient.displayName || "").split(" ").map(n=>n[0]).slice(0,2).join("")}</span>
-                    <div>
-                      <strong>{patient.displayName}</strong>
-                      <small>{isUnassigned ? "Unassigned" : `Assigned to ${isMine ? "you" : patient.assignedTherapistName}`}</small>
-                    </div>
+                    <span className="therapist-avatar">
+                      {(patient.displayName || "")
+                        .split(" ")
+                        .map((n) => n[0])
+                        .slice(0, 2)
+                        .join("")}
+                    </span>
+                    <strong>{patient.displayName}</strong>
+                  </div>
+
+                  <span className={`badge-pill ${patient.status === "active" ? "good" : "fair"}`}>
+                    {patient.status === "active" ? "Active" : "Disabled"}
+                  </span>
+
+                  <div className="assign-patient-row-assigned">
+                    {isMine ? (
+                      <strong>You</strong>
+                    ) : isTakenByOther ? (
+                      <strong>{patient.assignedTherapistName || "Another therapist"}</strong>
+                    ) : (
+                      <small>—</small>
+                    )}
                   </div>
 
                   <div className="assign-patient-row-actions">
-                    <span className={`badge-pill ${patient.status === "active" ? "good" : "fair"}`}>
-                      {patient.status === "active" ? "Active" : "Disabled"}
-                    </span>
-
-                    {isMine && <span className="badge-pill good">Yours</span>}
-
-                    {isTakenByOther ? (
-                      <button type="button" className="secondary-button" disabled title={`Already assigned to ${patient.assignedTherapistName}`}>
-                        Assigned
+                    {isMine ? (
+                      <button
+                        type="button"
+                        className="danger-button assign-patient-remove"
+                        onClick={() => handleUnassign(patient.id)}
+                        disabled={!canAssign || busy}
+                      >
+                        <UserMinus size={13} /> {busy ? "Removing…" : "Remove"}
                       </button>
                     ) : isUnassigned ? (
-                      <button type="button" className="primary-button" onClick={() => handleAssign(patient.id)} disabled={!canAssign || assigningId === patient.id}>
-                        <UserPlus size={13} /> {assigningId === patient.id ? "Assigning…" : "Assign to me"}
+                      <button
+                        type="button"
+                        className="primary-button assign-patient-assign"
+                        onClick={() => handleAssign(patient.id)}
+                        disabled={!canAssign || busy}
+                      >
+                        <UserPlus size={13} /> {busy ? "Assigning…" : "Assign"}
                       </button>
-                    ) : null}
+                    ) : (
+                      <span className="badge-pill muted">Taken</span>
+                    )}
                   </div>
                 </div>
               );

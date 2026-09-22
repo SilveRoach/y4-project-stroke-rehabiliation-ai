@@ -139,7 +139,9 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
     setForm((current) => ({ ...current, [key]: event.target.value }));
   };
 
-  const startEditing = () => {
+  const startEditing = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
     beforeEditRef.current = form;
     setSavedSuccess(false);
     setSaveError(null);
@@ -149,10 +151,13 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
     // land straight in the form instead of hunting for it).
     requestAnimationFrame(() => {
       document.querySelector<HTMLInputElement>(".ps-card input, .ps-card select")?.focus();
+      document.querySelector<HTMLInputElement>(".ps-field input, .ps-field select")?.focus();
     });
   };
 
-  const discardChanges = () => {
+  const discardChanges = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
     setForm(beforeEditRef.current);
     setIsEditing(false);
     setSaveError(null);
@@ -160,7 +165,9 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!isEditing) return;
     if (!token || !authUser) return;
+
 
     setSaving(true);
     setSaveError(null);
@@ -423,19 +430,40 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
               <div className="ps-edit-actions">
                 {isEditing ? (
                   <>
-                    <button type="button" className="secondary-button" onClick={discardChanges} disabled={saving}>
+                    <button
+                      key="patient-discard-btn"
+                      type="button"
+                      className="secondary-button"
+                      onClick={discardChanges}
+                      disabled={saving}
+                    >
                       <X size={14} /> Discard changes
                     </button>
-                    <button type="submit" className="primary-button" disabled={saving}>
+                    <button
+                      key="patient-save-btn"
+                      type="submit"
+                      className="primary-button"
+                      disabled={saving}
+                    >
                       <Save size={14} /> {saving ? "Saving…" : "Save changes"}
                     </button>
                   </>
                 ) : (
                   <>
-                    <button type="button" className="secondary-button" onClick={onLogout}>
+                    <button
+                      key="patient-logout-btn"
+                      type="button"
+                      className="secondary-button"
+                      onClick={onLogout}
+                    >
                       <LogOut size={14} /> Log out
                     </button>
-                    <button type="button" className="primary-button" onClick={startEditing}>
+                    <button
+                      key="patient-edit-btn"
+                      type="button"
+                      className="primary-button"
+                      onClick={startEditing}
+                    >
                       <Pencil size={14} /> Edit profile
                     </button>
                   </>

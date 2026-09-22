@@ -55,12 +55,18 @@ interface SessionResultReviewPageProps {
   onBack: () => void;
   onLogout: () => void;
   onNavigate: (label: TherapistNavLabel) => void;
+  // Scheduled-exercise id to focus when the review was opened from a specific
+  // exercise (PatientDetailPage's per-exercise "Review" action); undefined =
+  // whole-day review, starting on the first exercise.
+  focusExerciseId?: string;
 }
 
-export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate }: SessionResultReviewPageProps) {
+export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, focusExerciseId }: SessionResultReviewPageProps) {
   const { token } = useAuth();
   const [exercises, setExercises] = useState<SessionExerciseReview[]>(review.exercises);
-  const [selectedExerciseId, setSelectedExerciseId] = useState<string | undefined>(review.exercises[0]?.id);
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | undefined>(() => {
+    return review.exercises.find((exercise) => exercise.id === focusExerciseId)?.id ?? review.exercises[0]?.id;
+  });
 
   // Real attempts: the review payload handed in from App.tsx is mock/synthesized
   // (data/sessionReviewMock.ts). Fetch the REAL exercise_performance_results for
@@ -81,7 +87,9 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate }
         const mapped = mapRealReviewToExercises(res.review);
         if (mapped.length > 0) {
           setExercises(mapped);
-          setSelectedExerciseId(mapped[0].id);
+          // Same focus rule as the initial state: the requested exercise when
+          // present, else the day's first exercise.
+          setSelectedExerciseId(mapped.find((exercise) => exercise.id === focusExerciseId)?.id ?? mapped[0].id);
           setPersistedAttemptIds(
             new Set(mapped.flatMap((exercise) => exercise.attempts.map((attempt) => attempt.id)))
           );

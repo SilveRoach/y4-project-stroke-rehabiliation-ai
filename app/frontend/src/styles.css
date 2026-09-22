@@ -686,6 +686,65 @@ input:focus {
   white-space: nowrap;
 }
 
+/* Success toast (shown at App.tsx's root after the patient confirms an
+   exercise-video upload) — fixed bottom-center above the patient bottom nav,
+   slides up in, auto-hides after 4s (App.tsx owns the timer). */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(92vw, 480px);
+  padding: 12px 14px;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 14px;
+  background: var(--success-light, #f0fdf4);
+  color: #15803d;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-card, 0 8px 24px rgba(0, 0, 0, 0.12));
+  animation: app-toast-in 0.25s ease-out;
+}
+
+.app-toast svg {
+  flex-shrink: 0;
+  color: var(--success, #22c55e);
+}
+
+.app-toast span {
+  min-width: 0;
+}
+
+.app-toast-close {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@keyframes app-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 .completion-pill {
   background: var(--success-light);
   color: var(--success);
@@ -799,10 +858,8 @@ input:focus {
   white-space: nowrap;
 }
 
-.exercise-card.next {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary) inset;
-}
+/* The "next up" exercise no longer carries any special highlight — every
+   exercise card uses the same neutral styling regardless of schedule order. */
 
 .next-pill {
   flex-shrink: 0;
@@ -878,45 +935,48 @@ input:focus {
   height: 20px;
 }
 
-.exercise-panel .exercise-status-dot {
-  width: 22px;
-  height: 22px;
+.exercise-panel .exercise-status-checkbox {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
 }
 
-.exercise-panel .exercise-status-dot.next .status-dot-inner {
-  width: 10px;
-  height: 10px;
+.exercise-panel .exercise-status-checkbox svg {
+  width: 12px;
+  height: 12px;
 }
 
-/* Trailing checkbox-style status indicator (design reference) — replaces the
-   old right-aligned difficulty-badge + status-label column; the difficulty is
-   now folded into the subtitle line instead ("10 reps · Easy"). */
-.exercise-status-dot {
+/* Compact difficulty tag on the exercise metadata line ("6 reps  Easy") —
+   reuses the shared .difficulty-badge colors; this override just shrinks the
+   pill so the row keeps its mobile height. */
+.exercise-difficulty {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 7px;
+  padding: 1px 7px;
+  font-size: 0.62rem;
+  vertical-align: middle;
+}
+
+/* Rounded-square completion checkbox (design reference) — replaces the old
+   circular radio-style status dot. Green tick when the session status is
+   "completed", neutral empty square otherwise. */
+.exercise-status-checkbox {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-}
-
-.exercise-status-dot.done {
-  color: var(--success);
-}
-
-.exercise-status-dot.next {
-  border: 2px solid var(--primary);
-}
-
-.exercise-status-dot.next .status-dot-inner {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--primary);
-}
-
-.exercise-status-dot.pending {
+  width: 24px;
+  height: 24px;
   border: 2px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: transparent;
+}
+
+.exercise-status-checkbox.done {
+  border-color: var(--success);
+  background: var(--success-light);
+  color: var(--success);
 }
 
 /* .pt-calendar-card (the week/month calendar) is just an alias applied
@@ -1234,6 +1294,24 @@ div.exercise-card:hover {
   color: #ffffff;
 }
 
+/* Any day inside an active plan that hasn't come due yet — future exercise
+   days AND rest days alike — fills the same light-blue "pending" as the month
+   calendar's .pd-calendar-cell.pending (#60a5fa), so the strip and the month
+   grid share one color scheme. */
+.week-strip-cell.status-pending {
+  border-color: #60a5fa;
+  background: #60a5fa;
+  color: #ffffff;
+}
+
+/* In-progress days (today partially done / backend in_progress) — the same
+   yellow the month calendar uses for .pd-calendar-cell.in_progress. */
+.week-strip-cell.status-in_progress {
+  border-color: var(--warning);
+  background: var(--warning);
+  color: #ffffff;
+}
+
 .week-strip-cell.status-none {
   border-color: #cbd5e1;
   background: #cbd5e1;
@@ -1242,8 +1320,12 @@ div.exercise-card:hover {
 
 .week-strip-cell.status-completed small,
 .week-strip-cell.status-missing small,
+.week-strip-cell.status-pending small,
+.week-strip-cell.status-in_progress small,
 .week-strip-cell.status-completed strong,
-.week-strip-cell.status-missing strong {
+.week-strip-cell.status-missing strong,
+.week-strip-cell.status-pending strong,
+.week-strip-cell.status-in_progress strong {
   color: #ffffff;
 }
 
@@ -1269,14 +1351,37 @@ div.exercise-card:hover {
 
 /* Exception to the rule above: when TODAY is completed, the green "done" fill
    wins over the blue today highlight (the completion is the more meaningful
-   state, and the cell is still the centered/current one anyway). */
+   state, and the cell is still the centered/current one anyway). The same
+   applies to an in-progress today — yellow, matching the month calendar. */
 .week-strip-cell.status-completed.is-today {
   border-color: var(--success);
   background: var(--success);
 }
 
+.week-strip-cell.status-in_progress.is-today {
+  border-color: var(--warning);
+  background: var(--warning);
+}
+
 .week-strip-legend {
   margin-top: 2px;
+  /* Compact single-line-friendly legend row (Home week strip only): tighter
+     gaps and slightly smaller text so all five statuses fit one row on phones.
+     Items may wrap between each other, but never internally (white-space), so
+     a label like "In progress" never splits across rows. */
+  gap: 3px 9px;
+  margin-bottom: 4px;
+}
+
+.week-strip-legend span {
+  font-size: 0.68rem;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.week-strip-legend .pd-legend-dot {
+  width: 8px;
+  height: 8px;
 }
 
 
@@ -1294,8 +1399,7 @@ div.exercise-card:hover {
   font-weight: 700;
 }
 
-.stats-row span,
-.desktop-metrics span {
+.stats-row span {
   display: grid;
   gap: 4px;
   border: 1px solid var(--border);
@@ -1306,8 +1410,7 @@ div.exercise-card:hover {
   font-size: 0.78rem;
 }
 
-.stats-row strong,
-.desktop-metrics strong {
+.stats-row strong {
   color: var(--text-primary);
   font-size: 1.4rem;
 }
@@ -1400,8 +1503,12 @@ div.exercise-card:hover {
 .session-shell {
   display: grid;
   place-items: center;
-  padding: 20px;
+  /* Mobile-first: immersive full-bleed camera session (§3). Padded card
+     layouts come back at the 600px/1100px breakpoints below. */
+  padding: 0;
   background: #0a0f1e;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .session-desktop-layout {
@@ -1412,16 +1519,16 @@ div.exercise-card:hover {
 
 .camera-stage {
   position: relative;
-  width: min(100%, 520px);
-  min-height: min(820px, calc(100vh - 40px));
-  aspect-ratio: 9 / 16;
+  /* §23 — full-screen on phones: fill the dynamic viewport, no card chrome. */
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
-  border: 2px solid rgba(37, 99, 235, 0.38);
-  border-radius: 20px;
+  border: 0;
+  border-radius: 0;
   background:
     radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.12), transparent 17%),
     linear-gradient(135deg, #0d1b2a, #1a2744);
-  box-shadow: 0 0 40px rgba(37, 99, 235, 0.15);
 }
 
 .session-topbar {
@@ -1432,19 +1539,28 @@ div.exercise-card:hover {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 16px 18px 44px;
+  /* §6 — safe-area spacing so the bar clears notches/status bars. */
+  padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 44px calc(16px + env(safe-area-inset-left));
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
   color: #ffffff;
 }
 
-.session-topbar div {
+.session-topbar-info {
   display: grid;
   gap: 3px;
+  /* Allow the name to shrink + truncate instead of pushing Exit off-screen. */
+  min-width: 0;
 }
 
 .session-topbar span {
   font-size: 0.82rem;
   color: rgba(255, 255, 255, 0.76);
+}
+
+.session-topbar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-icon-button {
@@ -1508,6 +1624,15 @@ div.exercise-card:hover {
   text-align: center;
 }
 
+/* Phone view — the floating reference panel (with the actual demo video) gets
+   a larger footprint so the movement is actually watchable on a small screen,
+   while staying clear of the tracking HUD/controls. */
+@media (max-width: 700px) {
+  .reference-panel {
+    width: min(160px, 44vw);
+  }
+}
+
 /* CAMERA_TRACKING_MOCKUP_PLAN.md §2.1 — pre-session "get positioned in frame"
    state, shown once the camera is streaming but before the patient presses
    Start. Sits above the plain camera feed, below where the full tracking HUD
@@ -1559,7 +1684,7 @@ div.exercise-card:hover {
    guide and prompt. */
 .session-preroll .primary-button {
   position: absolute;
-  bottom: 32px;
+  bottom: calc(32px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
@@ -1588,6 +1713,15 @@ div.exercise-card:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  font-size: 1rem;
+}
+
+.session-topbar-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
 }
 
 .side-name-row {
@@ -1603,37 +1737,49 @@ div.exercise-card:hover {
   color: var(--text-secondary);
 }
 
-.session-progress-badge {
-  position: absolute;
-  top: 78px;
-  right: 16px;
-  z-index: 4;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  padding: 6px 10px;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
+/* §10 — reference/demo panel is COLLAPSED by default on camera-centric layouts
+   (phone/tablet): it only appears when the floating "Demo" toggle below is
+   tapped (.open), so it never permanently covers the patient's tracking area.
+   The desktop breakpoint (≥1100px) shows it permanently and hides the toggle. */
+.reference-panel {
+  display: none;
 }
 
-.session-progress-ring {
-  position: relative;
+.reference-panel.open {
+  display: grid;
+}
+
+.reference-toggle {
+  position: absolute;
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(246px + env(safe-area-inset-bottom));
+  z-index: 5;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.48);
+  color: rgba(255, 255, 255, 0.9);
+  padding: 8px 14px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
 }
 
-.session-progress-ring > strong {
-  position: absolute;
-  color: #ffffff;
-  font-size: 0.68rem;
-  font-weight: 700;
+.reference-toggle:focus-visible,
+.session-demo-toggle button:focus-visible,
+.session-control-btn:focus-visible,
+.session-icon-button:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
 }
 
 .session-demo-toggle {
   position: absolute;
-  bottom: 190px;
-  right: 16px;
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(206px + env(safe-area-inset-bottom));
   z-index: 5;
 }
 
@@ -1684,6 +1830,21 @@ div.exercise-card:hover {
   stroke-width: 5;
 }
 
+/* The exercise's actual demo video in the floating camera reference panel
+   (phone/tablet) — rounded video tile matching the reference thumb's look.
+   Muted/looping/controls; on desktop (≥1100px) it's hidden along with the
+   floating panel and lives in the sidebar instead. */
+.session-demo-video {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 12px;
+  background: #2b2e2b;
+  display: block;
+}
+
 .skeleton-overlay,
 .hand-overlay {
   position: absolute;
@@ -1702,6 +1863,23 @@ div.exercise-card:hover {
      HandOverlay's virtual-object box, offset left) the "tracked" object sat on
      the opposite side from where a mirrored real hand would be. */
   transform: scaleX(-1);
+}
+
+/* REAL hand-tracking skeleton canvas (PatientSessionPage's virtual_grip/both
+   overlay). Positioned like .skeleton-overlay/.hand-overlay, but sized to the
+   video's intrinsic resolution with object-fit: cover so it crops exactly like
+   .camera-feed does, and with NO CSS scaleX(-1) — the landmarks are drawn
+   pre-mirrored by drawHandSkeleton(mirror=true) instead. */
+.hand-tracking-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.5));
 }
 
 .camera-feed {
@@ -1753,6 +1931,158 @@ div.exercise-card:hover {
   opacity: 0.8;
 }
 
+.session-bottom-stack {
+  position: absolute;
+  inset: auto calc(14px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+  z-index: 5;
+  display: grid;
+  gap: 10px;
+}
+
+/* §9 — compact feedback chip (replaces the old large permanent feedback
+   panel): icon + short text, translucent, max-width so it never covers the
+   whole camera. */
+.feedback-chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 420px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 9px 12px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #ffffff;
+  backdrop-filter: blur(10px);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.feedback-chip p {
+  margin: 0;
+  min-width: 0;
+}
+
+.feedback-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #ffffff;
+}
+
+.feedback-chip.warning {
+  background: rgba(120, 53, 15, 0.86);
+}
+
+.feedback-chip.warning .feedback-chip-icon {
+  background: var(--warning);
+  color: #3b2300;
+}
+
+/* §8 — the single primary progress representation on the camera. */
+.session-progress-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  backdrop-filter: blur(10px);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.session-progress-count {
+  white-space: nowrap;
+}
+
+.session-progress-track {
+  display: block;
+  flex: 1;
+  height: 8px;
+  min-width: 60px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.session-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 0.4s ease;
+}
+
+/* Score chip inside the progress line: deprioritized on phones per the mobile
+   information hierarchy (§5), shown from the tablet breakpoint up (CSS). */
+.session-progress-score {
+  display: none;
+  align-items: baseline;
+  gap: 3px;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+}
+
+.session-progress-score strong {
+  color: #ffffff;
+  font-size: 1rem;
+}
+
+.session-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+/* §11 — labeled pill buttons with large touch targets instead of tiny
+   icon-only circles. Same handlers/behavior as before. */
+.session-control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 96px;
+  height: 52px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.82rem;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+
+.session-control-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.session-control-btn.stop {
+  min-width: 96px;
+  height: 52px;
+  border: none;
+  background: linear-gradient(135deg, var(--error), #c53030);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 24px rgba(239, 68, 68, 0.4);
+}
+
+.session-control-btn.stop:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+}
+
+/* Session-state overlay text scales down on small screens instead of clipping. */
 .session-state {
   position: absolute;
   inset: 0;
@@ -1761,105 +2091,20 @@ div.exercise-card:hover {
   place-items: center;
   background: rgba(0, 0, 0, 0.3);
   color: #ffffff;
-  font-size: 2rem;
+  font-size: clamp(1.4rem, 5vw, 2rem);
   font-weight: 800;
 }
 
-.session-bottom-stack {
-  position: absolute;
-  inset: auto 14px 14px;
-  z-index: 5;
-  display: grid;
-  gap: 12px;
-}
-
-.feedback-panel {
-  display: grid;
-  gap: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
-  padding: 14px;
-  background: rgba(0, 0, 0, 0.62);
-  color: #ffffff;
-  backdrop-filter: blur(10px);
-}
-
-.session-controls {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-}
-
-.session-control-btn {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(8px);
-}
-
-.session-control-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.session-control-btn.stop {
-  width: 68px;
-  height: 68px;
-  border: none;
-  background: linear-gradient(135deg, var(--error), #c53030);
-  color: #ffffff;
-  font-weight: 700;
-  font-size: 0.8rem;
-  box-shadow: 0 4px 24px rgba(239, 68, 68, 0.4);
-}
-
-.session-control-btn.stop:hover {
-  background: linear-gradient(135deg, #dc2626, #b91c1c);
-}
-
-.feedback-panel.warning {
-  background: rgba(120, 53, 15, 0.86);
-}
-
-.feedback-panel p {
-  margin: 0;
-  line-height: 1.4;
-}
-
-.metric-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+/* Desktop-only session dashboard (shown ≥1100px). Hidden entirely below that —
+   phone/tablet use the on-camera HUD instead of a shrunken sidebar (§5/§13). */
+.session-side-panel {
+  display: none;
 }
 
 .side-name-th {
-  margin: -8px 0 0;
+  margin: -6px 0 0;
   color: var(--text-secondary);
   font-size: 0.85rem;
-}
-
-.metric-row span {
-  display: grid;
-  gap: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 12px;
-  padding: 8px;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 0.76rem;
-}
-
-.metric-row strong {
-  color: #ffffff;
-  font-size: 1.15rem;
-}
-
-.session-side-panel {
-  display: none;
 }
 
 @keyframes pulse {
@@ -1984,37 +2229,6 @@ div.exercise-card:hover {
     display: none;
   }
 
-  .session-shell {
-    padding: 32px;
-  }
-
-  .session-desktop-layout {
-    grid-template-columns: minmax(440px, 560px) minmax(320px, 380px);
-    align-items: stretch;
-    gap: 24px;
-  }
-
-  .camera-stage {
-    min-height: min(820px, calc(100vh - 64px));
-  }
-
-  .session-side-panel {
-    display: grid;
-    align-content: start;
-    gap: 20px;
-    min-height: min(820px, calc(100vh - 64px));
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    background: var(--card);
-    padding: 24px;
-    box-shadow: var(--shadow-card);
-  }
-
-  .desktop-metrics {
-    display: grid;
-    gap: 10px;
-  }
-
   .session-bottom-stack {
     inset: auto 20px 20px;
   }
@@ -2049,16 +2263,307 @@ div.exercise-card:hover {
   }
 }
 
-@media (max-width: 560px) {
-  .camera-stage {
-    min-height: 100vh;
-    width: 100%;
-    border: 0;
-    border-radius: 0;
+/* Small phone — the base mobile styles above are already full-bleed; nothing
+   extra needed here anymore (the old 560px overrides were folded into base). */
+
+/* §3 — Tablet / small laptop (600–1099px): the camera comes back as a rounded
+   portrait card (still the only panel — no desktop dashboard yet), with room
+   for the padded shell. Score becomes visible in the progress line. */
+@media (min-width: 600px) {
+  .session-shell {
+    padding: 24px;
   }
 
+  .camera-stage {
+    width: min(100%, 520px);
+    height: auto;
+    min-height: min(820px, calc(100vh - 64px));
+    aspect-ratio: 9 / 16;
+    border: 2px solid rgba(37, 99, 235, 0.38);
+    border-radius: 20px;
+    box-shadow: 0 0 40px rgba(37, 99, 235, 0.15);
+  }
+
+  .session-topbar {
+    border-radius: 18px 18px 0 0;
+  }
+
+  .session-progress-score {
+    display: inline-flex;
+  }
+
+  .session-bottom-stack {
+    inset: auto calc(20px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+  }
+}
+
+/* §3/§4 — Desktop (≥1100px): two-column workspace with the CAMERA as the
+   dominant surface — it takes all remaining width (minmax(0, 1fr)) while the
+   sidebar holds a stable secondary width. Score, progress, feedback and the
+   controls all live in the sidebar; the camera keeps only its own HUD (top
+   bar, tracking status, overlays, reference thumb). The bottom stack stays
+   hidden on desktop (§22) so nothing competes with the patient's tracking
+   area. */
+@media (min-width: 1100px) {
   .session-shell {
-    padding: 0;
+    /* §25 — modest page padding; the layout itself stretches to the viewport. */
+    padding: 24px 32px;
+  }
+
+  .session-desktop-layout {
+    /* Camera = flexible majority; sidebar = stable secondary width. The base
+       width cap (1180px) is lifted here so the camera keeps growing on large
+       displays (§24). */
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    align-items: stretch;
+    gap: 20px;
+    justify-items: stretch;
+    width: min(100%, 1720px);
+  }
+
+  .camera-stage {
+    /* §5/§26 — fill the flexible column and the viewport height (minus the
+       shell's own 24px top/bottom padding) so the session fits without page
+       scrolling. The video itself keeps its proportions via object-fit: cover
+       (§6) — only the stage grows. */
+    width: 100%;
+    min-width: 0;
+    height: calc(100vh - 48px);
+    height: calc(100dvh - 48px);
+    min-height: 540px;
+    aspect-ratio: auto;
+  }
+
+  .session-bottom-stack {
+    display: none;
+  }
+
+  /* §7/§8 — the demo/reference does NOT live in the camera on desktop: the
+     floating panel, the Demo toggle and the low-confidence demo toggle are all
+     hidden, keeping the camera clean. The reference appears as an "Exercise
+     demo" sidebar section instead (.side-reference below). */
+  .reference-panel,
+  .reference-toggle,
+  .session-demo-toggle {
+    display: none;
+  }
+
+  .side-reference {
+    display: grid;
+    gap: 8px;
+  }
+
+  /* §5/§6 — responsive to the sidebar width (no fixed size), 16:9 like a video
+     tile so it stays compact and never pushes the controls off-panel. */
+  .side-reference .reference-thumb {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+  }
+
+  /* The exercise's actual demo video (PatientSessionPage's ExerciseDemoMedia)
+     fills the same 16:9 tile the static reference thumb uses. */
+  .side-reference .session-demo-video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
+    border-radius: 12px;
+    background: var(--bg);
+  }
+
+  .side-reference-hint {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+  }
+
+  .session-side-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    /* §14/§28 — the panel stretches to match the camera row height
+       (align-items: stretch on the grid); internal scroll only if a very
+       short viewport can't fit the content, so controls stay reachable. */
+    min-height: 0;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--card);
+    padding: 20px 22px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .side-exercise-name {
+    margin: 0;
+    font-size: 1.3rem;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+
+  .side-exercise-feedback {
+    margin: 10px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+    line-height: 1.45;
+  }
+
+  .side-label {
+    margin: 0 0 6px;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* Therapist instruction section (its own sidebar block above Current score —
+     replaces the old .side-exercise-feedback line in the heading section). */
+  .side-instruction-text {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 0.88rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  /* B — score as the visual focal point of the panel. */
+  .side-score-value {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 0;
+  }
+
+  .side-score-value strong {
+    font-size: clamp(2.6rem, 4vw, 3.4rem);
+    line-height: 1;
+    color: var(--text-primary);
+  }
+
+  .side-score-value span {
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  .side-score {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    background: var(--bg);
+  }
+
+  /* C — target progress (dark-theme track variant for the card background). */
+  .side-target {
+    display: grid;
+    gap: 8px;
+  }
+
+  .side-target-track {
+    height: 10px;
+    background: var(--border);
+  }
+
+  .side-target-track .session-progress-fill {
+    background: var(--primary);
+  }
+
+  .side-target-count {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  /* D — live feedback: compact, clearly separated, state icon + text. */
+  .side-feedback-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    border: 1px solid rgba(22, 163, 74, 0.25);
+    border-radius: 14px;
+    padding: 12px;
+    background: rgba(22, 163, 74, 0.08);
+    font-size: 0.88rem;
+    line-height: 1.4;
+  }
+
+  .side-feedback-body p {
+    margin: 0;
+    min-width: 0;
+  }
+
+  .side-feedback-body.warning {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.1);
+  }
+
+  /* D — live feedback is hidden on desktop/laptop: the camera's own feedback
+     chip already shows the same check/correction state, so the green-bordered
+     card below the Target bar is redundant on the wide layout. */
+  .side-feedback {
+    display: none;
+  }
+
+  /* E — controls grouped at the bottom of the panel; Finish visually distinct. */
+  .side-controls {
+    display: grid;
+    gap: 10px;
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .side-controls .secondary-button {
+    justify-content: center;
+  }
+
+  .finish-button {
+    min-height: 48px;
+    font-weight: 800;
+  }
+}
+
+/* §16 — landscape phones: unstack the HUD into a single bottom row, keep
+   controls reachable, and move the Demo toggle up out of the way. */
+@media (max-width: 899px) and (orientation: landscape) {
+  .session-bottom-stack {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .feedback-chip {
+    flex: 1;
+    max-width: none;
+    align-items: center;
+  }
+
+  .session-progress-line {
+    flex: 0 0 auto;
+    width: min(240px, 32vw);
+  }
+
+  .session-controls {
+    flex: 0 0 auto;
+  }
+
+  .session-control-btn {
+    min-width: 84px;
+    height: 48px;
+  }
+
+  .session-control-btn.stop {
+    min-width: 84px;
+    height: 48px;
+  }
+
+  .session-demo-toggle,
+  .reference-toggle {
+    bottom: auto;
+    top: calc(130px + env(safe-area-inset-top));
+  }
+
+  .session-preroll .primary-button {
+    min-width: 150px;
   }
 }
 
@@ -2160,6 +2665,8 @@ div.exercise-card:hover {
 }
 
 .therapist-workspace {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 
@@ -2228,10 +2735,12 @@ div.exercise-card:hover {
 }
 
 .therapist-main {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 20px;
   padding: 20px;
+  min-height: 0;
+  flex: 1;
 }
 
 .therapist-patient-table-row {
@@ -2500,6 +3009,8 @@ div.exercise-card:hover {
   display: grid;
   gap: 16px;
   grid-template-columns: 1fr;
+  flex: 1;
+  min-height: 0;
 }
 
 .therapist-chart-card {
@@ -2651,7 +3162,7 @@ div.exercise-card:hover {
 }
 
 .admin-account-list-scroll {
-  max-height: 590px;
+  height: 552px;  /* exactly 8 rows × ~69px per row (avatar + name stack) */
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
@@ -3074,7 +3585,31 @@ div.exercise-card:hover {
    status + a status pill + an action button/badge. */
 
 .admin-modal.assign-patient-modal {
-  width: min(100%, 560px);
+  width: min(100%, 640px);
+}
+
+/* Header row + rows share the same 4-column grid so each column lines up:
+   Patient | Status | Assigned to | Action */
+.assign-patient-header,
+.assign-patient-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.4fr) minmax(80px, 0.9fr) minmax(120px, 1.1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.assign-patient-header {
+  padding: 0 12px 6px;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.assign-patient-header-action {
+  text-align: right;
 }
 
 .assign-patient-subtitle {
@@ -3107,14 +3642,22 @@ div.exercise-card:hover {
 }
 
 .assign-patient-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
   border: 1px solid var(--border-light);
   border-radius: 14px;
   padding: 10px 12px;
+}
+
+.assign-patient-row-assigned {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assign-patient-row-assigned small {
+  color: var(--text-secondary);
 }
 
 .assign-patient-row-info {
@@ -3137,14 +3680,56 @@ div.exercise-card:hover {
 .assign-patient-row-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
 .assign-patient-row-actions .primary-button,
-.assign-patient-row-actions .secondary-button {
+.assign-patient-row-actions .secondary-button,
+.assign-patient-row-actions .danger-button {
   min-height: 32px;
   padding: 6px 12px;
   font-size: 0.78rem;
+}
+
+/* Green "Assign" for an empty slot */
+.assign-patient-row-actions .assign-patient-assign {
+  background: var(--success);
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.3);
+}
+
+.assign-patient-row-actions .assign-patient-assign:hover {
+  box-shadow: 0 6px 18px rgba(34, 197, 94, 0.4);
+}
+
+/* Red "Remove" for a patient already assigned to this therapist */
+.assign-patient-row-actions .danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  background: var(--error);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.3);
+}
+
+.assign-patient-row-actions .danger-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.4);
+}
+
+.assign-patient-row-actions .danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: none;
+}
+
+.badge-pill.muted {
+  background: var(--darkgray-light);
+  color: var(--darkgray);
 }
 
 /* --- Admin Dashboard (frontend-design.md §8) --- */
@@ -3254,11 +3839,227 @@ div.exercise-card:hover {
   gap: 10px;
 }
 
+/* Full-width system-logs card: spans both columns of .therapist-chart-grid so it
+   occupies the row the weekly-activity chart used to share. Entries render one
+   per row, capped in height with scrolling for longer feeds. */
+.admin-dashboard-side-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-log-card--wide {
+  grid-column: 1 / -1;
+}
+
+/* The log card stretches to fill all remaining vertical space */
+.admin-log-card {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-height: 0;
+}
+
+.admin-log-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.admin-log-pagination {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.admin-log-pagination-label {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.admin-log-pagination-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease, border-color 0.13s ease;
+  padding: 0;
+}
+
+.admin-log-pagination-btn:hover:not(:disabled) {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.admin-log-pagination-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Filter/search toolbar above the activity-log table */
+.admin-log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.admin-log-search {
+  flex: 1 1 220px;
+  min-width: 180px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  outline: none;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+}
+
+.admin-log-search::placeholder {
+  color: var(--text-secondary);
+}
+
+.admin-log-search:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.admin-log-filter-select {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+}
+
+.admin-log-filter-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.admin-log-table-scroll .admin-log-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+}
+
+.admin-log-table {
+  width: 100%;
+  min-width: 600px;
+  min-width: 520px;
+}
+
+.admin-log-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.admin-log-badge--create {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.admin-log-badge--edit {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+}
+
+.admin-log-badge--delete {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid rgba(220, 38, 38, 0.25);
+}
+
+.admin-log-table-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.admin-log-table-pill--user {
+  background: rgba(139, 92, 246, 0.08);
+  color: #7c3aed;
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+.admin-log-table-pill--exercise {
+  background: rgba(14, 165, 233, 0.08);
+  color: #0284c7;
+  border-color: rgba(14, 165, 233, 0.2);
+}
+
+.admin-log-table-pill--plan {
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.admin-log-object-name {
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.admin-log-bywho {
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 0.82rem;
+}
+
+.admin-log-list--wide {
+  grid-template-columns: minmax(0, 1fr);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* One row per log: level tag, message (truncates with ellipsis), then the time
+   label pushed to the row's right edge. */
 .admin-log-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   border-left: 3px solid var(--primary);
   border-radius: 10px;
   background: var(--primary-light);
-  padding: 10px 14px;
+  padding: 8px 14px;
 }
 
 .admin-log-entry.warning {
@@ -3271,14 +4072,9 @@ div.exercise-card:hover {
   background: var(--error-light);
 }
 
-.admin-log-entry-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
-}
-
 .admin-log-level {
+  flex: 0 0 auto;
+  min-width: 46px;
   color: var(--text-primary);
   font-size: 0.68rem;
   font-weight: 800;
@@ -3303,10 +4099,125 @@ div.exercise-card:hover {
 }
 
 .admin-log-entry p {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   color: var(--text-primary);
   font-size: 0.8rem;
   line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Narrow screens: let the message wrap onto a second line instead of truncating. */
+@media (max-width: 760px) {
+  .admin-log-entry p {
+    flex: 1 1 100%;
+    white-space: normal;
+    overflow: visible;
+  }
+}
+
+/* --- Admin Schedule Sync Button & Banner --- */
+
+.admin-sync-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #7c3aed, var(--primary));
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.25);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+
+.admin-sync-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);
+}
+
+.admin-sync-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.admin-sync-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+@keyframes spin-animation {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin-icon {
+  animation: spin-animation 1s linear infinite;
+}
+
+.admin-sync-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 12px 18px;
+  border-radius: 14px;
+}
+
+.admin-sync-banner-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+}
+
+.admin-sync-banner-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.admin-sync-banner-content strong {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.admin-sync-banner-content p {
+  margin: 4px 0 0;
+  font-size: 0.81rem;
+  opacity: 0.92;
+}
+
+.admin-sync-banner-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: currentColor;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.admin-sync-banner-close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.06);
 }
 
 /* --- Exercise Library (frontend-design.md §6, revised per
@@ -5026,6 +5937,16 @@ div.exercise-card:hover {
   color: var(--text-secondary);
 }
 
+/* Today page only: cancelled days read as "no exercise" — the same solid
+   light-gray fill as the week strip's .status-none cell — instead of the
+   striped hatch, so both Home calendars share one color scheme. (Patient
+   Detail / Progress / History keep the striped hatch.) */
+.pt-calendar-card .pd-calendar-cell.cancelled {
+  background: #cbd5e1;
+  border-color: #cbd5e1;
+  color: var(--text-primary);
+}
+
 .pd-legend {
   display: flex;
   flex-wrap: wrap;
@@ -5300,6 +6221,60 @@ div.exercise-card:hover {
   box-shadow: var(--shadow-hover);
 }
 
+/* Majority-screen exercise-library picker modal (PatientDetailPage's
+   "Add exercise from library" popup). Mirrors ExerciseLibraryPage's toolbar
+   (.library-toolbar/.library-search/.library-status-filter) and card grid
+   (.library-grid/.library-card) inside a .pd-modal shell. */
+.pd-library-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(100%, 1180px);
+  height: min(100%, 92vh);
+  max-height: 92vh;
+  padding: 20px 24px;
+  overflow: hidden;
+}
+
+.pd-library-modal .therapist-detail-header {
+  flex-shrink: 0;
+}
+
+.pd-library-toolbar-card {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.pd-library-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+/* Card affordance: pickable cards get the same hover treatment as the
+   library page; non-pickable (draft/archived/already-added) are dimmed. */
+.pd-picker-view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: end;
+  margin-top: 2px;
+  font-size: 0.78rem;
+}
+
+.pd-library-modal .library-card[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.pd-library-modal .library-card[aria-disabled="false"]:hover,
+.pd-library-modal .library-card[aria-disabled="false"]:focus-visible {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-hover);
+}
+
 .pd-modal-form {
   display: grid;
   gap: 16px;
@@ -5332,6 +6307,450 @@ div.exercise-card:hover {
   color: var(--text-secondary);
   font-size: 0.74rem;
   line-height: 1.4;
+}
+
+/* "Add exercise" confirm popup (PatientDetailPage's ExercisePickerModal):
+   Modern confirmation dialog featuring rich exercise summary with demo thumbnail,
+   dynamic interactive target setter with presets, and optional therapist instructions. */
+.pd-picker-confirm-dialog {
+  width: min(calc(100vw - 32px), 520px);
+  max-height: min(90vh, 740px);
+  padding: 22px 24px;
+  gap: 16px;
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 48px -12px rgba(15, 23, 42, 0.25), 0 4px 16px rgba(0, 0, 0, 0.08);
+  animation: pd-picker-fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pd-picker-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -47%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.pd-picker-confirm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.pd-picker-confirm-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pd-picker-confirm-title-wrap strong {
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+
+.pd-picker-confirm-day-badge {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 3px 10px;
+}
+
+.pd-picker-confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 1. Short detail card */
+.pd-picker-confirm-card {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--border-light, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  align-items: start;
+}
+
+.pd-picker-confirm-media {
+  width: 88px;
+  height: 88px;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pd-picker-confirm-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pd-picker-confirm-badge-overlay {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.pd-picker-confirm-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-align: center;
+  padding: 4px;
+}
+
+.pd-picker-confirm-details {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pd-picker-confirm-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pd-picker-confirm-name {
+  font-size: 0.96rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.pd-picker-confirm-nameth {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: -2px 0 2px;
+}
+
+.pd-picker-confirm-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.pd-picker-confirm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.pd-picker-confirm-chip.tracking {
+  background: var(--primary-light);
+  border-color: transparent;
+  color: var(--primary);
+}
+
+.pd-picker-confirm-chip.tracking.tracking-virtual_grip {
+  background: var(--teal-light, rgba(20, 184, 166, 0.12));
+  color: var(--teal, #0d9488);
+}
+
+.pd-picker-confirm-chip.tracking.tracking-none {
+  background: var(--border-light, #f1f5f9);
+  color: var(--text-secondary);
+}
+
+.pd-picker-confirm-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 3px 0 0;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 2. Target Value Setter */
+.pd-picker-confirm-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pd-picker-confirm-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pd-picker-confirm-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pd-picker-confirm-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.pd-picker-confirm-reset-btn:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+
+.pd-picker-confirm-target-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  transition: border-color 0.15s ease;
+}
+
+.pd-picker-confirm-target-box:focus-within {
+  border-color: var(--primary);
+}
+
+.pd-picker-confirm-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.pd-picker-confirm-step-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pd-picker-confirm-step-btn:hover:not(:disabled) {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.pd-picker-confirm-step-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pd-picker-confirm-stepper-val {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 100px;
+}
+
+.pd-picker-confirm-stepper-input {
+  width: 68px;
+  height: 38px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.pd-picker-confirm-stepper-input:focus {
+  border-color: var(--primary);
+}
+
+.pd-picker-confirm-stepper-input::-webkit-inner-spin-button,
+.pd-picker-confirm-stepper-input::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.pd-picker-confirm-stepper-unit {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pd-picker-confirm-presets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.pd-picker-confirm-presets-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.pd-picker-confirm-presets-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pd-picker-confirm-preset-btn {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pd-picker-confirm-preset-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.pd-picker-confirm-preset-btn.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+/* 3. Optional Therapist Instruction */
+.pd-optional-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--border-light, #f1f5f9);
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.pd-picker-confirm-textarea {
+  width: 100%;
+  min-height: 70px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: var(--card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.pd-picker-confirm-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.pd-picker-confirm-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  margin: 2px 0 0;
+}
+
+.pd-picker-confirm-hint-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* 4. Action buttons */
+.pd-picker-confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.pd-picker-confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 42px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  border-radius: 12px;
+}
+
+@media (max-width: 480px) {
+  .pd-picker-confirm-card {
+    grid-template-columns: 1fr;
+  }
+  .pd-picker-confirm-media {
+    width: 100%;
+    height: 120px;
+  }
 }
 
 @media (min-width: 900px) {
@@ -5623,6 +7042,570 @@ div.exercise-card:hover {
 .filepicker-compact-trigger span {
   color: var(--primary);
   font-weight: 700;
+}
+
+/* --- Patient Detail: Plan Medical Attachments & Attach Medical File --- */
+.pd-attachments-container {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.pd-attachments-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+}
+
+.pd-attachments-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pd-attachments-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.pd-attachments-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 2px;
+  background: var(--border-light);
+  border-radius: 8px;
+}
+
+.pd-attachments-tab-btn {
+  border: 0;
+  background: transparent;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pd-attachments-tab-btn.active {
+  background: var(--card);
+  color: var(--primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.pd-attachments-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.pd-attachments-dropzone:hover,
+.pd-attachments-dropzone.drag-over {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.pd-attachments-dropzone-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pd-attachments-dropzone-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--border-light);
+  color: var(--primary);
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.pd-attachments-dropzone:hover .pd-attachments-dropzone-icon,
+.pd-attachments-dropzone.drag-over .pd-attachments-dropzone-icon {
+  background: var(--card);
+}
+
+.pd-attachments-dropzone-text {
+  display: grid;
+  text-align: left;
+}
+
+.pd-attachments-dropzone-text strong {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.pd-attachments-dropzone-text small {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.pd-attachments-browse-btn {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.pd-attachments-browse-btn:hover {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+.pd-attachments-uploading-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1.5px solid var(--primary);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: var(--primary-light);
+}
+
+.pd-attachments-uploading-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pd-attachments-uploading-filename {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-attachments-list {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.pd-attachment-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  transition: all 0.18s ease;
+  overflow: hidden;
+}
+
+.pd-attachment-card:hover {
+  border-color: var(--darkgray, #9ca3af);
+}
+
+.pd-attachment-card.selected {
+  border: 1.5px solid var(--primary);
+  border-left: 4px solid var(--primary);
+  background: linear-gradient(90deg, #f0f7ff 0%, #ffffff 100%);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.pd-attachment-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.pd-attachment-checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  margin: 0;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pd-attachment-checkbox {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.pd-attachment-custom-check {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: #ffffff;
+  transition: all 0.15s ease;
+}
+
+.pd-attachment-card.selected .pd-attachment-custom-check {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.pd-attachment-thumb {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.pd-attachment-thumb.image {
+  background: linear-gradient(135deg, #dbeafe 0%, #ccfbf1 100%);
+  color: var(--primary);
+}
+
+.pd-attachment-thumb.video {
+  background: linear-gradient(135deg, #1e293b 0%, #475569 100%);
+  color: #f8fafc;
+}
+
+.pd-attachment-thumb.document {
+  background: linear-gradient(135deg, #fee2e2 0%, #fef3c7 100%);
+  color: #dc2626;
+}
+
+.pd-attachment-thumb.audio {
+  background: linear-gradient(135deg, #ccfbf1 0%, #e0e7ff 100%);
+  color: #0d9488;
+}
+
+.pd-attachment-info {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.pd-attachment-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.pd-attachment-filename {
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-attachment-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pd-attachment-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.pd-attachment-pill.attached {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.pd-attachment-pill.saved {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.pd-attachment-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.pd-attachment-type-tag {
+  background: var(--border-light);
+  color: var(--darkgray);
+  padding: 0 5px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+}
+
+.pd-attachment-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pd-attachment-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pd-attachment-action-btn:hover {
+  background: var(--border-light);
+  color: var(--text-primary);
+}
+
+.pd-attachment-action-btn.view-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.pd-attachment-action-btn.remove-btn {
+  padding: 4px 6px;
+  color: var(--error);
+  border-color: transparent;
+}
+
+.pd-attachment-action-btn.remove-btn:hover {
+  background: var(--error-light);
+  border-color: var(--error);
+}
+
+.pd-attachment-note-section {
+  padding: 6px 12px 10px 12px;
+  border-top: 1px dashed rgba(37, 99, 235, 0.2);
+  background: rgba(239, 246, 255, 0.4);
+  display: grid;
+  gap: 4px;
+}
+
+.pd-attachment-note-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.pd-attachment-note-icon {
+  flex-shrink: 0;
+}
+
+.pd-attachment-note-input-wrap {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.pd-attachment-note-input {
+  width: 100%;
+  min-height: 30px;
+  font-size: 0.78rem;
+  padding: 5px 28px 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-primary);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pd-attachment-note-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.pd-attachment-note-clear {
+  position: absolute;
+  right: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.pd-attachment-note-clear:hover {
+  color: var(--text-primary);
+}
+
+/* Attachment preview lightbox modal */
+.pd-attachment-preview-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 300;
+  width: min(94vw, 760px);
+  max-height: 90vh;
+  width: min(96vw, 1200px);
+  height: min(92vh, 880px);
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.2s ease, height 0.2s ease, border-radius 0.2s ease;
+}
+
+.pd-attachment-preview-modal.maximized {
+  width: 98vw;
+  height: 96vh;
+  border-radius: 10px;
+}
+
+.pd-attachment-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.pd-attachment-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-attachment-preview-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pd-attachment-preview-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: grid;
+  place-items: center;
+  background: #0f172a;
+  min-height: 280px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #090d16;
+  position: relative;
+}
+
+.pd-attachment-preview-img {
+  max-width: 100%;
+  max-height: 65vh;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  border-radius: 6px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.pd-attachment-preview-video {
+  max-width: 100%;
+  max-height: 65vh;
+  border-radius: 8px;
+  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+.pd-attachment-preview-iframe {
+  width: 100%;
+  height: 65vh;
+  height: 100%;
+  border: 0;
+  border-radius: 8px;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.pd-attachment-preview-fallback {
+  text-align: center;
+  padding: 30px 20px;
+  padding: 40px 24px;
+  color: #f8fafc;
+}
+
+.pd-attachment-preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  flex-shrink: 0;
 }
 
 /* --- Session Result Review (UI_MOCKUP_PLAN_NEWDB.md §2.7, new page). Reuses the
@@ -6431,6 +8414,351 @@ div.exercise-card:hover {
   gap: 2px;
 }
 
+/* Multi-select status filter in the Plan column header (PatientDetailPage) */
+.pd-status-filter-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pd-plan-status-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card, #ffffff);
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.pd-plan-status-filter:hover {
+  border-color: #cbd5e1;
+  background: var(--border-light, #f8fafc);
+  color: var(--text-primary);
+}
+
+.pd-plan-status-filter.filtering {
+  border-color: var(--primary);
+  background: var(--primary-light, #eff6ff);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.pd-plan-status-filter.active-menu {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+.pd-plan-status-filter:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.pd-filter-icon {
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.85;
+}
+
+.pd-filter-btn-label {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-filter-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.pd-filter-chevron {
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.6;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pd-filter-chevron.rotated {
+  transform: rotate(180deg);
+}
+
+/* Status Filter Dropdown Menu */
+.pd-status-filter-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: 204px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card, #ffffff);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  animation: pdFilterMenuFade 0.15s ease-out;
+}
+
+@keyframes pdFilterMenuFade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.pd-status-filter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 6px 6px;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 4px;
+}
+
+.pd-status-filter-title {
+  font-size: 0.70rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.pd-status-filter-quick-action {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.pd-status-filter-quick-action:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+.pd-status-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pd-status-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.12s ease;
+}
+
+.pd-status-filter-option:hover {
+  background: var(--border-light, #f8fafc);
+}
+
+.pd-status-filter-option.checked {
+  background: #f1f5f9;
+}
+
+.pd-status-filter-option input {
+  accent-color: var(--primary);
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.pd-status-filter-option-name {
+  flex: 1;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+/* Colored dot indicators for each status */
+.pd-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pd-status-dot.active {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+.pd-status-dot.draft {
+  background: #94a3b8;
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
+}
+
+.pd-status-dot.paused {
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.pd-status-dot.completed {
+  background: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.pd-status-dot.cancelled {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+/* Count badge on each filter row */
+.pd-status-filter-count {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  min-width: 18px;
+  text-align: center;
+}
+
+.pd-status-filter-count.zero {
+  opacity: 0.4;
+  background: transparent;
+}
+
+/* Status Filter Popover Footer */
+.pd-status-filter-footer {
+  margin-top: 4px;
+  padding: 6px 6px 2px 6px;
+  border-top: 1px solid var(--border-light);
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* Active filter chips shown in the Plan column below the header */
+.pd-active-filter-chips {
+  padding: 0 0 4px 0;
+}
+
+.pd-active-filter-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.pd-active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  line-height: 1.2;
+}
+
+.pd-active-filter-chip.active {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+
+.pd-active-filter-chip.draft {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+.pd-active-filter-chip.paused {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.pd-active-filter-chip.completed {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.pd-active-filter-chip.cancelled {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.pd-active-filter-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin-left: 2px;
+  cursor: pointer;
+  color: currentColor;
+  opacity: 0.65;
+  border-radius: 50%;
+  transition: opacity 0.15s ease;
+}
+
+.pd-active-filter-remove:hover {
+  opacity: 1;
+}
+
+.pd-active-filter-clear-link {
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+
+.pd-active-filter-clear-link:hover {
+  color: var(--primary);
+}
+
+.pd-empty-clear-btn {
+  margin-top: 8px;
+  font-size: 0.76rem;
+  padding: 4px 10px;
+}
+
+
 .pd-ws-add {
   display: grid;
   place-items: center;
@@ -6688,8 +9016,18 @@ div.exercise-card:hover {
   background: var(--success);
 }
 
+.pd-legend-dot.status-in_progress {
+  background: var(--warning);
+}
+
 .pd-legend-dot.status-missing {
   background: var(--error);
+}
+
+/* Matches the strip cell fill and the month calendar's .pd-calendar-cell.pending
+   (#60a5fa) — one pending blue across both Home calendars. */
+.pd-legend-dot.status-pending {
+  background: #60a5fa;
 }
 
 .pd-legend-dot.status-none {
@@ -7564,92 +9902,25 @@ tr.admin-user-row:hover .admin-row-open-hint {
   line-height: 1.4;
 }
 
-/* --- Patient Exercise Instruction page: "get ready" camera panel (right column,
-   PC layout). Mirrors the wireframe's right-hand box — a camera preview area
-   (placeholder only for this pass; no getUserMedia wired up yet — see
-   PatientExerciseInstructionPage.tsx's comment on why), a device-check row (UI
-   stubs only, real enumerateDevices()/switching + a mic-level meter are a later
-   pass), and Start Exercise sitting at the bottom of the same box. Reuses
-   .today-main-panel/.summary-card's existing bordered-card look (via
-   .pei-details-panel/.pei-camera-card) rather than inventing a new card shell. */
+/* --- Patient Exercise Instruction page: standalone Start Exercise bar. The old
+   "get ready" camera panel (preview placeholder + device stubs) was removed;
+   the button now sits in its own full-width bar at the bottom of the page
+   content, above the bottom nav. */
 
-.pei-camera-card {
+.pei-start-bar {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 520px;
-}
-
-.pei-camera-card-header p {
-  margin: 0 0 2px;
-}
-
-.pei-camera-card-header h2 {
-  margin: 0;
-  font-size: 1rem;
-}
-
-.pei-camera-preview {
-  display: grid;
-  place-items: center;
-  gap: 8px;
-  flex: 1;
-  min-height: 220px;
-  border: 1.5px dashed var(--border);
-  border-radius: 16px;
-  padding: 24px;
-  text-align: center;
-  background: var(--bg);
-  color: var(--text-secondary);
-}
-
-.pei-camera-preview svg {
-  color: var(--text-secondary);
-}
-
-.pei-camera-preview p {
-  margin: 0;
-  color: var(--text-primary);
-  font-weight: 600;
-  font-size: 0.88rem;
-}
-
-.pei-camera-preview span {
-  max-width: 240px;
-  font-size: 0.78rem;
-  line-height: 1.4;
-}
-
-.pei-device-row {
-  display: flex;
-  gap: 8px;
-}
-
-.pei-device-chip {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  gap: 6px;
-  flex: 1;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
-  color: var(--text-secondary);
-  padding: 8px 10px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: not-allowed;
+  margin-top: 16px;
+  padding: 14px 16px calc(14px + 64px); /* bottom padding clears the bottom nav */
+  border-top: 1px solid var(--border);
 }
 
-.pei-device-hint {
-  margin: -8px 0 0;
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  line-height: 1.4;
-}
-
-.pei-start-button {
-  margin-top: auto;
+.pei-start-bar .pei-start-button {
+  width: 100%;
+  max-width: 420px;
+  justify-content: center;
+  padding: 14px 24px;
+  font-size: 1rem;
 }
 
 /* This page's topbar stacks a "Back to today" button above the usual

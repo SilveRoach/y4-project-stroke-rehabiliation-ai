@@ -250,6 +250,12 @@ export interface UserListItem {
   dateOfBirthLabel?: string | null;
   heightCm?: number | null;
   weightKg?: number | null;
+  // Patient-only: the therapist from the patient's ACTIVE
+  // patient_therapist_assignments row (null when unassigned). Mirrors
+  // getUserProfile()'s assignedTherapist below — without this the account
+  // table's "Assigned to {name}" line on AdminUserManagementPage always shows
+  // "Not assigned" even when the therapist dashboard shows the assignment.
+  assignedTherapist?: { id: string; displayName: string; licenseNumber?: string | null } | null;
 }
 
 // users.status is active/inactive/suspended (UsersStatus on schema.prisma),
@@ -274,7 +280,16 @@ export async function listUsers(): Promise<UserListItem[]> {
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "desc" },
     include: {
-      patient: true,
+      patient: {
+        include: {
+          // Active assignment only (same definition therapist.service.ts's
+          // dashboard uses) with the therapist's user row for the display name.
+          therapistAssignments: {
+            where: { status: "active" },
+            include: { therapist: { include: { user: true } } }
+          }
+        }
+      },
       therapist: {
         include: {
           patientAssignments: { where: { status: "active" } }
@@ -315,6 +330,19 @@ export async function listUsers(): Promise<UserListItem[]> {
       item.dateOfBirthLabel = toDateInputValue(user.patient.dateOfBirth);
       item.heightCm = user.patient.heightCm !== null && user.patient.heightCm !== undefined ? Number(user.patient.heightCm) : null;
       item.weightKg = user.patient.weightKg !== null && user.patient.weightKg !== undefined ? Number(user.patient.weightKg) : null;
+      // Same shape as getUserProfile()'s assignedTherapist (therapist *user* id —
+      // assignment endpoints are keyed on user ids), so the table row and the
+      // AccountInfoModal agree on the patient's current therapist.
+      const activeAssignment = user.patient.therapistAssignments?.[0];
+      if (activeAssignment?.therapist) {
+        item.assignedTherapist = {
+          id: activeAssignment.therapist.userId,
+          displayName: displayName(activeAssignment.therapist.user),
+          licenseNumber: activeAssignment.therapist.licenseNumber
+        };
+      } else {
+        item.assignedTherapist = null;
+      }
     }
 
     return item;

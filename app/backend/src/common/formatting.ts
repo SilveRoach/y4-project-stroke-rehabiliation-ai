@@ -80,3 +80,23 @@ export function relativeDateLabel(date: Date | null | undefined): string {
 export function weekdayShortLabel(date: Date): string {
   return new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date);
 }
+
+/**
+ * Short relative time label: "Just now", "N min ago", "N hours ago", "Yesterday", "N days ago", or short date.
+ */
+export function relativeTimeLabel(date: Date | null | undefined): string {
+  if (!date) return "Unknown";
+  const now = Date.now();
+  const diffMs = Math.max(0, now - date.getTime());
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "Just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+}
+

@@ -1,10 +1,11 @@
-import { Pencil, Phone, Save, Shield, User, X, Camera } from "lucide-react";
+import { AlertCircle, Camera, Pencil, Phone, Save, Shield, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
 import { useProfilePicture, useProfilePictureUpload } from "../hooks/useProfilePicture";
-import { ApiError, getUserProfile, type UserProfile } from "../services/api";
+import { ApiError, getUserProfile, updateUserProfile, type UserProfile } from "../services/api";
+
 import { useAuth } from "../store/authStore";
 import { initialsFromName } from "../utils/displayName";
 
@@ -51,7 +52,7 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
   // Real logged-in admin for the topbar/sidebar profile chrome and the form's
   // pre-filled display name — mirrors PatientSettingsPage.tsx's idiom of
   // sourcing the shared chrome from the auth store instead of a static mock.
-  const { token, user } = useAuth();
+  const { token, user, updateUser } = useAuth();
   const authDisplayName = user?.displayName || user?.username || "Admin";
 
   // --- Real profile picture (same flow as Patient/TherapistSettingsPage) ---
@@ -61,12 +62,37 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [uploadBanner, setUploadBanner] = useState<string | null>(null);
 
+  const [form, setForm] = useState<AdminProfileForm>({
+    displayName: authDisplayName,
+    title: "System Administrator",
+    employeeId: "EMP-0001",
+    email: "suda.admin@rehabclinic.example",
+    phoneNumber: "0898765432",
+    address: "Bangkok Rehabilitation Center, 45 Phahonyothin Rd, Bangkok 10400"
+  });
+  const [isEditing, setIsEditing] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!token || !user) return;
     let cancelled = false;
     getUserProfile(token, user.id)
       .then((res) => {
         if (!cancelled) setProfile(res.user);
+        if (!cancelled) {
+          const u = res.user;
+          setProfile(u);
+          const name = u.displayName || [u.firstName, u.lastName].filter(Boolean).join(" ") || authDisplayName;
+          setForm((prev) => ({
+            ...prev,
+            displayName: name,
+            email: u.email ?? prev.email,
+            phoneNumber: u.phoneNumber ?? prev.phoneNumber,
+            address: u.address ?? prev.address
+          }));
+        }
       })
       .catch((err) => {
         // The picture is chrome, not the page's core form — a failed load just
@@ -84,16 +110,6 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
     setUploadBanner(null);
   });
 
-  const [form, setForm] = useState<AdminProfileForm>({
-    displayName: authDisplayName,
-    title: "System Administrator",
-    employeeId: "EMP-0001",
-    email: "suda.admin@rehabclinic.example",
-    phoneNumber: "0898765432",
-    address: "Bangkok Rehabilitation Center, 45 Phahonyothin Rd, Bangkok 10400"
-  });
-  const [isEditing, setIsEditing] = useState(false);
-  const [saved, setSaved] = useState(false);
   // Snapshot taken when edit mode starts, restored on "Discard changes" — lets
   // fields be edited freely without a cancel undoing more than this pass.
   const beforeEditRef = useRef(form);
@@ -102,18 +118,24 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
     setForm((current) => ({ ...current, [key]: event.target.value }));
   };
 
-  const startEditing = () => {
+  const startEditing = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
     beforeEditRef.current = form;
     setSaved(false);
+    setSaveError(null);
     setIsEditing(true);
   };
 
-  const discardChanges = () => {
+  const discardChanges = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
     setForm(beforeEditRef.current);
     setIsEditing(false);
+    setSaveError(null);
   };
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     // Stub: no profile-edit endpoint exists yet — this only updates local state
     // (and the "Saved" confirmation resets after a moment) so the form is
@@ -121,7 +143,35 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
     setIsEditing(false);
     setSaved(true);
     window.setTimeout(() => setSaved(false), 2500);
+    if (!isEditing) return;
+    if (!token || !user) return;
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const parts = form.displayName.trim().split(/\s+/);
+      const firstName = parts[0] || form.displayName.trim();
+      const lastName = parts.slice(1).join(" ") || undefined;
+
+      const res = await updateUserProfile(token, user.id, {
+        firstName,
+        lastName,
+        email: form.email.trim() || undefined,
+        phoneNumber: form.phoneNumber.trim() || undefined,
+        address: form.address.trim() || undefined
+      });
+      setProfile(res.user);
+      updateUser({ displayName: res.user.displayName, profilePictureFileId: res.user.profilePictureFileId });
+      setIsEditing(false);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : "Failed to save profile. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
+
 
   const handleNavigate = (label: AdminNavLabel) => {
     if (label === "Dashboard") onNavigateDashboard();
@@ -152,9 +202,11 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
         </header>
 
         <main className="therapist-main settings-main ps-main">
-          {(uploadBanner || picUpload.uploadError) && (
+          {(uploadBanner || picUpload.uploadError || saveError) && (
             <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)", marginBottom: 16 }}>
-              <p style={{ margin: 0 }}>{uploadBanner ?? picUpload.uploadError}</p>
+              <p style={{ margin: 0, color: "var(--danger, #d33)", display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertCircle size={16} /> {uploadBanner ?? picUpload.uploadError ?? saveError}
+              </p>
             </div>
           )}
 
@@ -246,17 +298,33 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
             <div className="ps-edit-actions">
               {isEditing ? (
                 <>
-                  <button type="button" className="secondary-button" onClick={discardChanges}>
+                  <button
+                    key="admin-discard-btn"
+                    type="button"
+                    className="secondary-button"
+                    onClick={discardChanges}
+                    disabled={saving}
+                  >
                     <X size={14} /> Discard changes
                   </button>
-                  <button type="submit" className="primary-button">
-                    <Save size={14} /> Save changes
+                  <button
+                    key="admin-save-btn"
+                    type="submit"
+                    className="primary-button"
+                    disabled={saving}
+                  >
+                    <Save size={14} /> {saving ? "Saving…" : "Save changes"}
                   </button>
                 </>
               ) : (
                 <>
                   {saved && <span className="ps-saved-note">Saved</span>}
-                  <button type="button" className="primary-button" onClick={startEditing}>
+                  <button
+                    key="admin-edit-btn"
+                    type="button"
+                    className="primary-button"
+                    onClick={startEditing}
+                  >
                     <Pencil size={14} /> Edit profile
                   </button>
                 </>

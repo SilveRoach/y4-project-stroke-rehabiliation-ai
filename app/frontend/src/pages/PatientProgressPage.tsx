@@ -18,6 +18,7 @@ import type {
   ScheduledExercise,
   ScheduledExerciseStatus
 } from "../types";
+import { formatTargetValue as sharedFormatTargetValue } from "../utils/targetValue";
 
 // Patient Progress page (sidebar/bottom-nav "Progress").
 // Fetches live rehabilitation plans, schedule days, and performance results
@@ -65,17 +66,7 @@ const exerciseStatusBadgeClass: Record<ScheduledExerciseStatus, string> = {
 // Mirrors backend session.service.ts's `targetValueLabel()`. Turns a raw JSON
 // target value (which Prisma returns as a JS object/array/primitive/null) into
 // a human-readable string. Without this, JSON objects produce "[object Object]".
-function formatTargetValue(targetValue: unknown): string {
-  if (targetValue === null || targetValue === undefined) return "";
-  if (typeof targetValue === "string" || typeof targetValue === "number") return String(targetValue);
-  if (Array.isArray(targetValue)) return targetValue.map(String).join(" · ");
-  if (typeof targetValue === "object") {
-    return Object.entries(targetValue as Record<string, unknown>)
-      .map(([key, value]) => `${String(value)} ${key}`)
-      .join(" · ");
-  }
-  return String(targetValue);
-}
+const formatTargetValue = sharedFormatTargetValue;
 
 function mapServerPlans(serverPlans: any[]): PatientRehabPlan[] {
   return serverPlans.map((sp: any) => {
@@ -103,7 +94,7 @@ function mapServerPlans(serverPlans: any[]): PatientRehabPlan[] {
           ex.exerciseLibrary?.versionNumber != null ? `v${ex.exerciseLibrary.versionNumber}` : (ex.versionLabel ?? undefined),
         movementTracking: ex.exerciseLibrary?.movementTracking ?? ex.movementTracking ?? "none",
         orderNumber: ex.orderNumber ?? 0,
-        targetType: ex.targetType ?? "free",
+        targetType: ex.targetType ?? "repetitions",
         targetValueLabel: formatTargetValue(ex.targetValue),
         difficultyLevel: ex.exerciseLibrary?.difficultyLevel ?? ex.difficultyLevel ?? undefined,
         therapistInstruction: ex.therapistInstruction ?? undefined,
@@ -516,8 +507,24 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
   // out-of-plan days shadowed out. Navigation remains available even when the
   // viewed month has no scheduled plan days.
   const monthRange = planMonthRange(plan);
-  const effectiveMonthKey = viewMonthKey ?? monthRange.min;
-  const monthCells = buildMonthCalendar(plan, effectiveMonthKey);
+  // Opening the section lands on TODAY's month (not the plan's start month) so
+  // the current/in-progress day is visible immediately; falls back to the plan's
+  // first month when today lies outside the plan's range.
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const todayMonthKey = todayIso.slice(0, 7);
+  const effectiveMonthKey =
+    viewMonthKey ?? (todayMonthKey >= monthRange.min && todayMonthKey <= monthRange.max ? todayMonthKey : monthRange.min);
+  // Today's own day reads as in-progress (yellow) while its exercises aren't
+  // all completed yet — same semantics as the Today page's calendars.
+  const monthCells = buildMonthCalendar(plan, effectiveMonthKey).map((cell) =>
+    cell.iso === todayIso &&
+    cell.dayIndex !== null &&
+    cell.status === "pending" &&
+    (plan.days[cell.dayIndex]?.exercises.length ?? 0) > 0
+      ? { ...cell, status: "in_progress" as HeatmapDayStatus }
+      : cell
+  );
   const monthLabel = (() => {
     const [y, m] = effectiveMonthKey.split("-").map(Number);
     return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -663,7 +670,6 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
                       ? ` · ${(exercise as TaggedExercise).planName}`
                       : ""}
                   </small>
-                    {exercise.therapistInstruction && <small className="exercise-note-text">{exercise.therapistInstruction}</small>}
                   </span>
                   <span className={`badge-pill ${exerciseStatusBadgeClass[exercise.status]}`}>
                     {exerciseStatusLabels[exercise.status]}

@@ -15,3 +15,15 @@ export async function getAdminDashboardHandler(_req: Request, res: Response, nex
     next(err);
   }
 }
+
+export async function syncSchedulesHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const actorId = req.user?.sub;
+    const clientToday = typeof req.body?.clientToday === "string" ? req.body.clientToday : undefined;
+    const result = await adminService.syncScheduleStatuses(actorId, clientToday);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+

@@ -89,9 +89,74 @@ export const roleDistributionData: RoleDistributionSlice[] = [
 ];
 
 export const systemLogs: SystemLogEntry[] = [
-  { level: "info", message: "AI model inference completed \u2014 98.2ms avg", timeLabel: "2 min ago" },
-  { level: "warning", message: "High memory usage on pose-estimation service (82%)", timeLabel: "15 min ago" },
-  { level: "info", message: "Scheduled backup completed successfully", timeLabel: "1 hour ago" },
-  { level: "error", message: "WebSocket timeout \u2014 patient session 4412 disconnected", timeLabel: "2 hours ago" },
-  { level: "info", message: "User Dr. Nattaya logged in from 203.154.x.x", timeLabel: "3 hours ago" }
+  {
+    id: "log-1",
+    type: "create",
+    table: "user",
+    objectName: "Dr. Pattarapong Srirak",
+    timeLabel: "10 min ago",
+    byWho: "Admin Suda",
+    level: "info",
+    message: "Created therapist user account for Dr. Pattarapong Srirak"
+  },
+  {
+    id: "log-2",
+    type: "edit",
+    table: "exercise",
+    objectName: "Shoulder Abduction v2",
+    timeLabel: "45 min ago",
+    byWho: "Dr. Nattaya Jantarasri",
+    level: "info",
+    message: "Updated base criteria targets for Shoulder Abduction v2"
+  },
+  {
+    id: "log-3",
+    type: "create",
+    table: "exercise",
+    objectName: "Bicep Curl with Resistance",
+    timeLabel: "2 hours ago",
+    byWho: "Dr. Pattarapong Srirak",
+    level: "info",
+    message: "Created new exercise draft 'Bicep Curl with Resistance'"
+  },
+  {
+    id: "log-4",
+    type: "edit",
+    table: "user",
+    objectName: "Ploy Sirichai",
+    timeLabel: "4 hours ago",
+    byWho: "Admin Suda",
+    level: "info",
+    message: "Updated patient demographics and contact number for Ploy Sirichai"
+  },
+  {
+    id: "log-5",
+    type: "edit",
+    table: "user",
+    objectName: "Dr. Chanon Wimonsit",
+    timeLabel: "Yesterday",
+    byWho: "Admin Suda",
+    level: "warning",
+    message: "Changed account status to disabled for Dr. Chanon Wimonsit"
+  },
+  {
+    id: "log-6",
+    type: "create",
+    table: "user",
+    objectName: "Somchai Prasert",
+    timeLabel: "2 days ago",
+    byWho: "Admin Suda",
+    level: "info",
+    message: "Created patient user account for Somchai Prasert"
+  },
+  {
+    id: "log-7",
+    type: "edit",
+    table: "exercise",
+    objectName: "Finger Tap Coordination",
+    timeLabel: "3 days ago",
+    byWho: "Dr. Nattaya Jantarasri",
+    level: "info",
+    message: "Updated difficulty rating and repetitions for Finger Tap Coordination"
+  }
 ];

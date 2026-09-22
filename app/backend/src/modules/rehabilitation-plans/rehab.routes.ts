@@ -12,8 +12,6 @@ rehabPlansRouter.post("/patients/:patientId/plans", requireAuth, requireRole("th
 rehabPlansRouter.get("/plans/:planId", requireAuth, controller.getPlan);
 rehabPlansRouter.patch("/plans/:planId", requireAuth, requireRole("therapist"), controller.patchPlan);
 rehabPlansRouter.patch("/plans/:planId/status", requireAuth, requireRole("therapist"), controller.patchPlanStatus);
-// Hard delete (full cascade of days/exercises/results/attachments).
-rehabPlansRouter.delete("/plans/:planId", requireAuth, requireRole("therapist"), controller.deletePlanHandler);
 
 // Attachments
 rehabPlansRouter.get("/patients/:patientId/attachments", requireAuth, controller.getPatientAttachments);

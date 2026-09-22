@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PatientNavLabel } from "./components/PatientSidebar";
 import type { TherapistNavLabel } from "./components/TherapistSidebar";
+import { Toast } from "./components/Toast";
 import { patientProgram } from "./data/patientMock";
 import { patientRehabPlans } from "./data/patientRehabPlanMock";
 import { getSessionReview } from "./data/sessionReviewMock";
@@ -86,6 +87,9 @@ function AppShell() {
   const [lowConfidence, setLowConfidence] = useState(false);
   const [detailPatient, setDetailPatient] = useState<TherapistPatientSummary | null>(null);
   const [reviewSession, setReviewSession] = useState<SessionHistoryEntry | null>(null);
+  // Scheduled-exercise id the review page should focus (per-exercise "Review"
+  // from PatientDetailPage's exercise cards); null = whole-day review.
+  const [reviewFocusExerciseId, setReviewFocusExerciseId] = useState<string | null>(null);
   // Patient name for a review opened from the cross-patient Sessions log (where
   // no detailPatient is loaded). null when opened from Patient Detail.
   const [reviewPatientName, setReviewPatientName] = useState<string | null>(null);
@@ -101,6 +105,10 @@ function AppShell() {
   const [selectedExercise, setSelectedExercise] = useState<ExerciseLibraryItem | null>(null);
   const [creationName, setCreationName] = useState("");
   const [creationTracking, setCreationTracking] = useState<ExerciseTrackingType>("pose");
+  // Where ExerciseCreationPage's Back/Save should return to — the library page
+  // when opened from there, or the patient's detail page when the therapist
+  // used the "View" button in PatientDetailPage's exercise-picker popup.
+  const [exerciseCreationReturn, setExerciseCreationReturn] = useState<"therapist-library" | "patient-detail">("therapist-library");
 
   // CAMERA_TRACKING_MOCKUP_PLAN.md §6.6 — lifted from a plain module-level import
   // into state so a confirmed upload (see handleConfirmUpload below) can actually
@@ -194,7 +202,19 @@ function AppShell() {
 
   // §6.3 — Confirm & upload: marks the scheduled exercise completed (visible on
   // Today/Progress via rehabPlans state above), consumes this exercise's next
-  // attempt number, releases the local blob URL, and returns to Today.
+  // attempt number, releases the local blob URL, and returns to Today with a
+  // success toast (rendered at root level so it survives the view switch).
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const showToast = (message: string) => {
+    setToast(message);
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 4000);
+  };
+  useEffect(() => () => {
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+  }, []);
+
   const handleConfirmUpload = () => {
     if (!pendingAttempt) return;
     const { scheduledExerciseId, videoBlobUrl } = pendingAttempt;
@@ -203,6 +223,7 @@ function AppShell() {
     URL.revokeObjectURL(videoBlobUrl);
     setPendingAttempt(null);
     setView("today");
+    showToast("Exercise result uploaded successfully · บันทึกผลการฝึกเรียบร้อยแล้ว");
   };
 
   // §6.3 — Retry: discard this take (no attempt number consumed) and go back into
@@ -228,11 +249,14 @@ function AppShell() {
     setView("patient-detail");
   };
 
-  const openSessionReview = (session: SessionHistoryEntry, patientName?: string) => {
+  const openSessionReview = (session: SessionHistoryEntry, patientName?: string, focusExerciseId?: string) => {
     setReviewSession(session);
     // Sessions opened from the cross-patient log aren't tied to a
     // detailPatient — remember the log's own patient name for the review page.
     setReviewPatientName(patientName ?? null);
+    // When opened from an exercise card's per-exercise "Review" action, the
+    // review page should switch straight to that exercise (null = no focus).
+    setReviewFocusExerciseId(focusExerciseId ?? null);
     setView("session-result-review");
   };
 
@@ -298,6 +322,7 @@ function AppShell() {
 
   return (
     <main>
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
       {view === "login" && (
         <LoginPage
           onRegister={() => setView("register")}
@@ -361,7 +386,6 @@ function AppShell() {
           lowConfidence={lowConfidence}
           onBack={() => setView("today")}
           onTogglePause={() => setSessionPaused((value) => !value)}
-          onToggleConfidence={() => setLowConfidence((value) => !value)}
           onRestart={() => {
             setSessionPaused(false);
             setLowConfidence(false);
@@ -415,6 +439,7 @@ function AppShell() {
             setSelectedExercise(exercise);
             setCreationName(exercise.name);
             setCreationTracking(exercise.movementTracking);
+            setExerciseCreationReturn("therapist-library");
             setView("exercise-creation");
           }}
         />
@@ -426,11 +451,11 @@ function AppShell() {
           initialTracking={creationTracking}
           onBack={() => {
             setSelectedExercise(null);
-            setView("therapist-library");
+            setView(exerciseCreationReturn);
           }}
           onSaved={() => {
             setSelectedExercise(null);
-            setView("therapist-library");
+            setView(exerciseCreationReturn);
           }}
           onLogout={() => {
             logout();
@@ -482,6 +507,13 @@ function AppShell() {
           onOpenExercise={handleOpenScheduledExercise}
           onOpenProgramEditor={openProgramEditor}
           pendingPlanUpdate={pendingPlanUpdate}
+          onViewExercise={(exercise) => {
+            setSelectedExercise(exercise);
+            setCreationName(exercise.name);
+            setCreationTracking(exercise.movementTracking);
+            setExerciseCreationReturn("patient-detail");
+            setView("exercise-creation");
+          }}
         />
       )}
 
@@ -502,6 +534,7 @@ function AppShell() {
       {view === "session-result-review" && reviewSession && (
         <SessionResultReviewPage
           review={getSessionReview(reviewSession, detailPatient?.name ?? reviewPatientName ?? "Patient")}
+          focusExerciseId={reviewFocusExerciseId ?? undefined}
           onBack={() => setView(detailPatient ? "patient-detail" : "therapist-sessions")}
           onLogout={() => {
             logout();

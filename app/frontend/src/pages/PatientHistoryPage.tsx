@@ -8,6 +8,7 @@ import { ApiError, getPatientPlans } from "../services/api";
 import { useAuth } from "../store/authStore";
 import { initialsFromName } from "../utils/displayName";
 import type { ExerciseTrackingType, HeatmapDayStatus, RehabPlanStatus } from "../types";
+import { formatTargetValue } from "../utils/targetValue";
 
 export interface HistoryExercise {
   id: string;
@@ -75,18 +76,6 @@ interface ViewedMonth {
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function formatTargetValue(targetValue: unknown): string {
-  if (targetValue === null || targetValue === undefined) return "";
-  if (typeof targetValue === "string" || typeof targetValue === "number") return String(targetValue);
-  if (Array.isArray(targetValue)) return targetValue.map(String).join(" · ");
-  if (typeof targetValue === "object") {
-    return Object.entries(targetValue as Record<string, unknown>)
-      .map(([key, value]) => `${String(value)} ${key}`)
-      .join(" · ");
-  }
-  return String(targetValue);
-}
 
 function mapServerPlansToHistory(serverPlans: any[]): HistoryPlan[] {
   return serverPlans.map((sp: any) => {
@@ -172,11 +161,19 @@ function buildMonthCalendarCells(plan: HistoryPlan, viewed: ViewedMonth): Calend
     const fullDateStr = `${viewed.year}-${monthStr}-${dayStr}`;
 
     const match = dayMap.get(fullDateStr);
+    // Today's own day reads as in-progress (yellow) while its exercises aren't
+    // all completed yet — same semantics as the Today/Progress calendars.
+    const now = new Date();
+    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    let status = match ? match.status : null;
+    if (fullDateStr === todayIso && status === "pending") {
+      status = "in_progress";
+    }
     cells.push({
       key: `day-${day}`,
       dateNumber: day,
       dateStr: fullDateStr,
-      status: match ? match.status : null,
+      status,
       dayIndex: match !== undefined ? match.dayIndex : null
     });
   }
@@ -195,6 +192,24 @@ function monthOfPlanStart(plan: HistoryPlan | undefined): ViewedMonth {
   }
   const now = new Date();
   return { year: now.getFullYear(), month: now.getMonth() };
+}
+
+// Opening/switching the calendar lands on TODAY's month (so the current/
+// in-progress day is visible immediately) whenever today falls inside the
+// selected plan's date span; otherwise it falls back to the plan's start month.
+function monthOfTodayOrPlanStart(plan: HistoryPlan | undefined): ViewedMonth {
+  const now = new Date();
+  const today = { year: now.getFullYear(), month: now.getMonth() };
+  if (!plan || !ISO_DATE_RE.test(plan.startDateLabel)) return today;
+  const startKey = plan.startDateLabel.slice(0, 7);
+  const todayKey = `${today.year}-${String(today.month + 1).padStart(2, "0")}`;
+  const endIso = plan.days
+    .map((day) => day.dateLabel)
+    .filter((label): label is string => !!label && ISO_DATE_RE.test(label))
+    .sort()
+    .pop();
+  const endKey = endIso ? endIso.slice(0, 7) : startKey;
+  return todayKey >= startKey && todayKey <= endKey ? today : monthOfPlanStart(plan);
 }
 
 function viewedMonthLabel(viewed: ViewedMonth): string {
@@ -258,7 +273,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
           if (mapped.length > 0) {
             const activeOrFirst = mapped.find((p) => p.status === "active") ?? mapped[0];
             setSelectedPlanId((cur) => cur ?? activeOrFirst.id);
-            setViewedMonth(monthOfPlanStart(activeOrFirst));
+            setViewedMonth(monthOfTodayOrPlanStart(activeOrFirst));
           }
         }
       })
@@ -299,7 +314,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
     setSelectedPlanId(planId);
     setSelectedDayIndex(null);
     const chosen = plans.find((plan) => plan.id === planId);
-    setViewedMonth(monthOfPlanStart(chosen));
+    setViewedMonth(monthOfTodayOrPlanStart(chosen));
   };
 
   const handleSelectDay = (dayIndex: number, status: HeatmapDayStatus) => {

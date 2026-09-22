@@ -4,7 +4,7 @@ import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { ApiError, getAllPatients } from "../services/api";
 import { useAuth } from "../store/authStore";
-import { useOwnProfilePicture } from "../hooks/useProfilePicture";
+import { useOwnProfilePicture, useProfilePicture } from "../hooks/useProfilePicture";
 import type { AllPatientListItem } from "../services/api";
 import type { TherapistPatientSummary } from "../types";
 import { initialsFromName } from "../utils/displayName";
@@ -26,6 +26,21 @@ interface TherapistPatientsPageProps {
 }
 
 type AccountFilter = "all" | "active" | "inactive" | "assigned";
+
+// Per-row avatar: hooks can't be called inside the table's .map(), so each row
+// delegates to this tiny component — it resolves the patient's
+// profilePictureFileId to a blob object URL (auth'd GET /files/:id/content via
+// useProfilePicture) and renders the photo over the initials circle, falling
+// back to the initials badge when there's no picture on file or it fails to load.
+function PatientAvatar({ patient }: { patient: AllPatientListItem }) {
+  const { token } = useAuth();
+  const photoUrl = useProfilePicture(token, patient.profilePictureFileId ?? null);
+  return (
+    <span className={`therapist-avatar${photoUrl ? " with-photo" : ""}`}>
+      {photoUrl ? <img src={photoUrl} alt={`${patient.name}'s profile picture`} /> : patient.avatarInitials}
+    </span>
+  );
+}
 
 const accountFilters: Array<{ key: AccountFilter; label: string }> = [
   { key: "all", label: "All" },
@@ -209,7 +224,7 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
                     >
                       <td>
                         <div className="therapist-table-patient">
-                          <span className="therapist-avatar">{patient.avatarInitials}</span>
+                          <PatientAvatar patient={patient} />
                           <div>
                             <strong>{patient.name}</strong>
                             <small>

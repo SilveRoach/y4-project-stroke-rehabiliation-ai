@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Mic, Play, Video, VideoOff } from "lucide-react";
+import { ArrowLeft, Play, VideoOff } from "lucide-react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
 import type { PatientNavLabel } from "../components/PatientSidebar";
@@ -155,44 +155,20 @@ export function PatientExerciseInstructionPage({
                 <p>{instruction.therapistInstruction ?? "No additional instruction has been provided by your therapist."}</p>
               </section>
             </section>
-
-            {/* "Get ready" camera panel — placeholder preview only for this pass (no
-                getUserMedia wired up yet; PatientSessionPage.tsx's useCamera hook is
-                the real capture path once this is hooked up) plus UI-only camera/mic
-                device stubs. Start Exercise now lives at the bottom of this panel,
-                not in a separate sidebar card. */}
-            <aside className="today-side-panel">
-              <div className="summary-card pei-camera-card">
-                <div className="pei-camera-card-header">
-                  <p className="eyebrow">Get ready</p>
-                  <h2>Check your camera &amp; position</h2>
-                </div>
-
-                <div className="pei-camera-preview">
-                  <Video size={28} />
-                  <p>Camera preview will appear here</p>
-                  <span>Once you start, we'll show a position outline so we can see you clearly during the exercise.</span>
-                </div>
-
-                <div className="pei-device-row">
-                  <button type="button" className="pei-device-chip" disabled title="Device selection coming soon">
-                    <Video size={14} /> Camera
-                  </button>
-                  <button type="button" className="pei-device-chip" disabled title="Device selection coming soon">
-                    <Mic size={14} /> Microphone
-                  </button>
-                </div>
-                <p className="pei-device-hint">
-                  Device selection isn't wired up yet — your browser's default camera &amp; mic will be used.
-                </p>
-
-                <button type="button" className="primary-button patient-start-button pei-start-button" onClick={onStartExercise}>
-                  <Play size={20} fill="currentColor" /> Start Exercise
-                </button>
-              </div>
-            </aside>
           </div>
         ) : null}
+
+        {/* Standalone Start Exercise bar — full-width, pinned to the bottom of the
+            page content (above the bottom nav), outside the instruction grid. The
+            real camera setup happens on PatientSessionPage when the exercise
+            starts. */}
+        {instruction && exercise && !loading && !error && (
+          <div className="pei-start-bar">
+            <button type="button" className="primary-button patient-start-button pei-start-button" onClick={onStartExercise}>
+              <Play size={20} fill="currentColor" /> Start Exercise
+            </button>
+          </div>
+        )}
       </div>
       <PatientBottomNav activeLabel="Home" onNavigate={onNavigate} />
     </section>

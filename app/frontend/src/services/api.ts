@@ -254,6 +254,10 @@ export interface AllPatientListItem {
   lastSessionLabel: string;
   sessionsCompleted: number;
   avatarInitials: string;
+  // files-row id of the patient's uploaded profile picture — resolved to a
+  // blob URL via useProfilePicture (auth'd GET /files/:id/content); when null
+  // or unresolvable the initials badge renders instead.
+  profilePictureFileId?: string | null;
   progressPercent: number;
   compliancePercent: number;
   standing: "active" | "at_risk";
@@ -566,11 +570,23 @@ export function updateUserProfile(
 
 export function getTherapistSessions(
   token: string,
-  therapistId: string
+  therapistId: string,
+  // Optional narrowing scopes: patientId scopes the log to one assigned
+  // patient, planId to one of that patient's plans (PatientDetailPage passes
+  // both so its history matches the plan selected in the UI). Both are enforced
+  // against the therapist's own assignments on the backend.
+  opts: { patientId?: string; planId?: string } = {}
 ): Promise<{ sessions: TherapistSessionLogEntry[] }> {
-  return apiRequest<{ sessions: TherapistSessionLogEntry[] }>(`/therapists/${therapistId}/sessions`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const params = new URLSearchParams();
+  if (opts.patientId) params.set("patientId", opts.patientId);
+  if (opts.planId) params.set("planId", opts.planId);
+  const query = params.toString();
+  return apiRequest<{ sessions: TherapistSessionLogEntry[] }>(
+    `/therapists/${therapistId}/sessions${query ? `?${query}` : ""}`,
+    {
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  );
 }
 
 // --- Patient today ----------------------------------------------------------
@@ -628,7 +644,7 @@ export function getPatientToday(token: string, patientId: string): Promise<Patie
 export interface PatientScheduledExerciseInstruction {
   id: string;
   exerciseLibraryId: string;
-  targetType: "repetitions" | "duration" | "sets" | "distance" | "free";
+  targetType: "repetitions" | "duration";
   targetValue: unknown;
   therapistInstruction: string | null;
   exercise: {
@@ -800,10 +816,23 @@ export interface AdminRoleCount {
   count: number;
 }
 
+export interface AdminDashboardLogEntry {
+  id: string;
+  type: "create" | "edit" | string;
+  table: "user" | "exercise" | string;
+  objectName: string;
+  timeLabel: string;
+  timestamp: string;
+  byWho: string;
+  level?: "info" | "warning" | "error";
+  message?: string;
+}
+
 export interface AdminDashboardData {
   stats: AdminDashboardStats;
   weeklyActivity: AdminWeeklyActivityPoint[];
   roleDistribution: AdminRoleCount[];
+  logs?: AdminDashboardLogEntry[];
 }
 
 export function getAdminDashboard(token: string): Promise<AdminDashboardData> {
@@ -811,6 +840,35 @@ export function getAdminDashboard(token: string): Promise<AdminDashboardData> {
     headers: { Authorization: `Bearer ${token}` }
   });
 }
+
+export interface SyncSchedulesResponse {
+  success: boolean;
+  message: string;
+  today: string;
+  updatedDaysCount: number;
+  updatedExercisesCount: number;
+  summary: {
+    daysSkipped: number;
+    daysCompleted: number;
+    daysPending: number;
+    daysInProgress: number;
+    exercisesSkipped: number;
+    exercisesPending: number;
+    exercisesCompleted: number;
+  };
+}
+
+export function syncScheduleStatuses(token: string, clientToday?: string): Promise<SyncSchedulesResponse> {
+  return apiRequest<SyncSchedulesResponse>("/admin/sync-schedules", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ clientToday })
+  });
+}
+
 
 // --- Patient rehabilitation plans (Patient Detail page) ---------------------
 // GET /patients/:patientId/plans
@@ -855,16 +913,6 @@ export function createPatientPlan(
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload)
-  });
-}
-
-// DELETE /plans/:planId — hard-deletes the plan and everything attached to it
-// (schedule days, scheduled exercises, recorded performance results, plan
-// attachments). Destructive: unlike cancelling, session history is wiped too.
-export function deletePlan(token: string, planId: string): Promise<{ success: boolean }> {
-  return apiRequest<{ success: boolean }>(`/plans/${planId}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` }
   });
 }
 

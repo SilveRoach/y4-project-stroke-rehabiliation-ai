@@ -20,6 +20,10 @@ export const therapistSessionLog: TherapistSessionLogEntry[] = therapistPatients
     patientId: patient.id,
     patientName: patient.name,
     patientAvatarInitials: patient.avatarInitials,
+    // Mock plan identity: the mock caseload has no real plans, so a synthetic
+    // "current program" plan is assumed per patient.
+    rehabilitationPlanId: `${patient.id}-plan-0`,
+    rehabilitationPlanName: "Current program",
     dateLabel: patient.lastSessionLabel,
     dayLabel: `Day ${patient.sessionsCompleted}`,
     exercisesAttempted: isAtRisk ? 0 : 3,
@@ -34,6 +38,8 @@ export const therapistSessionLog: TherapistSessionLogEntry[] = therapistPatients
       patientId: patient.id,
       patientName: patient.name,
       patientAvatarInitials: patient.avatarInitials,
+      rehabilitationPlanId: `${patient.id}-plan-0`,
+      rehabilitationPlanName: "Current program",
       dateLabel: "—",
       dayLabel: `Day ${Math.max(1, patient.sessionsCompleted - 1)}`,
       exercisesAttempted: 3,

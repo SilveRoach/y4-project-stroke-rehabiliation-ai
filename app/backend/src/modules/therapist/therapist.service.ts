@@ -222,6 +222,9 @@ export interface PatientListItem {
   lastSessionLabel: string;
   sessionsCompleted: number;
   avatarInitials: string;
+  // files-row id of the patient's uploaded profile picture (users.profile_picture_file_id).
+  // Consumers resolve it to a blob URL via useProfilePicture; null = initials fallback.
+  profilePictureFileId?: string | null;
   progressPercent: number;
   compliancePercent: number;
   standing: PatientStanding;
@@ -268,6 +271,7 @@ export async function listAllPatients(q?: string): Promise<PatientListItem[]> {
       name: displayNameStr,
       displayName: displayNameStr,
       username: p.user.username,
+      profilePictureFileId: p.user.profilePictureFileId ?? null,
       phoneNumber: p.user.phoneNumber ?? null,
       status: p.user.status as "active" | "inactive" | "suspended",
       assignedTherapistId: assigned ? assigned.therapistId : null,

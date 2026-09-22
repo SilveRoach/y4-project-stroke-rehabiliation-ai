@@ -189,17 +189,6 @@ export async function addPlanAttachment(req: Request, res: Response, next: NextF
   }
 }
 
-export async function deletePlanHandler(req: Request, res: Response, next: NextFunction) {
-  try {
-    const actorId = req.user!.sub;
-    const planId = String(req.params.planId);
-    const result = await service.deletePlan(actorId, planId);
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-}
-
 export async function removePlanAttachment(req: Request, res: Response, next: NextFunction) {
   try {
     const actorId = req.user!.sub;

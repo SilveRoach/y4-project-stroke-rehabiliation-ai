@@ -102,9 +102,6 @@ enum RehabilitationScheduleDaysStatus {
 enum ScheduledExercisesTargetType {
   repetitions
   duration
-  sets
-  distance
-  free
 
   @@map("scheduled_exercises_target_type")
 }

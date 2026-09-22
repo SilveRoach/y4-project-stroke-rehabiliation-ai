@@ -16,7 +16,7 @@
 //      what parent_exercise_id points to for version 3+ of a chain: the row's
 //      immediate predecessor, or the original v1 row. Both are consistent with
 //      the @@unique([parentExerciseId, versionNumber]) constraint and with
-//      seed.ts (which only ever creates v1 rows with parentExerciseId left
+//      seed-full.ts (which only ever creates v1 rows with parentExerciseId left
 //      null). CHOSEN CONVENTION: parentExerciseId always points at the family's
 //      v1 (root) row — never at an intermediate version — so the whole
 //      family's version history can be fetched with one flat query

@@ -207,34 +207,6 @@ export async function createPlan(
   return created;
 }
 
-// --- DELETE /plans/:planId --------------------------------------------------
-// Hard-deletes a plan and everything hanging off it in one transaction. The
-// schema has no cascade rules on its FKs, so children are removed explicitly,
-// leaf-first: performance results -> scheduled exercises -> schedule days ->
-// attachments -> the plan itself. This wipes the patient's recorded session
-// history for this plan too (scores/videos rows) — that's the point of DELETE
-// vs PATCH status "cancelled", which keeps everything. Only the assigned
-// therapist may delete.
-export async function deletePlan(actorId: string, planId: string) {
-  const plan = await prisma.patientRehabilitationPlan.findUnique({ where: { id: planId } });
-  if (!plan) throw new NotFoundError("Plan not found.");
-  await assertAssignedTherapist(actorId, plan.patientId);
-
-  await prisma.$transaction(async (tx) => {
-    await tx.exercisePerformanceResult.deleteMany({
-      where: { scheduledExercise: { scheduleDay: { rehabilitationPlanId: planId } } }
-    });
-    await tx.scheduledExercise.deleteMany({
-      where: { scheduleDay: { rehabilitationPlanId: planId } }
-    });
-    await tx.rehabilitationScheduleDay.deleteMany({ where: { rehabilitationPlanId: planId } });
-    await tx.rehabilitationPlanAttachment.deleteMany({ where: { rehabilitationPlanId: planId } });
-    await tx.patientRehabilitationPlan.delete({ where: { id: planId } });
-  });
-
-  return { success: true };
-}
-
 export async function getPlanById(planId: string) {
   const plan = await prisma.patientRehabilitationPlan.findUnique({
     where: { id: planId },
@@ -256,12 +228,6 @@ export async function updatePlanMetadata(
   const start = parseIsoDate(patch.startDate ?? undefined);
   const end = parseIsoDate(patch.endDate ?? undefined);
   if (start && end && end.getTime() < start.getTime()) throw new ValidationError("endDate cannot be before startDate.");
-
-  // Business rule: if startDate hasn't been reached yet, allow change to current day but not before current day
-  const nowDateStr = new Date().toISOString().slice(0, 10);
-  if (start && start.toISOString().slice(0, 10) < nowDateStr) {
-    throw new ValidationError("startDate cannot be before today.");
-  }
 
   if (typeof patch.status !== "undefined") {
     const valid = new Set(["draft", "active", "completed", "cancelled"]);

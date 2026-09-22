@@ -147,21 +147,37 @@ export function buildExerciseDateSet(plans: PatientRehabPlan[]): Set<string> {
 // --- Per-date completion status for the Home strip/calendar ---
 // Unlike buildExerciseDateSet (a plain yes/no "is anything scheduled"), the
 // scrollable strip needs to say whether that day's exercises were actually
-// *done* — completed (green), missing (red, scheduled but not fully done), or
-// no exercise that day at all (dark gray). Merged across every *visible* plan
-// (the caller passes selectedPlanId's filtered list), so switching the plan
-// chip updates these colors too, not just which dots show up.
+// *done* — completed (green), missing (red, scheduled but not fully done),
+// pending (blue: any day inside an active plan's span that hasn't come due
+// yet, with or without exercises), or no day of any plan at all (dark gray).
+// Merged across every *visible* plan (the caller passes selectedPlanId's
+// filtered list), so switching the plan chip updates these colors too, not
+// just which dots show up.
 //
 // Takes the page's real data shape (PatientTodayPlan from
-// GET /patients/:id/today): scheduled dates come from plan.scheduleDates with
-// each date's real day status in plan.dateStatuses (rehabilitation_schedule_days
-// status — completed/skipped/etc.). A date is "completed" when the backend says
-// the schedule day completed; "missing" for past dates that weren't (skipped,
-// cancelled, or still pending/in_progress after their day passed); future
-// scheduled dates report "none" until their day arrives. Today's own cell uses
-// today's exercise statuses when available (all done → completed), falling back
-// to the day status. Completed wins over missing when several plans share a date.
-export type DayCellStatus = "completed" | "missing" | "none";
+// GET /patients/:id/today): a plan's span runs from its first scheduled date
+// through `totalDays` calendar days (rest days with no scheduled exercises
+// sit inside that span), with each date's real day status in
+// plan.dateStatuses (rehabilitation_schedule_days status —
+// completed/skipped/etc.). A date is "completed" when the backend says the
+// schedule day completed; "in_progress" (yellow, matching the month calendar's
+// in-progress color) while the day's exercises are partially done or the
+// backend still marks it in progress; "missing" for past exercise days that
+// weren't (skipped, or still pending after their day passed); "none" for
+// cancelled days (rendered as "no exercise", matching the gray none cell);
+// every other day inside the span — rest days, future exercise days, today
+// before anything is done — reports "pending" so the whole plan renders blue
+// instead of falling back to uncolored. Completed wins over missing when
+// several plans share a date.
+export type DayCellStatus = "completed" | "in_progress" | "missing" | "pending" | "none";
+
+// ISO date `days` after the given ISO date (local-time arithmetic, consistent
+// with the rest of this file's `${iso}T00:00:00` parsing).
+function isoAfter(iso: string, days: number): string {
+  const date = new Date(`${iso}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 export function buildExerciseDateStatusMap(plans: PatientTodayPlan[]): Map<string, DayCellStatus> {
   const now = new Date();
@@ -169,43 +185,74 @@ export function buildExerciseDateStatusMap(plans: PatientTodayPlan[]): Map<strin
   const statusMap = new Map<string, DayCellStatus>();
   const outrank = (current: DayCellStatus | undefined, next: DayCellStatus): DayCellStatus => {
     if (current === "completed" || next === "completed") return "completed";
-    // Two plans both still pending on a future date must stay "none" (no
-    // exercise yet) — collapsing none+none to "missing" painted not-yet-due
-    // overlapping days red as if they'd been missed.
+    // Two plans both still pending on a future date must stay "pending"
+    // (blue) — only days that belong to NO plan at all fall through to "none".
     if ((current ?? "none") === "none" && next === "none") return "none";
-    return "missing";
+    if (current === "missing" || next === "missing") return "missing";
+    if (current === "in_progress" || next === "in_progress") return "in_progress";
+    return "pending";
   };
 
   plans.forEach((plan) => {
     // Today's completion, when this plan has a "today" day with exercises.
+    // Today with exercises reads as in-progress (yellow) until ALL of its
+    // exercises are completed (then green) — regardless of the backend day
+    // status, which stays "pending" until the first exercise is actually done,
+    // so today would otherwise fall through to red/blue and never show yellow.
     let todayStatus: DayCellStatus | null = null;
     if (plan.today && plan.today.exercises.length > 0) {
       const total = plan.today.exercises.length;
       const completed = plan.today.exercises.filter((exercise) => exercise.status === "completed").length;
-      todayStatus = completed >= total ? "completed" : "missing";
+      todayStatus = completed >= total ? "completed" : "in_progress";
     }
 
-    plan.scheduleDates.forEach((iso) => {
-      if (!ISO_DATE_RE.test(iso)) return;
-      // Real day status from the backend decides completed vs missed — a past
-      // day whose schedule_day row is "completed" must show as completed, not
-      // defaulted to missed (the old behavior, since scheduleDates carried no
-      // statuses at all).
+    // Real day status from the backend decides completed vs missed — a past
+    // day whose schedule_day row is "completed" must show as completed, not
+    // defaulted to missed (the old behavior, since scheduleDates carried no
+    // statuses at all). scheduleDates only lists days WITH exercises, so the
+    // full plan span (first scheduled date + totalDays) fills the in-between
+    // rest days in as "pending" blue too.
+    const scheduled = plan.scheduleDates.filter((iso) => ISO_DATE_RE.test(iso)).sort();
+    if (scheduled.length === 0) return;
+    const spanEnd = isoAfter(scheduled[0], Math.max(1, plan.totalDays) - 1);
+    const endIso = spanEnd > scheduled[scheduled.length - 1] ? spanEnd : scheduled[scheduled.length - 1];
+    const exerciseDates = new Set(scheduled);
+
+    for (let iso = scheduled[0]; iso <= endIso; iso = isoAfter(iso, 1)) {
       const dayStatus = plan.dateStatuses[iso];
       let status: DayCellStatus;
       if (dayStatus === "completed") {
         status = "completed";
-      } else if (iso === todayIso && todayStatus) {
-        status = todayStatus;
-      } else if (iso > todayIso) {
+      } else if (dayStatus === "in_progress") {
+        // Backend still marks the day in progress — yellow on both calendars.
+        status = "in_progress";
+      } else if (exerciseDates.has(iso)) {
+        if (iso === todayIso && todayStatus) {
+          status = todayStatus;
+        } else if (iso > todayIso) {
+          status = "pending";
+        } else {
+          // Past (or today without a today-block) and not completed — skipped
+          // or never finished.
+          status = "missing";
+        }
+      } else if (dayStatus === "skipped") {
+        // A day the backend marks skipped is a real missed outcome — red,
+        // even when the day carries no exercises (exercise-less skipped days
+        // don't appear in scheduleDates, so they'd otherwise fall into the
+        // rest-day pending branch below and render blue).
+        status = "missing";
+      } else if (dayStatus === "cancelled") {
+        // Cancelled days read as "no exercise" (gray), not as a missed
+        // outcome — matching the strip's none cell on both calendars.
         status = "none";
       } else {
-        // Past (or today without a today-block) and not completed — skipped,
-        // cancelled, or never finished.
-        status = "missing";
+        // Rest day inside the plan span (no scheduled exercise) — still part
+        // of the plan, so it renders blue pending rather than uncolored.
+        status = "pending";
       }
       statusMap.set(iso, outrank(statusMap.get(iso), status));
-    });
+    }
   });
   return statusMap;
 }
@@ -243,22 +290,45 @@ export function viewedMonthLabel(viewed: ViewedMonth): string {
 // Adapter that reshapes the Today payload into the PatientRehabPlan shape the
 // Progress page's month calendar (PatientDetailPage's buildMonthCalendar/
 // planMonthRange) consumes. Day statuses come from the same completed/missing/
-// none derivation the strip uses (completed → completed, missing → skipped,
-// none/scheduled → pending), and the union of every visible plan's schedule
-// dates defines the plan range the month navigation is constrained to.
+// pending derivation the strip uses (completed → completed, missing → skipped,
+// pending → pending), and the date set covers each visible plan's FULL calendar
+// span (first scheduled date through totalDays, rest days included) unioned
+// across plans — so every day inside a plan renders blue pending in the month
+// grid, not just the days that carry exercises.
 export function buildScheduleCalendarPlan(
   plans: PatientTodayPlan[],
   statusMap: Map<string, DayCellStatus>
 ): PatientRehabPlan {
-  const dates = Array.from(new Set(plans.flatMap((plan) => plan.scheduleDates)))
-    .filter((iso) => ISO_DATE_RE.test(iso))
-    .sort();
+  const dateSet = new Set<string>();
+  plans.forEach((plan) => {
+    const scheduled = plan.scheduleDates.filter((iso) => ISO_DATE_RE.test(iso)).sort();
+    if (scheduled.length === 0) return;
+    const spanEnd = isoAfter(scheduled[0], Math.max(1, plan.totalDays) - 1);
+    const endIso = spanEnd > scheduled[scheduled.length - 1] ? spanEnd : scheduled[scheduled.length - 1];
+    for (let iso = scheduled[0]; iso <= endIso; iso = isoAfter(iso, 1)) {
+      dateSet.add(iso);
+    }
+  });
+  const dates = Array.from(dateSet).sort();
   const days: ScheduleDay[] = dates.map((iso) => {
     const stripStatus = statusMap.get(iso);
     return {
       id: `cal-${iso}`,
       dateLabel: iso,
-      status: stripStatus === "completed" ? "completed" : stripStatus === "missing" ? "skipped" : "pending",
+      // Strip status → month-calendar status (HeatmapDayStatus): completed stays
+      // green, in_progress stays yellow, missing becomes skipped (red), none
+      // (cancelled days) becomes cancelled — styled as gray "no exercise" on
+      // the Today page's month grid — and pending stays pending (blue).
+      status:
+        stripStatus === "completed"
+          ? "completed"
+          : stripStatus === "in_progress"
+            ? "in_progress"
+            : stripStatus === "missing"
+              ? "skipped"
+              : stripStatus === "none"
+                ? "cancelled"
+                : "pending",
       exercises: []
     };
   });

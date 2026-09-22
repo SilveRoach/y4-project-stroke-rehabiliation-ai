@@ -200,9 +200,15 @@ export interface RoleDistributionSlice {
 }
 
 export interface SystemLogEntry {
-  level: "info" | "warning" | "error";
-  message: string;
+  id?: string;
+  type: "create" | "edit" | "delete" | string;
+  table: "user" | "exercise" | string;
+  objectName: string;
   timeLabel: string;
+  timestamp?: string;
+  byWho: string;
+  level?: "info" | "warning" | "error";
+  message?: string;
 }
 
 export type ExerciseTrackingType = "pose" | "virtual_grip" | "none";
@@ -340,12 +346,14 @@ export interface SessionHistoryEntry {
 
 // --- Therapist Sessions (sidebar "Sessions" page, cross-patient session log).
 // Same shape as SessionHistoryEntry (Patient Detail's per-patient list) plus the
-// patient identity fields needed to show a mixed-patient list. No backend endpoint
-// aggregates sessions across patients yet — see data/therapistSessionsMock.ts's
-// comments for how this mock is derived.
+// patient identity fields needed to show a mixed-patient list, and the owning
+// plan identity so consumers can scope the log to a plan (PatientDetailPage
+// shows only the currently selected plan's sessions).
 export interface TherapistSessionLogEntry extends SessionHistoryEntry {
   patientId: string;
   patientName: string;
+  rehabilitationPlanId: string;
+  rehabilitationPlanName: string;
   patientAvatarInitials: string;
 }
 
@@ -367,7 +375,7 @@ export type RehabPlanStatus = "draft" | "active" | "paused" | "completed" | "can
 // an ExerciseLibraryItem. Mirrors docs/04-design/mockups/program-editor.html.
 // Page in pages/ProgramEditorPage.tsx.
 
-export type ScheduledExerciseTargetType = "repetitions" | "duration" | "sets" | "distance" | "free";
+export type ScheduledExerciseTargetType = "repetitions" | "duration";
 
 export type ScheduledExerciseStatus = "pending" | "in_progress" | "completed" | "skipped" | "cancelled";
 

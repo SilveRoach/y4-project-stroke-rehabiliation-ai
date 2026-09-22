@@ -16,6 +16,14 @@
         "noEmit": true,
         "jsx": "react-jsx",
         "types": ["vite/client"],
+        // @mediapipe/tasks-vision@0.10.3 ships its typings (vision.d.ts) but its
+        // package.json "exports" map has no "types" condition, so TS's bundler
+        // resolution can't find them on its own. Map the specifier to the file
+        // directly — this only affects type-checking; Vite still resolves the
+        // real package at runtime.
+        "paths": {
+            "@mediapipe/tasks-vision": ["./node_modules/@mediapipe/tasks-vision/vision.d.ts"]
+        },
     },
     "include": ["src"],
     "references": []

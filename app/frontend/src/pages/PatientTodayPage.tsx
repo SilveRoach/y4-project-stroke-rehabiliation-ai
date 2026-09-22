@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarCheck,
+  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -29,6 +30,13 @@ interface PatientTodayPageProps { onLogout: () => void; onNavigate: (label: Pati
 const exerciseStatusLabel: Record<ScheduledExerciseStatus, string> = { pending: "Not started", in_progress: "In progress", completed: "Done today", skipped: "Skipped", cancelled: "Cancelled" };
 
 const heatmapLabels: Record<HeatmapDayStatus, string> = { completed: "Completed", in_progress: "In progress", skipped: "Skipped", pending: "Pending", cancelled: "Cancelled" };
+
+// Difficulty tag on the exercise metadata line — same label/class convention as
+// PatientDetailPage's difficultyLabels/difficultyBadgeClass ("medium" renders as
+// the "moderate" amber badge). Colors come from the shared .difficulty-badge
+// rules; only the compact sizing lives in the .exercise-difficulty override.
+const exerciseDifficultyLabel: Record<PatientTodayExercise["difficultyLevel"], string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
+const exerciseDifficultyClass: Record<PatientTodayExercise["difficultyLevel"], string> = { easy: "easy", medium: "moderate", hard: "hard" };
 
 export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: PatientTodayPageProps) {
   const { token, user } = useAuth();
@@ -191,7 +199,12 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
   }, [selectedPlanId]);
 
   const monthRange = planMonthRange(calendarPlan);
-  const effectiveMonthKey = viewMonthKey ?? monthRange.min;
+  // Opening the month view lands on TODAY's month (not the plan's start month),
+  // so the yellow in-progress/current day is visible immediately. Falls back to
+  // the plan's first month when today lies outside the plan's range.
+  const todayMonthKey = `${todayIso.slice(0, 4)}-${todayIso.slice(5, 7)}`;
+  const effectiveMonthKey =
+    viewMonthKey ?? (todayMonthKey >= monthRange.min && todayMonthKey <= monthRange.max ? todayMonthKey : monthRange.min);
   const monthCells = buildMonthCalendar(calendarPlan, effectiveMonthKey);
   const monthLabel = (() => {
     const [y, m] = effectiveMonthKey.split("-").map(Number);
@@ -271,7 +284,9 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
             })}</div>
             <div className="pd-legend week-strip-legend">
               <span><span className="pd-legend-dot status-completed" />Completed</span>
+              <span><span className="pd-legend-dot status-in_progress" />In progress</span>
               <span><span className="pd-legend-dot status-missing" />Missed</span>
+              <span><span className="pd-legend-dot status-pending" />Pending</span>
               <span><span className="pd-legend-dot status-none" />No exercise</span>
             </div>
           </> : <>
@@ -328,12 +343,19 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
               })}
             </div>
             <div className="pd-legend">
-              {(["completed", "in_progress", "skipped", "pending", "cancelled"] as HeatmapDayStatus[]).map((status) => (
+              {/* Same statuses as the strip's legend above so the two calendars
+                  share one color scheme — except "cancelled", which the month
+                  grid renders as gray "no exercise" (no striped red hatch). */}
+              {(["completed", "in_progress", "skipped", "pending"] as HeatmapDayStatus[]).map((status) => (
                 <span key={status}>
                   <span className={`pd-legend-dot ${status}`} />
                   {heatmapLabels[status]}
                 </span>
               ))}
+              <span>
+                <span className="pd-legend-dot status-none" />
+                No exercise
+              </span>
             </div>
             <button type="button" className="text-action" onClick={() => setCalendarView("week")}>Back to week</button>
           </>}
@@ -364,18 +386,16 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
             {showGroupLabels && <p className="pt-exercise-group-label">{group.planName}</p>}
             {group.exercises.map((exercise) => {
               const Icon = trackingIcon[exercise.movementTracking];
-              const isNext = nextExercise?.id === exercise.id;
               const isDone = exercise.status === "completed";
               const noteExpanded = expandedNoteIds.has(exercise.id);
-              return <button className={`exercise-card${isNext ? " next" : ""}`} key={exercise.id} onClick={() => onOpenInstruction(exercise)} type="button">
+              return <button className="exercise-card" key={exercise.id} onClick={() => onOpenInstruction(exercise)} type="button">
                 <span className={`exercise-icon ${isDone ? "done" : `tracking-${exercise.movementTracking}`}`} aria-hidden="true">{isDone ? <CheckCircle2 size={22} /> : <Icon size={22} />}</span>
                 <span className="exercise-card-body">
                   <span className="exercise-card-title-row">
-                    {/* Exercise name only — version ("v1") and difficulty labels
-                        removed for a cleaner mobile row; long names truncate
-                        with an ellipsis (see .exercise-card-title-row strong). */}
+                    {/* Exercise name only — version ("v1") removed for a cleaner
+                        mobile row; long names truncate with an ellipsis (see
+                        .exercise-card-title-row strong). */}
                     <strong>{exercise.exerciseName}</strong>
-                    {isNext && <span className="next-pill">Next</span>}
                     {exercise.therapistInstruction && <span
                       className="exercise-note-icon-btn"
                       role="button"
@@ -385,11 +405,25 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
                       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.stopPropagation(); event.preventDefault(); toggleNote(exercise.id); } }}
                     ><MessageSquare size={13} /></span>}
                   </span>
-                  <small>{exercise.targetValueLabel}</small>
+                  <small>
+                    {exercise.targetValueLabel}
+                    {/* Difficulty tag right after the reps/target text — driven by
+                        the exercise's real difficultyLevel from
+                        GET /patients/:id/today, no hardcoded values. */}
+                    {exercise.difficultyLevel && (
+                      <span className={`difficulty-badge exercise-difficulty ${exerciseDifficultyClass[exercise.difficultyLevel]}`}>
+                        {exerciseDifficultyLabel[exercise.difficultyLevel]}
+                      </span>
+                    )}
+                  </small>
                   {exercise.therapistInstruction && noteExpanded && <small className="exercise-note-text">{exercise.therapistInstruction}</small>}
                 </span>
-                <span className={`exercise-status-dot ${isDone ? "done" : isNext ? "next" : "pending"}`} aria-hidden="true">
-                  {isDone ? <CheckCircle2 size={22} /> : isNext ? <span className="status-dot-inner" /> : null}
+                {/* Rounded-square completion checkbox (not a radio/selection
+                    control): green tick when done, neutral empty square
+                    otherwise — driven by the same session status as the rest of
+                    the row. */}
+                <span className={`exercise-status-checkbox${isDone ? " done" : ""}`} aria-hidden="true">
+                  {isDone && <Check size={14} strokeWidth={3} />}
                 </span>
               </button>;
             })}

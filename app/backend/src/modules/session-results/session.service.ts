@@ -50,6 +50,11 @@ export interface TherapistSessionLogEntryDto {
   patientId: string;
   patientName: string;
   patientAvatarInitials: string;
+  // Which plan the session's schedule day belongs to — lets consumers scope
+  // the log to a single plan (PatientDetailPage shows the selected plan's
+  // sessions) or label entries with the plan name.
+  rehabilitationPlanId: string;
+  rehabilitationPlanName: string;
   dateLabel: string;
   dayLabel: string;
   exercisesAttempted: number;
@@ -112,7 +117,7 @@ export interface PatientTodayDto {
 export interface PatientScheduledExerciseDto {
   id: string;
   exerciseLibraryId: string;
-  targetType: "repetitions" | "duration" | "sets" | "distance" | "free";
+  targetType: "repetitions" | "duration";
   targetValue: unknown;
   therapistInstruction: string | null;
   exercise: {
@@ -229,10 +234,12 @@ export async function getPatientToday(patientId: string): Promise<PatientTodayDt
       name: plan.name,
       totalDays: plan.scheduleDays.length,
       scheduleDates: plan.scheduleDays.filter((day) => day.scheduledExercises.length > 0).map((day) => isoDate(day.scheduledDate)),
+      // dateStatuses covers EVERY schedule day (not just days with exercises):
+      // a skipped/cancelled day whose exercises were removed must still carry
+      // its real status so the Today calendar can paint it red instead of
+      // treating it as a pending rest day.
       dateStatuses: Object.fromEntries(
-        plan.scheduleDays
-          .filter((day) => day.scheduledExercises.length > 0)
-          .map((day) => [isoDate(day.scheduledDate), day.status])
+        plan.scheduleDays.map((day) => [isoDate(day.scheduledDate), day.status])
       ),
       today
     };
@@ -569,24 +576,42 @@ export async function updateAttemptScoring(
   };
 }
 
-export async function getTherapistSessions(therapistId: string): Promise<TherapistSessionLogEntryDto[]> {
+export async function getTherapistSessions(
+  therapistId: string,
+  opts: { patientId?: string; planId?: string } = {}
+): Promise<TherapistSessionLogEntryDto[]> {
   const assignments = await prisma.patientTherapistAssignment.findMany({
     where: { therapistId, status: "active" },
     select: { patientId: true }
   });
-  const patientIds = assignments.map((assignment) => assignment.patientId);
+  // Authorization invariant stays intact with the optional scopes: the base set
+  // is always the therapist's OWN assigned patients. A patientId outside that
+  // set short-circuits to empty (never leaks another therapist's patient), and
+  // a planId outside it simply matches nothing via the where clause below.
+  let patientIds = assignments.map((assignment) => assignment.patientId);
+  if (opts.patientId) {
+    if (!patientIds.includes(opts.patientId)) return [];
+    patientIds = [opts.patientId];
+  }
   if (patientIds.length === 0) return [];
 
   const days = await prisma.rehabilitationScheduleDay.findMany({
     where: {
       status: { in: ["completed", "skipped"] },
-      rehabilitationPlan: { patientId: { in: patientIds } }
+      rehabilitationPlan: {
+        patientId: { in: patientIds },
+        // Optional plan scope — PatientDetailPage passes the currently
+        // selected plan so its session history stays plan-scoped.
+        ...(opts.planId ? { id: opts.planId } : {})
+      }
     },
     orderBy: { scheduledDate: "desc" },
     take: RECENT_SESSIONS_LIMIT,
     include: {
       rehabilitationPlan: {
         select: {
+          id: true,
+          name: true,
           patientId: true,
           startDate: true,
           patient: { include: { user: true } }
@@ -644,6 +669,8 @@ export async function getTherapistSessions(therapistId: string): Promise<Therapi
       patientId: day.rehabilitationPlan.patientId,
       patientName: name,
       patientAvatarInitials: initialsFromName(name),
+      rehabilitationPlanId: day.rehabilitationPlan.id,
+      rehabilitationPlanName: day.rehabilitationPlan.name,
       dateLabel: relativeDateLabel(day.scheduledDate),
       dayLabel: `Day ${Math.max(1, dayNumber)}`,
       exercisesAttempted: day.scheduledExercises.length,

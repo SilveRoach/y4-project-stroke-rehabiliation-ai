@@ -28,6 +28,7 @@
 // covers §9.
 
 import { AlertCircle, ArrowDown, ArrowUp, ChevronRight, Pencil, Plus, Search, Shield, User, UserMinus, UserPlus, Users, X } from "lucide-react";
+
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
@@ -127,6 +128,46 @@ function UserAvatar({ token, fileId, name }: { token: string | null | undefined;
   );
 }
 
+// Avatar for AccountInfoModal's profile header — same resolution as UserAvatar
+// (useProfilePicture → auth'd GET /files/:id/content) but keeping the larger
+// admin-info-avatar sizing class. Works for every role: the backend's
+// GET /users returns profilePictureFileId for patients, therapists, and admins
+// alike (users.profile_picture_file_id).
+function InfoModalAvatar({ token, fileId, name }: { token: string | null; fileId?: string | null; name: string }) {
+  const avatarUrl = useProfilePicture(token, fileId ?? null);
+  return (
+    <span className={`therapist-avatar admin-avatar admin-info-avatar${avatarUrl ? " with-photo" : ""}`}>
+      {avatarUrl ? <img src={avatarUrl} alt={`${name}'s profile picture`} /> : initialsFromName(name)}
+    </span>
+  );
+}
+
+// Avatar for the assigned-therapist / assignment-picker rows: AccountInfoModal's
+// assignedTherapist payload only carries {id, displayName, licenseNumber} — no
+// picture file id — so the photo is looked up from the full therapists list
+// (GET /users rows, which do include profilePictureFileId) and resolved through
+// useProfilePicture. Falls back to initials when the therapist isn't in the
+// active list or has no uploaded picture.
+function TherapistRowAvatar({
+  token,
+  therapistId,
+  therapistName,
+  therapists
+}: {
+  token: string | null;
+  therapistId: string | undefined;
+  therapistName: string;
+  therapists: AdminUserSummary[];
+}) {
+  const record = therapists.find((t) => t.id === therapistId);
+  const avatarUrl = useProfilePicture(token, record?.profilePictureFileId ?? null);
+  return (
+    <span className={`therapist-avatar${avatarUrl ? " with-photo" : ""}`}>
+      {avatarUrl ? <img src={avatarUrl} alt={`${therapistName}'s profile picture`} /> : initialsFromName(therapistName)}
+    </span>
+  );
+}
+
 export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavigateSettings }: AdminUserManagementPageProps) {
   const { token, user } = useAuth();
   // Real logged-in admin for the sidebar/topbar profile chrome, same idiom as
@@ -178,6 +219,18 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
     };
   }, [token, usersReloadKey]);
 
+  // Keep the open AccountInfoModal's snapshot in sync with the refetched users
+  // list — assignment changes inside the popup bump usersReloadKey (GET /users
+  // refetch), and without this the popup's "Assigned therapist" line would keep
+  // showing the pre-change therapist until it was closed and reopened.
+  useEffect(() => {
+    if (!infoUser) return;
+    const fresh = users.find((u) => u.id === infoUser.id);
+    if (fresh && fresh !== infoUser) setInfoUser(fresh);
+    // Only users is a dependency by design: re-sync whenever the list refetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users]);
+
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
     const matched = users.filter((u) => {
@@ -203,6 +256,14 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
       }
     });
   }, [users, search, sort]);
+
+  const USER_PAGE_SIZE = 8;
+  const [userPage, setUserPage] = useState(0);
+  // Reset to first page whenever the filter/sort changes
+  useEffect(() => { setUserPage(0); }, [filteredUsers]);
+  const totalUserPages = Math.max(1, Math.ceil(filteredUsers.length / USER_PAGE_SIZE));
+  const pagedUsers = filteredUsers.slice(userPage * USER_PAGE_SIZE, (userPage + 1) * USER_PAGE_SIZE);
+
 
   const therapistCount = users.filter((u) => u.role === "therapist").length;
   const adminCount = users.filter((u) => u.role === "admin").length;
@@ -369,8 +430,6 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                           <div>
                             <strong>{user.name}</strong>
                             {typeof user.patientCount === "number" && <small>{user.patientCount} patients</small>}
-                            {user.licenseNumber && <small>License {user.licenseNumber}</small>}
-                            {user.employeeId && <small>Employee ID {user.employeeId}</small>}
                             {user.role === "patient" && (
                               <small className={user.assignedTherapist ? "admin-assigned-therapist" : "admin-unassigned-therapist"}>
                                 {user.assignedTherapist
@@ -512,6 +571,7 @@ function StatCard({
 // requireSelfTherapistOrAdmin — the same endpoint the therapist dashboard's
 // self-assignment flow uses, no duplicate backend work).
 function AssignTherapistModal({
+  token,
   patient,
   therapists,
   busy,
@@ -519,6 +579,7 @@ function AssignTherapistModal({
   onAssign,
   onAssigned
 }: {
+  token: string | null;
   patient: AdminUserSummary;
   therapists: AdminUserSummary[];
   busy: boolean;
@@ -594,14 +655,12 @@ function AssignTherapistModal({
             return (
               <div className="assign-patient-row" key={therapist.id}>
                 <div className="assign-patient-row-info">
-                  <span className="therapist-avatar">
-                    {therapist.name
-                      .split(" ")
-                      .map((word) => word[0])
-                      .slice(0, 2)
-                      .join("")
-                      .toUpperCase()}
-                  </span>
+                  <TherapistRowAvatar
+                    token={token}
+                    therapistId={therapist.id}
+                    therapistName={therapist.name}
+                    therapists={therapists}
+                  />
                   <div>
                     <strong>{therapist.name}</strong>
                     <small>
@@ -1334,6 +1393,9 @@ const [submitting, setSubmitting] = useState(false);
  const [showAssignModal, setShowAssignModal] = useState(false);
 const [assignmentBusy, setAssignmentBusy] = useState(false);
  const [assignmentError, setAssignmentError] = useState<string | null>(null);
+ // In-app unassign confirmation (same .admin-info-confirm idiom as the
+ // save-changes dialog) instead of the browser's unstyled window.confirm().
+ const [unassignConfirmOpen, setUnassignConfirmOpen] = useState(false);
 
  const roleText = user.role === "admin" ? "Admin" : user.role === "therapist" ? "Therapist" : "Patient";
 const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "good" : "fair";
@@ -1437,7 +1499,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
   // row-level Unassign button (same endpoint, and same confirm-then-act flow).
   const handleUnassign = async () => {
     if (!token || !user.assignedTherapist) return;
-    if (!window.confirm(`Unassign ${user.assignedTherapist.displayName} from "${user.name}"?`)) return;
+    setUnassignConfirmOpen(false);
     setAssignmentBusy(true);
     setAssignmentError(null);
     try {
@@ -1472,16 +1534,12 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
           </div>
         </div>
 
-        {/* Mini profile header — consistent across roles */}
+        {/* Mini profile header — consistent across roles. The avatar resolves the
+            user's profilePictureFileId via useProfilePicture (same idiom as the
+            account table's UserAvatar wrapper) so an uploaded photo shows here
+            too, with initials as the fallback when unset/loading/failed. */}
         <div className="admin-info-header">
-          <span className="therapist-avatar admin-avatar admin-info-avatar">
-            {user.name
-              .split(" ")
-              .map((word) => word[0])
-              .join("")
-              .slice(0, 2)
-              .toUpperCase()}
-          </span>
+          <InfoModalAvatar token={token} fileId={user.profilePictureFileId} name={user.name} />
           <div className="admin-info-header-text">
             <strong>{user.name}</strong>
             <div className="admin-info-badges">
@@ -1576,14 +1634,12 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                 {user.assignedTherapist ? (
                   <div className="assign-patient-row">
                     <div className="assign-patient-row-info">
-                      <span className="therapist-avatar">
-                        {user.assignedTherapist.displayName
-                          .split(" ")
-                          .map((word) => word[0])
-                          .slice(0, 2)
-                          .join("")
-                          .toUpperCase()}
-                      </span>
+                      <TherapistRowAvatar
+                        token={token}
+                        therapistId={user.assignedTherapist.id}
+                        therapistName={user.assignedTherapist.displayName}
+                        therapists={therapists}
+                      />
                       <div>
                         <strong>{user.assignedTherapist.displayName}</strong>
                         <small>{user.assignedTherapist.licenseNumber ? `License ${user.assignedTherapist.licenseNumber}` : "Active therapist"}</small>
@@ -1594,16 +1650,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                         type="button"
                         className="secondary-button"
                         disabled={assignmentBusy}
-                        onClick={() => setShowAssignModal(true)}
-                        title="Assign a different therapist"
-                      >
-                        <UserPlus size={13} /> Change
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        disabled={assignmentBusy}
-                        onClick={handleUnassign}
+                        onClick={() => setUnassignConfirmOpen(true)}
                         title="Unassign this therapist"
                       >
                         <UserMinus size={13} /> {assignmentBusy ? "Working…" : "Unassign"}
@@ -1774,9 +1821,44 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
           </>
         )}
 
+        {/* Unassign confirmation — in-app dialog (same .admin-info-confirm
+            idiom as the save-changes dialog), not the browser's unstyled
+            window.confirm(). Confirm runs the real DELETE; Cancel keeps the
+            assignment untouched. */}
+        {unassignConfirmOpen && user.assignedTherapist && (
+          <>
+            <div className="therapist-panel-scrim admin-info-confirm-scrim" onClick={() => setUnassignConfirmOpen(false)} />
+            <div className="admin-modal admin-info-confirm" role="dialog" aria-label="Confirm therapist unassignment">
+              <span className="admin-info-confirm-icon">
+                <AlertCircle size={20} />
+              </span>
+              <strong>Unassign therapist?</strong>
+              <p>
+                Remove {user.assignedTherapist.displayName}&#39;s assignment from &quot;{user.name}&quot;?
+                The patient will have no assigned therapist until one is assigned again.
+              </p>
+              <div className="admin-info-confirm-actions">
+                <button type="button" className="secondary-button" onClick={() => setUnassignConfirmOpen(false)} disabled={assignmentBusy}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ background: "var(--danger, #d33)" }}
+                  onClick={handleUnassign}
+                  disabled={assignmentBusy}
+                >
+                  {assignmentBusy ? "Unassigning…" : "Confirm unassign"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Assignment picker (reuses the same AssignTherapistModal as the old row flow) */}
         {showAssignModal && isPatient && (
           <AssignTherapistModal
+            token={token}
             patient={user}
             therapists={therapists}
             busy={assignmentBusy}
@@ -1786,6 +1868,16 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
               setAssignmentBusy(true);
               setAssignmentError(null);
               try {
+                // Reassign flow: if the patient already has an active assignment,
+                // the backend's POST /therapists/:id/patients refuses to create a
+                // second one (ConflictError). Admins may unassign anyone
+                // (requireSelfTherapistOrAdmin), so end the current assignment
+                // first — exactly what the picker's subtitle promises. The
+                // therapist-side flow never hits this branch, so its
+                // self-assign-only behavior is unchanged.
+                if (user.assignedTherapist) {
+                  await unassignPatient(token, user.assignedTherapist.id, user.id);
+                }
                 await assignPatient(token, therapist.id, user.id);
               } finally {
                 setAssignmentBusy(false);

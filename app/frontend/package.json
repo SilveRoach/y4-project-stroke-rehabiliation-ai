@@ -3,7 +3,6 @@
     "version": "0.0.1",
     "private": true,
     "type": "module",
-
     "scripts": {
         "dev": "vite",
         "dev:https": "cross-env VITE_HTTPS=true vite",
@@ -11,18 +10,19 @@
         "preview": "vite preview"
     },
     "dependencies": {
+        "@mediapipe/tasks-vision": "^0.10.3",
         "lucide-react": "^1.28.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
         "recharts": "^3.10.1"
     },
     "devDependencies": {
-        "typescript": "^7.0.2",
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.4",
         "@vitejs/plugin-basic-ssl": "^2.3.0",
         "@vitejs/plugin-react": "^6.0.5",
         "cross-env": "^10.1.0",
+        "typescript": "^7.0.2",
         "vite": "^8.2.0"
-  }
+    }
 }
