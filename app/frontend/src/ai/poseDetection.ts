@@ -25,10 +25,14 @@ export interface PoseLandmark {
 
 const DEFAULT_WASM_BASE_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm";
-// Lite model: fastest of the pose variants — the right trade-off for a live,
-// throttled in-session overlay (accurate joint lines, not millimeter precision).
+// Full model: matches the reference pipeline's modelComplexity: 1 (the imported
+// Rehab-AI project ran the FULL BlazePose variant), for joint positions that sit
+// tightly on the body. NOTE: Google renamed the objects
+// (pose_landmarker.task -> pose_landmarker_full.task) around late 2026 — the old
+// /1/pose_landmarker.task path now 404s. Swap to pose_landmarker_lite.task if
+// the full model is too heavy for weak devices.
 const DEFAULT_POSE_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker.task";
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
 
 export interface PoseTrackerOptions {
   /** Base URL serving the tasks-vision WASM fileset (defaults to jsdelivr CDN). */

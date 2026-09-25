@@ -60,6 +60,14 @@ export interface ExerciseBaseCriteria {
   targetGripStrength?: number;
   repetitions?: number;
   holdSeconds?: number;
+  /**
+   * AI pose-reference authored in the AI workspace (CreateExerciseView flow):
+   * angle definitions + FSM rep criteria + master/wrong-form feature samples
+   * (see modules/pose-scoring/poseScoring.types.ts). Passed through verbatim
+   * into exercise_library.base_criteria and consumed by the pose-scoring
+   * module's resolvePoseReference().
+   */
+  poseReference?: Record<string, unknown>;
 }
 
 export interface ExerciseVersionSummary {

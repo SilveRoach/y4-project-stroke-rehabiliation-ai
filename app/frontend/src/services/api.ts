@@ -13,6 +13,7 @@ import type {
   TherapistSessionLogEntry,
   WeeklySessionPoint
 } from "../types";
+import type { FrameFeature, PoseReferencePublic, PoseRepScoringResult } from "../ai/poseScoring/poseScoringTypes";
 
 const BASE_URL = "/api/v1";
 
@@ -665,6 +666,46 @@ export function getPatientScheduledExerciseInstruction(
     headers: { Authorization: `Bearer ${token}` }
   });
 }
+
+// GET /scheduled-exercises/:id/pose-reference — the pose exercise's
+// starting-position/rep criteria (FSM config + angle definitions), used by
+// PatientSessionPage for movementTracking=pose exercises. masterSamples (the
+// reference skeleton feature sequences) stay server-side — only the scoring
+// backend ever sees them. poseReference is null when the exercise library
+// row has no poseReference stored (scoring requests will fail with a clear
+// error in that case).
+export function getPatientScheduledExercisePoseReference(
+  token: string,
+  scheduledExerciseId: string
+): Promise<{ poseReference: PoseReferencePublic | null }> {
+  return apiRequest<{ poseReference: PoseReferencePublic | null }>(
+    `/scheduled-exercises/${scheduledExerciseId}/pose-reference`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+}
+
+// POST /scheduled-exercises/:id/pose-rep-score — sends ONE captured
+// repetition's skeleton features (not raw video) to the backend, which scores
+// it against the exercise's reference using the Rehab-AI scoring pipeline
+// (DTW + BVE + K-NN + scoreEngine) and returns score + AI feedback. A rep is
+// only counted client-side after this request succeeds.
+export function scorePoseRep(
+  token: string,
+  scheduledExerciseId: string,
+  payload: {
+    repNumber: number;
+    frames: FrameFeature[];
+    peakRom: number;
+    baseTrunkPoint: { x: number; y: number } | null;
+  }
+): Promise<{ rep: PoseRepScoringResult }> {
+  return apiRequest<{ rep: PoseRepScoringResult }>(`/scheduled-exercises/${scheduledExerciseId}/pose-rep-score`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
 
 // §2.7 — real review data for one schedule day (assigned therapist or admin).
 // Attempts come newest-first per exercise; referenceVideoFileId is the server

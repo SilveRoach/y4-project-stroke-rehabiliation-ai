@@ -207,6 +207,13 @@ export function ExerciseCreationPage({
     } else {
       if (repetitions) baseCriteria.repetitions = Number(repetitions);
     }
+    // This form only knows the manual criteria fields, and create/PATCH/version
+    // all REPLACE base_criteria wholesale — so without carrying an AI-authored
+    // pose reference (created in the AI workspace) forward, editing the exercise
+    // here would silently wipe it and break session scoring.
+    if (exercise?.baseCriteria?.poseReference) {
+      baseCriteria.poseReference = exercise.baseCriteria.poseReference;
+    }
 
     const payload: ExerciseInputPayload = {
       name: name.trim(),

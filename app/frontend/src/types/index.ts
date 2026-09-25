@@ -225,6 +225,14 @@ export interface ExerciseBaseCriteria {
   targetGripStrength?: number;
   repetitions?: number;
   holdSeconds?: number;
+  /**
+   * AI pose-reference authored in the AI workspace (CreateExerciseView flow):
+   * angle definitions + FSM rep criteria + master/wrong-form feature samples
+   * (see modules/pose-scoring/poseScoring.types.ts on the backend). Passed
+   * through verbatim into exercise_library.base_criteria and consumed by the
+   * pose-scoring module.
+   */
+  poseReference?: Record<string, unknown>;
 }
 
 // One row in an exercise family's version history (newdb.txt's exercise_library,

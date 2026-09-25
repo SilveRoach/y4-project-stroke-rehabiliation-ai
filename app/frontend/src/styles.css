@@ -2012,11 +2012,13 @@ div.exercise-card:hover {
   overflow: hidden;
 }
 
+/* Green completion bar — reads as "repetitions done", matching the green live
+   skeleton language; width is driven inline by the completed-rep percentage. */
 .session-progress-fill {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: var(--primary);
+  background: var(--success);
   transition: width 0.4s ease;
 }
 
@@ -2445,6 +2447,14 @@ div.exercise-card:hover {
     font-weight: 700;
   }
 
+  /* Shown while the score is still "—" (before the first scored repetition). */
+  .side-score-hint {
+    margin: 6px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+
   .side-score {
     border: 1px solid var(--border);
     border-radius: 16px;
@@ -2452,7 +2462,8 @@ div.exercise-card:hover {
     background: var(--bg);
   }
 
-  /* C — target progress (dark-theme track variant for the card background). */
+  /* C — target progress (dark-theme track variant for the card background); the
+     fill inherits the shared green .session-progress-fill background. */
   .side-target {
     display: grid;
     gap: 8px;
@@ -2463,14 +2474,16 @@ div.exercise-card:hover {
     background: var(--border);
   }
 
-  .side-target-track .session-progress-fill {
-    background: var(--primary);
-  }
-
   .side-target-count {
     color: var(--text-secondary);
     font-size: 0.85rem;
     font-weight: 700;
+  }
+
+  /* The completed-rep number is emphasized inside "1 / 10 repetitions". */
+  .side-target-done {
+    color: var(--success);
+    font-size: 1.15rem;
   }
 
   /* D — live feedback: compact, clearly separated, state icon + text. */
@@ -9952,4 +9965,477 @@ tr.admin-user-row:hover .admin-row-open-hint {
 .ts-session-row-clickable:hover,
 .ts-session-row-clickable:focus-visible {
   background: var(--primary-light);
+}
+
+/* --- AI reference authoring workspace (ExerciseAiPage — the CreateExerciseView
+   flow). Two-column layout like the reference project's; colors come from the
+   shared CSS variables, so no new palette is introduced. --- */
+
+/* Single-column step flow: each card is one numbered step, stacked top to
+   bottom (1 → 2 → 3 …), so the therapist walks the page like a checklist. */
+.ai-author-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 1000px;
+}
+
+.ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  min-width: 0;
+}
+
+.ai-field label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.ai-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ai-input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+}
+
+.ai-choice-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ai-choice {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ai-choice.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.ai-choice.small {
+  padding: 4px 9px;
+  font-size: 0.72rem;
+}
+
+.ai-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  margin: 4px 0 12px;
+}
+
+.ai-clip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.84rem;
+  color: var(--text-primary);
+}
+
+.ai-clip-row:first-of-type {
+  border-top: none;
+}
+
+.ai-clip-row small {
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.ai-progress {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--primary);
+}
+
+.ai-error {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--error);
+}
+
+.ai-success {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  font-size: 0.84rem;
+  color: var(--success);
+}
+
+.ai-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.ai-candidate-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ai-candidate-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 64px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 12px;
+  font-size: 0.84rem;
+  color: var(--text-primary);
+  border-top: 1px solid var(--border);
+}
+
+.ai-candidate-row:first-child {
+  border-top: none;
+}
+
+.ai-candidate-head {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--bg);
+}
+
+.ai-candidate-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ai-derived-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.ai-confidence-high {
+  color: var(--success);
+  font-weight: 800;
+}
+
+.ai-confidence-medium {
+  color: var(--warning);
+  font-weight: 800;
+}
+
+.ai-confidence-low {
+  color: var(--error);
+  font-weight: 800;
+}
+
+.ai-fsm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 14px;
+}
+
+.ai-frame-preview {
+  width: 100%;
+  max-width: 480px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0f172a;
+  display: block;
+}
+
+/* Checkpoint marking (ExerciseAiPage) — reuses the existing checkpoint card /
+   grid classes above; these fill in the selected-role and list affordances. */
+.ai-checkpoint-card {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.ai-checkpoint-card.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.ai-checkpoint-card:disabled {
+  cursor: not-allowed;
+}
+
+.ai-checkpoint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ai-checkpoint-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.ai-checkpoint-item strong {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.ai-checkpoint-item p {
+  margin: 3px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.ai-checkpoint-item small {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+/* Advanced FSM panel + comparator rows (raw thresholds with greater/less than). */
+.ai-advanced-panel {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--warning);
+  border-radius: 12px;
+  background: var(--warning-light, rgba(245, 158, 11, 0.08));
+}
+
+.ai-advanced-warning {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--warning);
+}
+
+.ai-comparator-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.ai-slider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+@media (max-width: 1100px) {
+  .ai-author-stack {
+    max-width: 100%;
+  }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   AI Reference Authoring Workspace (ExerciseAiPage) Layout Enhancements
+   ══════════════════════════════════════════════════════════════════ */
+
+.ai-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  margin-bottom: 20px;
+  line-height: 1.4;
+}
+
+.ai-banner-success {
+  background: var(--success-light);
+  border: 1px solid #bbf7d0;
+  color: #15803d;
+}
+
+.ai-banner-error {
+  background: var(--error-light);
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.ai-banner-info {
+  background: var(--primary-light);
+  border: 1px solid #bfdbfe;
+  color: var(--primary-dark);
+}
+
+.ai-card-step-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.ai-file-upload-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  text-align: center;
+}
+
+.ai-file-upload-area:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.ai-file-upload-area-sm {
+  padding: 12px 14px;
+  flex-direction: row;
+}
+
+.ai-file-upload-icon {
+  color: var(--primary);
+}
+
+.ai-file-upload-label {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.ai-file-hidden-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.ai-clip-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-clip-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.86rem;
+}
+
+.ai-clip-ok {
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.ai-clip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.ai-clip-count-err {
+  background: var(--error-light);
+  color: var(--error);
+}
+
+.ai-card-locked {
+  opacity: 0.5;
+  filter: grayscale(0.2);
+  pointer-events: none;
+}
+
+.ai-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  margin-top: 8px;
+}
+
+.ai-empty-icon {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.ai-save-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.ai-save-actions button {
+  flex: 1;
+  min-width: 160px;
+  justify-content: center;
 }

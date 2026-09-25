@@ -5,8 +5,25 @@ import { useSessionRecording } from "../hooks/useSessionRecording";
 import type { RecordingResult } from "../hooks/useSessionRecording";
 import { HandTracker, drawHandSkeleton, type Landmark } from "../ai/handDetection";
 import { PoseTracker, drawSkeleton, type PoseLandmark } from "../ai/poseDetection";
+import {
+  DEFAULT_FSM_CONFIG,
+  DEFAULT_PRIMARY_ANGLE_DEFINITION,
+  DEFAULT_SECONDARY_ANGLE_DEFINITION,
+  ExerciseFSM,
+  buildFrameFeature,
+  calculateTrunkCentroid,
+  type CompletedRep
+} from "../ai/poseScoring/posePipeline";
+import type { PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
+import { OneEuroFilter } from "../ai/poseScoring/oneEuroFilter";
+import { GripMinigame, computeGripVisibleFrame } from "../ai/grip/gripMinigame";
+import { drawGripMinigame } from "../ai/grip/gripMinigameRenderer";
 import { useAuth } from "../store/authStore";
-import { getPatientScheduledExerciseDemoVideo } from "../services/api";
+import {
+  getPatientScheduledExerciseDemoVideo,
+  getPatientScheduledExercisePoseReference,
+  scorePoseRep
+} from "../services/api";
 import type { PatientExercise, TrackingType } from "../types";
 
 interface PatientSessionPageProps {
@@ -54,6 +71,21 @@ function trackingIconsFor(trackingType: TrackingType) {
   if (trackingType === "virtual_grip") return [Hand];
   return [Dumbbell, Hand];
 }
+
+// Client-side fallback criteria when an exercise's Exercise Library row has no
+// stored poseReference yet — identical to the backend pose-scoring module's
+// defaults (bilateral elbow extension, from projectimport/Rehab-AI's
+// exercisePresets.ts). Scoring still fails server-side in that case with a
+// clear "no pose reference stored" error.
+const DEFAULT_POSE_REFERENCE = {
+  angleDefinition: DEFAULT_PRIMARY_ANGLE_DEFINITION,
+  secondaryAngleDefinition: DEFAULT_SECONDARY_ANGLE_DEFINITION,
+  fsmConfig: DEFAULT_FSM_CONFIG,
+  targetRom: 90,
+  bveThreshold: 0.03,
+  enableTrunkBve: true
+} satisfies PoseReferencePublic;
+
 
 // The exercise's actual demo video (exercise_library.demo_video_file_id, fetched
 // through the auth'd GET /scheduled-exercises/:id/demo-video endpoint — the same
@@ -175,6 +207,11 @@ export function PatientSessionPage({
   const lastPoseLandmarksRef = useRef<PoseLandmark[] | null>(null);
   const [handDetected, setHandDetected] = useState(false);
   const [poseDetected, setPoseDetected] = useState(false);
+  // Tracking model load lifecycle, surfaced in the overlay caption — the
+  // MediaPipe WASM + .task model load from CDN on first use, and a failure
+  // here used to be swallowed silently (live video, but no skeleton and no
+  // hint why). "loading" until every enabled tracker's init() resolves.
+  const [trackingLoadState, setTrackingLoadState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     if ((!handTrackingEnabled && !poseTrackingEnabled) || camera.status !== "streaming") return;
@@ -188,6 +225,12 @@ export function PatientSessionPage({
     if (poseTracker) poseTrackerRef.current = poseTracker;
     runningRef.current = true;
     let cancelled = false;
+    setTrackingLoadState("loading");
+    // One grip minigame per session flow; reset()s happen on Start/Restart/
+    // exercise change (time discontinuity), matching the landmark filters.
+    if (handTrackingEnabled && !gripGameRef.current) {
+      gripGameRef.current = new GripMinigame();
+    }
 
     const loop = () => {
       if (!runningRef.current) return;
@@ -207,10 +250,58 @@ export function PatientSessionPage({
           if (handTracker) {
             lastHandLandmarksRef.current = handTracker.detect(video, now);
             setHandDetected(lastHandLandmarksRef.current !== null);
+            // Virtual-grip minigame tick (grab/follow/drop state machine +
+            // rep completion). Wrapped so a bug here can never take down the
+            // rAF loop that draws the skeleton overlay.
+            if (gripGameRef.current && sessionStartedRef.current && !pausedRef.current) {
+              try {
+                // Keep the minigame inside the region the patient can actually
+                // see: the canvas displays the video with object-fit: cover, so
+                // aspect-mismatched clients crop the frame — derive the visible
+                // sub-frame from the canvas's intrinsic (video) size vs its CSS
+                // (container) size and feed it to the game every detect tick.
+                // Gated on an active session (like the pose FSM) so the ball
+                // cannot be grabbed/scored during the pre-roll or while paused.
+                const visibleFrame = computeGripVisibleFrame(
+                  canvas.width,
+                  canvas.height,
+                  canvas.clientWidth,
+                  canvas.clientHeight
+                );
+                gripGameRef.current.setViewport(visibleFrame, canvas.width / Math.max(1, canvas.height));
+                gripGameRef.current.update(lastHandLandmarksRef.current, now);
+                const gripCaption = gripGameRef.current.snapshot().statusText;
+                if (gripCaption !== lastGripCaptionRef.current) {
+                  lastGripCaptionRef.current = gripCaption;
+                  setGripStatusText(gripCaption);
+                }
+              } catch (gripError) {
+                console.error("grip minigame update failed", gripError);
+              }
+            }
           }
           if (poseTracker) {
-            lastPoseLandmarksRef.current = poseTracker.detect(video, now);
+            const rawPose = poseTracker.detect(video, now);
+            // One-Euro smooth x/y per landmark before drawing/rep tracking —
+            // the reference pipeline's exact post-detection step (z/visibility
+            // pass through unfiltered).
+            lastPoseLandmarksRef.current = rawPose
+              ? rawPose.map((p, i) => {
+                  const pair =
+                    landmarkFiltersRef.current[i] ??
+                    (landmarkFiltersRef.current[i] = { x: new OneEuroFilter(1.0, 0.005), y: new OneEuroFilter(1.0, 0.005) });
+                  return { ...p, x: pair.x.filter(p.x, now), y: pair.y.filter(p.y, now) };
+                })
+              : null;
             setPoseDetected(lastPoseLandmarksRef.current !== null);
+            // movementTracking=pose rep tracking (ExerciseFSM + backend
+            // scoring). Wrapped so a bug here can never take down the rAF
+            // loop that draws the skeleton overlay.
+            try {
+              poseLoopHookRef.current?.(lastPoseLandmarksRef.current, now);
+            } catch (hookError) {
+              console.error("pose rep-tracking hook failed", hookError);
+            }
           }
         }
         if (ctx) {
@@ -223,6 +314,14 @@ export function PatientSessionPage({
           }
           if (lastHandLandmarksRef.current) {
             drawHandSkeleton(ctx, lastHandLandmarksRef.current, canvas.width, canvas.height);
+            // Virtual-grip ball + target ring, layered over the hand skeleton.
+            if (gripGameRef.current) {
+              try {
+                drawGripMinigame(ctx, gripGameRef.current, canvas.width, canvas.height);
+              } catch (gripDrawError) {
+                console.error("grip minigame render failed", gripDrawError);
+              }
+            }
           }
         }
       }
@@ -237,13 +336,20 @@ export function PatientSessionPage({
     if (poseTracker) inits.push(poseTracker.init());
     Promise.all(inits)
       .then(() => {
-        if (!cancelled && runningRef.current) {
+        if (cancelled) return;
+        setTrackingLoadState("ready");
+        if (runningRef.current) {
           rafIdRef.current = requestAnimationFrame(loop);
         }
       })
-      .catch(() => {
-        // Model load failed (e.g. offline) — the session itself (recording,
-        // upload flow) still works, just without the live skeleton overlay.
+      .catch((initError) => {
+        // Model load failed (e.g. offline / CDN blocked) — the session itself
+        // (recording, upload flow) still works, just without the live skeleton
+        // overlay. Surface it instead of failing silently: the overlay caption
+        // explains why there is no skeleton.
+        if (cancelled) return;
+        console.error("Tracking model load failed (skeleton overlay disabled)", initError);
+        setTrackingLoadState("error");
       });
 
     return () => {
@@ -276,16 +382,92 @@ export function PatientSessionPage({
   // §2.5 — local, session-only "live" demo motion: ticks once sessionStarted and
   // not paused, purely for demo fidelity (never a stand-in for ai/scoring.ts).
   const [demoDone, setDemoDone] = useState(initialDone);
-  const [demoScore, setDemoScore] = useState(exercise.score ?? 86);
+  // Current score — null until a real backend score arrives (pose flow). No
+  // mock/empty-state number: before the first scored repetition both the
+  // camera HUD and the sidebar show a "—" placeholder.
+  const [demoScore, setDemoScore] = useState<number | null>(null);
   const [feedbackIndex, setFeedbackIndex] = useState(0);
+
+  // -------------------------------------------------------------------------
+  // REAL pose rep tracking (movementTracking = pose) — adapted from
+  // projectimport/Rehab-AI's ExerciseLiveView pipeline, now split client/
+  // server: the client runs the ExerciseFSM (starting-position detection +
+  // one-repetition detection) on live MediaPipe landmarks; each COMPLETED rep
+  // is captured as a FrameFeature[] sequence and sent to the backend
+  // pose-scoring endpoint (DTW/BVE/K-NN + scoreEngine live server-side). A rep
+  // only counts after the scoring request SUCCEEDS.
+  // -------------------------------------------------------------------------
+  const { token } = useAuth();
+
+  // The exercise's stored criteria (Exercise Library base_criteria
+  // .poseReference via GET /scheduled-exercises/:id/pose-reference). Kept in a
+  // ref (not state) because the rAF loop consumes it. Null = the exercise has
+  // no poseReference stored — the FSM then falls back to the shared defaults
+  // and the backend rejects scoring with a clear error.
+  // Live status line for the camera overlay (starting-position prompt,
+  // hold countdown, "performing rep", scoring, next-rep countdown).
+  const [poseStatusText, setPoseStatusText] = useState<string | null>(null);
+  // Latest successful per-rep backend feedback (from scoreEngine).
+  const [repFeedback, setRepFeedback] = useState<string | null>(null);
+
+  const poseReferenceRef = useRef<PoseReferencePublic | null>(null);
+  const fsmRef = useRef<ExerciseFSM | null>(null);
+  // Mirrors sessionStarted/paused for the rAF loop (created once at mount).
+  const sessionStartedRef = useRef(false);
+  const pausedRef = useRef(false);
+  // Hold gate: set while a completed rep is being scored (or between reps) so
+  // the FSM stops consuming frames — no rep can complete while held.
+  const scoringHoldRef = useRef(false);
+  // Monotonic id of the current rep cycle — stale scoring responses /
+  // countdown timers after Restart/unmount are ignored via this.
+  const repCycleRef = useRef(0);
+  const demoDoneRef = useRef(initialDone);
+  // handleStop captured for submitCompletedRep's auto-finish (all reps done →
+  // existing STOP → SessionUploadConfirmPage flow). Assigned every render.
+  const stopRef = useRef<() => void>(() => {});
+  const poseLoopHookRef = useRef<((landmarks: PoseLandmark[] | null, nowMs: number) => void) | null>(null);
+  const lastPoseCaptionRef = useRef("");
+  // One-Euro smoothing for pose landmarks — 1 instance per coordinate per
+  // landmark (the reference pipeline's exact convention; see oneEuroFilter.ts).
+  // The reference applied this before BOTH drawing and feature extraction, so
+  // the overlay and the rep-tracking angles share the same smoothed signal.
+  const landmarkFiltersRef = useRef<Array<{ x: OneEuroFilter; y: OneEuroFilter }>>([]);
+
+  // -------------------------------------------------------------------------
+  // Virtual-grip minigame (movementTracking = virtual_grip): close the hand
+  // over the displayed ball to grab it, drag it into the target circle, hold
+  // to score a repetition. Pure logic lives in ai/grip/gripMinigame.ts; the
+  // ball/target render on the shared overlay canvas next to the hand skeleton.
+  // -------------------------------------------------------------------------
+  const gripGameRef = useRef<GripMinigame | null>(null);
+  const [gripStatusText, setGripStatusText] = useState<string | null>(null);
+  const lastGripCaptionRef = useRef("");
+
+  useEffect(() => {
+    sessionStartedRef.current = sessionStarted;
+    pausedRef.current = paused;
+  }, [sessionStarted, paused]);
+
 
   useEffect(() => {
     setSessionStarted(false);
     setReferenceOpen(false);
     const parsed = parseProgress(exercise.progressLabel);
     setDemoDone(parsed.done);
-    setDemoScore(exercise.score ?? 86);
+    setDemoScore(null);
     setFeedbackIndex(0);
+    // Pose rep tracking resets with the exercise switch too.
+    demoDoneRef.current = parsed.done;
+    repCycleRef.current += 1;
+    scoringHoldRef.current = false;
+    setRepFeedback(null);
+    setPoseStatusText(null);
+    lastPoseCaptionRef.current = "";
+    landmarkFiltersRef.current = [];
+    gripGameRef.current?.reset();
+    setGripStatusText(null);
+    lastGripCaptionRef.current = "";
+    fsmRef.current?.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exercise.id]);
 
@@ -293,22 +475,192 @@ export function PatientSessionPage({
     if (!sessionStarted || paused || total === 0 || demoDone >= total) {
       return;
     }
+    // movementTracking=pose: real rep counting (ExerciseFSM + backend scoring)
+    // drives demoDone — the fake timer only runs for non-pose exercises.
+    // movementTracking=virtual_grip: the grip minigame drives demoDone, so the
+    // fake timer is off there too (same rationale).
+    if (poseTrackingEnabled || handTrackingEnabled) {
+      return;
+    }
     const interval = setInterval(() => {
       setDemoDone((current) => Math.min(current + 1, total));
-      setDemoScore((current) => {
-        const delta = Math.round((Math.random() - 0.4) * 6);
-        return Math.max(60, Math.min(99, current + delta));
-      });
       setFeedbackIndex((current) => (current + 1) % demoFeedbackMessages(exercise).length);
     }, 3500);
     return () => clearInterval(interval);
   }, [sessionStarted, paused, total, demoDone, exercise]);
 
-  const progressLabel = total > 0 ? `${demoDone} of ${total}` : exercise.progressLabel;
+  // Fetch the exercise's stored pose criteria and (re)build the FSM. Skipped
+  // for non-pose exercises (their demo-timer flow above stays unchanged).
+  useEffect(() => {
+    if (!poseTrackingEnabled || !token) return;
+    let cancelled = false;
+    getPatientScheduledExercisePoseReference(token, exercise.id)
+      .then((response) => {
+        if (cancelled) return;
+        poseReferenceRef.current = response.poseReference;
+        fsmRef.current = new ExerciseFSM((response.poseReference ?? DEFAULT_POSE_REFERENCE).fsmConfig);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Network/auth failure — fall back to the shared defaults so the
+        // session still runs; scoring requests will surface a clear error.
+        poseReferenceRef.current = null;
+        fsmRef.current = new ExerciseFSM(DEFAULT_POSE_REFERENCE.fsmConfig);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [poseTrackingEnabled, token, exercise.id]);
+
+  // Submits one captured repetition to the backend and updates the session UI.
+  // Invoked from the rAF loop when the FSM reports repCompleted.
+  async function submitCompletedRep(completed: CompletedRep) {
+    const cycle = repCycleRef.current;
+    const repNumber = demoDoneRef.current + 1;
+    setPoseStatusText(`Scoring rep ${repNumber}… · กำลังให้คะแนนรอบที่ ${repNumber}`);
+    try {
+      if (!token) throw new Error("Not signed in.");
+      const { rep } = await scorePoseRep(token, exercise.id, {
+        repNumber,
+        frames: completed.sequence,
+        peakRom: completed.peakRom,
+        baseTrunkPoint: completed.baseTrunkPoint
+      });
+      if (cycle !== repCycleRef.current) return; // session restarted meanwhile
+
+      // Success — NOW the rep counts (demoDone drives "X of Y" + progress %).
+      demoDoneRef.current = Math.min(repNumber, total > 0 ? total : repNumber);
+      setDemoDone(demoDoneRef.current);
+      setDemoScore(rep.score);
+      setRepFeedback(rep.feedback);
+      setPoseStatusText(`Rep ${repNumber}: ${rep.score} pts · รอบที่ ${repNumber}: ${rep.score} คะแนน`);
+
+      if (total > 0 && demoDoneRef.current >= total) {
+        // All prescribed reps done → transition into the existing
+        // session-completion flow (STOP → SessionUploadConfirmPage).
+        setPoseStatusText("All reps completed — finishing… · ทำครบทุกรอบแล้ว กำลังจบเซสชัน");
+        window.setTimeout(() => {
+          if (cycle === repCycleRef.current) stopRef.current();
+        }, 2000);
+        return;
+      }
+
+      // Short countdown before allowing the next repetition, then return to
+      // starting-position detection (FSM reset).
+      let remaining = 3;
+      const tick = () => {
+        if (cycle !== repCycleRef.current) return;
+        if (remaining <= 0) {
+          scoringHoldRef.current = false;
+          fsmRef.current?.reset();
+          setPoseStatusText("Move into the starting position · กลับสู่ท่าเริ่มต้น");
+          return;
+        }
+        setPoseStatusText(`Next rep in ${remaining}… · รอบถัดไปในอีก ${remaining}…`);
+        remaining -= 1;
+        window.setTimeout(tick, 1000);
+      };
+      window.setTimeout(tick, 1000);
+    } catch (err) {
+      if (cycle !== repCycleRef.current) return;
+      // Failed scoring (network/backend error) — the rep is NOT counted; the
+      // patient repeats this repetition from the starting position.
+      const message = err instanceof Error ? err.message : "Scoring request failed.";
+      setRepFeedback(null);
+      setPoseStatusText(`Scoring failed — please repeat this rep · ให้คะแนนไม่สำเร็จ โปรดทำรอบนี้ซ้ำ (${message})`);
+      scoringHoldRef.current = false;
+      fsmRef.current?.reset();
+    }
+  }
+
+  // Per-frame pose rep tracking, invoked from the rAF loop. Keeping this in a
+  // ref (assigned every render) lets the long-lived loop closure stay stable
+  // while still seeing the latest values through refs.
+  poseLoopHookRef.current = (landmarks, nowMs) => {
+    if (!landmarks) return;
+    const fsm = fsmRef.current;
+    if (!fsm) return;
+    // Falls back to the shared default criteria when the exercise has no
+    // stored poseReference (scoring will surface a clear backend error).
+    const activeReference = poseReferenceRef.current ?? DEFAULT_POSE_REFERENCE;
+    if (!sessionStartedRef.current || pausedRef.current || scoringHoldRef.current) return;
+
+    const frameFeature = buildFrameFeature(
+      landmarks,
+      activeReference.angleDefinition,
+      activeReference.secondaryAngleDefinition
+    );
+    const output = fsm.processFrame(
+      { angle: frameFeature.elbowAngle, trunkCentroid: calculateTrunkCentroid(landmarks), timestampMs: nowMs },
+      frameFeature
+    );
+
+    // Caption (only on change — the loop runs ~15fps).
+    let caption = "Move into the starting position · เข้าสู่ท่าเริ่มต้น";
+    if (output.state === "WAITING_READY_POSE" && output.readyCountdownSeconds !== null) {
+      caption = `Hold the starting position — ${output.readyCountdownSeconds}s · ค้างท่าเริ่มต้น — ${output.readyCountdownSeconds}s`;
+    } else if (output.state === "IN_REP_ACTIVE") {
+      caption = "Performing one repetition · กำลังทำ 1 รอบ";
+    } else if (output.state === "IN_REP_RETURN") {
+      caption = "Return to the starting position · กลับสู่ท่าเริ่มต้น";
+    }
+    if (caption !== lastPoseCaptionRef.current) {
+      lastPoseCaptionRef.current = caption;
+      setPoseStatusText(caption);
+    }
+
+    if (output.repCompleted && output.completedRep) {
+      // Pause progression: stop feeding the FSM until scoring resolves and
+      // the next-rep countdown finishes (submitCompletedRep releases it).
+      scoringHoldRef.current = true;
+      void submitCompletedRep(output.completedRep);
+    }
+  };
+
+
+  // "1 / 10" repetition counter — completed reps / prescribed total (both the
+  // camera HUD and the sidebar target section render from this).
+  const progressLabel = total > 0 ? `${demoDone} / ${total}` : exercise.progressLabel;
   const progressPercent = total > 0 ? Math.round((demoDone / total) * 100) : 0;
   const score = demoScore;
   const trackingIcons = trackingIconsFor(exercise.trackingType);
-  const feedbackText = demoFeedbackMessages(exercise)[feedbackIndex] ?? exercise.feedback;
+  // movementTracking=pose: real per-rep AI feedback from the backend scoring
+  // engine (Thai, generated by scoreEngine) once a rep has been scored; the
+  // canned demo messages only apply to non-pose exercises.
+  const feedbackText = poseTrackingEnabled
+    ? repFeedback ?? exercise.feedback
+    : demoFeedbackMessages(exercise)[feedbackIndex] ?? exercise.feedback;
+
+  // Virtual-grip rep completed (ball dropped + held in the target) — advance
+  // the shared rep counter / green bar. Counted locally: grip interactions
+  // have no backend scoring endpoint yet, so no score is fabricated here
+  // (the score chip stays "—" per the no-mock policy).
+  function handleGripRepComplete() {
+    // Ignore stray completions outside an active session (e.g. a rep that
+    // finished on the very frame Pause was pressed), and on "both" exercises
+    // where the pose FSM owns the scored rep counter — the minigame stays
+    // playable there but must not double-count into the same "1 / N" counter.
+    if (!sessionStartedRef.current || pausedRef.current || poseTrackingEnabled) return;
+
+    const next = total > 0 ? Math.min(demoDoneRef.current + 1, total) : demoDoneRef.current + 1;
+    demoDoneRef.current = next;
+    setDemoDone(next);
+
+    // Prescribed reps reached → transition into the existing session-completion
+    // flow (STOP → SessionUploadConfirmPage), same as the pose flow. The
+    // repCycle guard drops this if the session was restarted meanwhile.
+    if (total > 0 && next >= total) {
+      const cycle = repCycleRef.current;
+      lastGripCaptionRef.current = "All reps completed — finishing… · ทำครบทุกรอบแล้ว กำลังจบเซสชัน";
+      setGripStatusText(lastGripCaptionRef.current);
+      window.setTimeout(() => {
+        if (cycle === repCycleRef.current) stopRef.current();
+      }, 2000);
+    }
+  }
+  if (gripGameRef.current) {
+    gripGameRef.current.onRepComplete = handleGripRepComplete;
+  }
 
   // §6.3/§6.4 — recording.stop() resolves asynchronously (MediaRecorder's onstop
   // fires after any final ondataavailable), so STOP can't hand a result to
@@ -328,6 +680,17 @@ export function PatientSessionPage({
   const handleStart = () => {
     setSessionStarted(true);
     recording.start();
+    // Pose rep tracking begins fresh: cancel any in-flight rep cycle, clear
+    // the scoring hold, and re-arm the FSM from the starting-position state.
+    repCycleRef.current += 1;
+    scoringHoldRef.current = false;
+    demoDoneRef.current = demoDone;
+    // New session = time discontinuity — landmark filters start fresh.
+    landmarkFiltersRef.current = [];
+    gripGameRef.current?.reset();
+    setGripStatusText(null);
+    lastGripCaptionRef.current = "";
+    fsmRef.current?.reset();
   };
 
   // §6.4 — STOP now ends the recording and hands off to
@@ -343,6 +706,9 @@ export function PatientSessionPage({
       onBack();
     }
   };
+  // Pose rep tracking completes all prescribed reps → the existing
+  // session-completion flow (stopRef is called by submitCompletedRep).
+  stopRef.current = handleStop;
 
   // §6.4 — Exit (topbar) abandons the whole session, not just this attempt.
   // Mid-recording, that would silently throw away an unconfirmed take, so this
@@ -369,7 +735,7 @@ export function PatientSessionPage({
 
   const handleRestart = () => {
     setDemoDone(initialDone);
-    setDemoScore(exercise.score ?? 86);
+    setDemoScore(null);
     setFeedbackIndex(0);
     // §6.4 — Restart discards the current recording and begins a fresh one (same
     // semantics as Retry on the confirm screen, just reachable mid-recording).
@@ -377,6 +743,18 @@ export function PatientSessionPage({
     if (sessionStarted) {
       recording.start();
     }
+    // Invalidate the old rep cycle (stale scoring responses/countdowns are
+    // dropped) and re-arm the FSM from the starting-position state.
+    repCycleRef.current += 1;
+    scoringHoldRef.current = false;
+    demoDoneRef.current = initialDone;
+    setRepFeedback(null);
+    lastPoseCaptionRef.current = "";
+    landmarkFiltersRef.current = [];
+    gripGameRef.current?.reset();
+    setGripStatusText(null);
+    lastGripCaptionRef.current = "";
+    fsmRef.current?.reset();
     onRestart();
   };
 
@@ -414,6 +792,19 @@ export function PatientSessionPage({
                 </button>
               )}
             </div>
+          )}
+
+          {/* REAL tracking overlay canvas — mounted as soon as the camera is
+              streaming (not only after Start), so the live skeleton is visible
+              during the preroll too and the patient can see the tracker working
+              while positioning themselves. The preroll (framing guide, z-index 3)
+              layers above it; rep tracking itself stays gated on Start. */}
+          {(poseTrackingEnabled || handTrackingEnabled) && camera.status === "streaming" && (
+            <canvas
+              ref={skeletonCanvasRef}
+              className="hand-tracking-overlay"
+              aria-hidden="true"
+            />
           )}
 
           <header className="session-topbar">
@@ -479,29 +870,26 @@ export function PatientSessionPage({
                 Demo
               </button>
 
-              {/* REAL tracking: the static SVG overlay mockups are replaced by
-                  live MediaPipe skeletons drawn on one canvas (see the effect
-                  at the top of this component) — green body skeleton
-                  (poseDetection.ts, reference skeletonRenderer.ts style) and/or
-                  blue hand skeleton (handDetection.ts). The canvas needs no CSS
-                  transform — landmarks are drawn pre-mirrored. */}
-              {(poseTrackingEnabled || handTrackingEnabled) && (
-                <canvas
-                  ref={skeletonCanvasRef}
-                  className="hand-tracking-overlay"
-                  aria-hidden="true"
-                />
-              )}
+              {/* The live skeleton canvas itself is mounted above (as soon as the
+                  camera streams) so it is visible during the preroll as well. */}
               <div className="overlay-caption" role="status">
-                {handTrackingEnabled && handDetected
+                {(poseTrackingEnabled || handTrackingEnabled) && trackingLoadState === "error"
+                  ? "Tracking unavailable — check your internet connection · โหลดโมเดลไม่สำเร็จ ตรวจการเชื่อมต่ออินเทอร์เน็ต"
+                  : (poseTrackingEnabled || handTrackingEnabled) && trackingLoadState === "loading"
+                  ? "Loading tracking… · กำลังโหลดโมเดล…"
+                  : poseTrackingEnabled && poseStatusText
+                  ? poseStatusText
+                  : handTrackingEnabled && gripStatusText
+                  ? gripStatusText
+                  : handTrackingEnabled && handDetected
                   ? "Hand tracking active · กำลังติดตามมือ"
                   : poseTrackingEnabled && poseDetected
-                    ? "Pose tracking active · กำลังติดตามร่างกาย"
-                    : handTrackingEnabled
-                      ? "Show your hand to the camera · ยกมือขึ้นให้เห็นในกล้อง"
-                      : poseTrackingEnabled
-                        ? "Step back so your full body is in frame · ยืนให้เห็นทั้งตัวในกล้อง"
-                        : "Reference pose · ท่าอ้างอิง"}
+                  ? "Pose tracking active · กำลังติดตามร่างกาย"
+                  : handTrackingEnabled
+                  ? "Show your hand to the camera · ยกมือขึ้นให้เห็นในกล้อง"
+                  : poseTrackingEnabled
+                  ? "Step back so your full body is in frame · ยืนให้เห็นทั้งตัวในกล้อง"
+                  : "Reference pose · ท่าอ้างอิง"}
               </div>
 
               {paused && <div className="session-state">Paused · หยุดชั่วคราว</div>}
@@ -526,7 +914,8 @@ export function PatientSessionPage({
                     (CSS) where the spec deprioritizes it, visible on tablet+. */}
                 <div className="session-progress-line" role="status" aria-label={`Session progress: ${progressLabel}`}>
                   <span className="session-progress-score">
-                    <strong>{score}</strong> pts
+                    {/* "—" until a real backend score exists — no mock number. */}
+                    {score === null ? <strong>—</strong> : <><strong>{score}</strong> pts</>}
                   </span>
                   <span className="session-progress-count">{progressLabel}</span>
                   <span className="session-progress-track" aria-hidden="true">
@@ -609,22 +998,39 @@ export function PatientSessionPage({
             <p className="side-instruction-text">{exercise.feedback}</p>
           </div>
 
-          {/* B — current performance: the score is the visual focal point */}
-          <div className="side-section side-score">
-            <p className="side-label">Current score · คะแนนปัจจุบัน</p>
-            <p className="side-score-value">
-              <strong>{score}</strong>
-              <span aria-hidden="true">/100</span>
-            </p>
-          </div>
-
-          {/* C — target/progress (same parsed "X of Y" data as the camera HUD) */}
+          {/* C — target/progress: repetition counter ("1 / 10") + the green
+              completion bar, placed ABOVE the score so the patient reads how far
+              they are before their current performance. Same parsed data as the
+              camera HUD — demoDone only advances after a successful backend
+              scoring response, so the bar reflects scored repetitions. */}
           <div className="side-section side-target">
-            <p className="side-label">Target · เป้าหมาย</p>
+            <p className="side-label">Target repetitions · เป้าหมายจำนวนครั้ง</p>
             <span className="session-progress-track side-target-track" aria-hidden="true">
               <span className="session-progress-fill" style={{ width: `${progressPercent}%` }} />
             </span>
-            <span className="side-target-count">{progressLabel}</span>
+            <span className="side-target-count">
+              {total > 0 ? (
+                <>
+                  <strong className="side-target-done">{demoDone}</strong>
+                  {` / ${total} repetitions · ครั้ง`}
+                </>
+              ) : (
+                progressLabel
+              )}
+            </span>
+          </div>
+
+          {/* B — current performance: the score is the visual focal point.
+              "—" until the first backend-scored repetition — no mock number. */}
+          <div className="side-section side-score">
+            <p className="side-label">Current score · คะแนนปัจจุบัน</p>
+            <p className="side-score-value">
+              <strong>{score ?? "—"}</strong>
+              <span aria-hidden="true">{score === null ? "" : "/100"}</span>
+            </p>
+            {score === null && (
+              <p className="side-score-hint">Score appears after your first scored repetition · คะแนนจะแสดงหลังให้คะแนนรอบแรก</p>
+            )}
           </div>
 
           {/* D — live feedback (same state/text as the camera feedback chip) */}

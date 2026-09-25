@@ -586,6 +586,13 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
     } else {
       baseCriteria.repetitions = Number(repetitions) || undefined;
     }
+    // This form only knows the manual criteria fields, and create/PATCH/version
+    // all REPLACE base_criteria wholesale — carry an AI-authored pose reference
+    // (created in the AI workspace) forward so editing here can't silently wipe
+    // it and break session scoring.
+    if (exercise?.baseCriteria?.poseReference) {
+      baseCriteria.poseReference = exercise.baseCriteria.poseReference;
+    }
 
     const payload: ExerciseInputPayload = {
       name: name.trim(),

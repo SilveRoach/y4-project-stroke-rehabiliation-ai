@@ -16,6 +16,7 @@ import { prisma } from "./config/prisma";
 import { adminRouter } from "./modules/admin/admin.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { exerciseRouter } from "./modules/exercise-program-library/exercise.routes";
+import { poseScoringRouter } from "./modules/pose-scoring/poseScoring.routes";
 import { sessionRouter } from "./modules/session-results/session.routes";
 import { therapistRouter } from "./modules/therapist/therapist.routes";
 import { userRouter } from "./modules/user-management/user.routes";
@@ -56,6 +57,7 @@ export function createApp(): Express {
   apiRouter.use("/", therapistRouter); // modules/therapist/therapist.routes.ts — /therapists/:id/*, /patients/:id/report
   apiRouter.use("/", exerciseRouter); // modules/exercise-program-library/exercise.routes.ts — /exercises/*
   apiRouter.use("/", sessionRouter); // modules/session-results/session.routes.ts — /therapists/:id/sessions, /patients/:id/today
+  apiRouter.use("/", poseScoringRouter); // modules/pose-scoring/poseScoring.routes.ts — /scheduled-exercises/:id/pose-reference, /scheduled-exercises/:id/pose-rep-score
   apiRouter.use("/", rehabPlansRouter); // modules/rehab-plans/rehab.routes.ts — /patients/:id/plans and plan operations
   apiRouter.use("/", adminRouter); // modules/admin/admin.routes.ts — /admin/dashboard
 

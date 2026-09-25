@@ -1,9 +1,35 @@
-import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, Dumbbell, Flag, Plus } from "lucide-react";
-import { useState } from "react";
+// AI exercise authoring workspace — the CreateExerciseView flow from
+// projectimport/Rehab-AI, adapted to this project: the therapist uploads a
+// demo clip, the page scans it frame-by-frame with this project's PoseTracker
+// (ai/poseDetection.ts, tasks-vision), auto-calibrates the tracking angle +
+// rep-counting criteria (ai/poseScoring/exerciseAutoCalibrator.ts), and saves
+// the result as exercise_library.base_criteria.poseReference via the normal
+// POST /exercises endpoint — closing the loop so patient sessions score
+// against a real therapist-authored reference instead of seeded defaults.
+// Layout mirrors the import's two-column workspace; styling stays on this
+// project's color scheme (creation-section-card / CSS variables).
+
+import { ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Loader2, Save, Trash2, Upload } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { useAuth } from "../store/authStore";
 import { initialsFromName } from "../utils/displayName";
+import { drawSkeleton } from "../ai/poseDetection";
+import {
+  CANDIDATE_ANGLE_DEFINITIONS,
+  DEFAULT_FSM_MARGIN_SCALE,
+  calibrateFromFrames,
+  deriveFsmConfigFromCheckpoints,
+  deriveFsmConfigFromSeries,
+  type CalibrationResult,
+  type FrameSample
+} from "../ai/poseScoring/exerciseAutoCalibrator";
+import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
+import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
+import type { ExerciseFSMConfig, FrameFeature, AngleDefinition } from "../ai/poseScoring/poseScoringTypes";
+import { createExercise, createExerciseVersion, getExerciseLibrary, updateExerciseDraft, uploadFile } from "../services/api";
+import type { ExerciseLibraryDifficulty, ExerciseLibraryItem } from "../types";
 
 interface ExerciseAiPageProps {
   onBack: () => void;
@@ -11,63 +37,1367 @@ interface ExerciseAiPageProps {
   onNavigate: (label: TherapistNavLabel) => void;
 }
 
-const videos = [
-  ["Correct / Good movement", "2 videos", "elbow-extension-correct-01.mp4", "elbow-extension-correct-02.mp4"],
-  ["Incorrect / Bad movement", "2 videos", "elbow-extension-low-rom.mp4", "elbow-extension-trunk-lean.mp4"]
+type Difficulty = Extract<ExerciseLibraryDifficulty, "easy" | "medium" | "hard">;
+
+interface ScannedClip {
+  id: number;
+  description: string;
+  frames: FrameSample[];
+}
+
+type CheckpointRole = "ready" | "active" | "return";
+
+interface ExerciseCheckpoint {
+  role: CheckpointRole;
+  label: string;
+  description?: string;
+  timestampSeconds: number;
+  angle: number;
+}
+
+/** The 3 FSM states the therapist marks on the base clip (reference order). */
+const CHECKPOINT_ROLES: { role: CheckpointRole; title: string; hint: string; icon: string }[] = [
+  { role: "ready", title: "Starting position", hint: "Pose the patient must hold before moving", icon: "📍" },
+  { role: "active", title: "Peak of movement", hint: "Furthest point they move to in this exercise", icon: "💪" },
+  { role: "return", title: "Return to start", hint: "Where a repetition counts as complete", icon: "🔁" }
+];
+
+/** Rep-counting strictness levels per difficulty (from the reference view) —
+ * level 2 is always the value the auto-calibration derived (scale = 1). */
+const DIFFICULTY_REP_SENSITIVITY: Record<Difficulty, { scale: number; label: string; desc: string }[]> = {
+  easy: [
+    { scale: 1.15, label: "Very lenient", desc: "Slightly easier rep counting for limited mobility." },
+    { scale: 1.075, label: "Lenient", desc: "The patient does not need the full range for a rep to count." },
+    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "Medium (auto-suggested)", desc: "The value analyzed from the demo clip — right for most patients." },
+    { scale: 0.925, label: "Strict", desc: "Movement must closely match the demo clip." },
+    { scale: 0.85, label: "Very strict", desc: "Closest match to the demo clip — for well-recovered patients." }
+  ],
+  medium: [
+    { scale: 1.35, label: "Very lenient", desc: "Easier rep counting for noticeably limited mobility." },
+    { scale: 1.175, label: "Lenient", desc: "Less range than the demo still counts as a rep." },
+    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "Medium (auto-suggested)", desc: "The value analyzed from the demo clip — right for most patients." },
+    { scale: 0.825, label: "Strict", desc: "Movement must closely match the demo clip." },
+    { scale: 0.65, label: "Very strict", desc: "Nearly full demo range required — for well-recovered patients." }
+  ],
+  hard: [
+    { scale: 1.6, label: "Very lenient", desc: "Much easier rep counting — for very limited mobility or a first attempt at this exercise." },
+    { scale: 1.4, label: "Lenient", desc: "Less range than the demo still counts as a rep." },
+    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "Medium (auto-suggested)", desc: "The value analyzed from the demo clip — right for most patients." },
+    { scale: 0.6, label: "Strict", desc: "Movement must closely match the demo clip." },
+    { scale: 0.45, label: "Very strict", desc: "Nearly the full demo range required — for well-recovered patients." }
+  ]
+};
+
+/** Difficulty meta shown under the selector (reference DIFFICULTY_INFO). */
+const DIFFICULTY_INFO: Record<Difficulty, { icon: string; rangeText: string; desc: string }> = {
+  easy: { icon: "🟢", rangeText: "±15%", desc: "This exercise is already easy — the adjustable range stays close to the analyzed value." },
+  medium: { icon: "🟡", rangeText: "±35%", desc: "Standard — suits most general exercises." },
+  hard: { icon: "🔴", rangeText: "±60%", desc: "This exercise is hard for some patients — the widest adjustable range, so it can be eased a lot." }
+};
+
+/** Trunk-compensation sensitivity presets, replacing the raw bveThreshold. */
+const BVE_SENSITIVITY_LEVELS: { value: number; label: string; desc: string }[] = [
+  { value: 0.08, label: "Very strict", desc: "No trunk lean allowed — for patients with good core control." },
+  { value: 0.12, label: "Strict", desc: "Catches trunk compensation early." },
+  { value: 0.15, label: "Medium (recommended)", desc: "Balance between accuracy and real-world use." },
+  { value: 0.2, label: "Lenient", desc: "Allows some trunk assistance." },
+  { value: 0.28, label: "Very lenient", desc: "For early-stage patients who still lean to support themselves." }
 ];
 
 export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageProps) {
-  const { user } = useAuth();
-  const [testStarted, setTestStarted] = useState(false);
-  const [debug, setDebug] = useState(true);
-  const [joints, setJoints] = useState(["Shoulder", "Elbow", "Wrist"]);
+  const { token, user } = useAuth();
   const displayName = user?.displayName || user?.username || "Therapist";
+
+  // Exercise identity / payload fields.
+  const [exerciseName, setExerciseName] = useState("");
+  const [exerciseDescription, setExerciseDescription] = useState("");
+  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
+
+  // Demo-clip scanning state. Only ONE clip can scan at a time (the scanner
+  // drives a hidden <video> element); one shared busy flag guards all inputs.
+  const [baseClip, setBaseClip] = useState<File | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanProgressText, setScanProgressText] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  // Calibration results (null until the base clip has been scanned).
+  const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
+  const [baseFrames, setBaseFrames] = useState<FrameSample[]>([]);
+  const [selectedPrimaryId, setSelectedPrimaryId] = useState<string | null>(null);
+  const [selectedSecondaryId, setSelectedSecondaryId] = useState<string | null>(null);
+
+  // Editable criteria.
+  const [fsmConfig, setFsmConfig] = useState<ExerciseFSMConfig | null>(null);
+  const [targetRom, setTargetRom] = useState(90);
+  const [bveThreshold, setBveThreshold] = useState(0.15);
+  const [enableTrunkBve, setEnableTrunkBve] = useState(true);
+  const [repSensitivityIndex, setRepSensitivityIndex] = useState(2);
+
+  // Additional takes (raw frames kept so features can be re-derived if the
+  // therapist switches the primary/secondary angle before saving).
+  const [masterClips, setMasterClips] = useState<ScannedClip[]>([]);
+  const [wrongFormClips, setWrongFormClips] = useState<ScannedClip[]>([]);
+  const [masterDescription, setMasterDescription] = useState("");
+  const [wrongFormDescription, setWrongFormDescription] = useState("");
+
+  // Frame preview scrubber (skeleton-only preview over a dark backdrop) — also
+  // the frame picker used when marking checkpoints.
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  // Live scan preview canvas (video frame + skeleton while scanning, the
+  // reference's behavior) — separate from the post-scan preview above.
+  const scanPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Therapist-marked checkpoints: ready / active / return angles taken from
+  // scrubbed frames of the base clip. When all three are marked, the FSM
+  // criteria are derived from these angles directly (more accurate than
+  // inferring from the whole signal).
+  const [checkpoints, setCheckpoints] = useState<Record<CheckpointRole, ExerciseCheckpoint | null>>({
+    ready: null,
+    active: null,
+    return: null
+  });
+  const [activeCheckpointRole, setActiveCheckpointRole] = useState<CheckpointRole>("ready");
+  const [checkpointLabelDraft, setCheckpointLabelDraft] = useState("");
+  const [checkpointDescDraft, setCheckpointDescDraft] = useState("");
+
+  // Advanced panel (raw numbers + comparator dropdowns).
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Save state.
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedExerciseName, setSavedExerciseName] = useState<string | null>(null);
+  // "new" = create a new exercise; otherwise the id of an existing pose exercise
+  // to attach this reference to (draft → update in place, active → new version).
+  const [targetExerciseId, setTargetExerciseId] = useState<string>("new");
+  const [libraryExercises, setLibraryExercises] = useState<ExerciseLibraryItem[]>([]);
+
+  const rankedCandidates = calibration?.rankedCandidates ?? [];
+  const sensitivityLevels = DIFFICULTY_REP_SENSITIVITY[difficulty];
+  const allCheckpointsSet = Boolean(checkpoints.ready && checkpoints.active && checkpoints.return);
+
+  // Pose exercises already in the library (this therapist's own rows included),
+  // offered as attach targets so a reference can be applied to an existing
+  // exercise instead of always creating a new one. Archived versions are
+  // excluded — attaching to them would resurrect a retired row.
+  const targetExercise =
+    targetExerciseId === "new" ? null : libraryExercises.find((item) => item.id === targetExerciseId) ?? null;
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getExerciseLibrary(token)
+      .then((response) => {
+        if (cancelled) return;
+        setLibraryExercises(
+          response.exercises
+            .filter((item) => item.movementTracking === "pose" && item.status !== "archived")
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
+      })
+      .catch(() => {
+        // Non-fatal: the picker just stays empty and "New exercise" still works.
+        if (!cancelled) setLibraryExercises([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, savedExerciseName]);
+
+  const getAngleDefinitionById = (id: string | null): AngleDefinition | null =>
+    id ? CANDIDATE_ANGLE_DEFINITIONS.find((c) => c.id === id)?.angleDefinition ?? null : null;
+
+  const primaryDef = getAngleDefinitionById(selectedPrimaryId) ?? calibration?.primary.angleDefinition ?? null;
+  const secondaryDef = getAngleDefinitionById(selectedSecondaryId) ?? calibration?.secondary.angleDefinition ?? null;
+
+  /** Primary-angle series over the scanned base frames (for FSM re-derivation). */
+  const seriesFor = (def: AngleDefinition): number[] => baseFrames.map((f) => extractConfiguredAngle(f.landmarks, def).mean);
+
+  /** Raw landmark frames → FrameFeature[] with the CURRENT primary/secondary
+   * definitions (re-derived at save time, matching the reference flow). */
+  const convertFramesToFeatures = (frames: FrameSample[]): FrameFeature[] => {
+    if (!primaryDef || !secondaryDef) return [];
+    return frames.map((f) => {
+      const primary = extractConfiguredAngle(f.landmarks, primaryDef);
+      const secondary = extractConfiguredAngle(f.landmarks, secondaryDef);
+      return {
+        elbowAngle: Math.round(primary.mean * 10) / 10,
+        shoulderAngle: Math.round(secondary.mean * 10) / 10,
+        leftElbowAngle: primary.left !== undefined ? Math.round(primary.left * 10) / 10 : undefined,
+        rightElbowAngle: primary.right !== undefined ? Math.round(primary.right * 10) / 10 : undefined,
+        pinchDistance: 0,
+        trunkCentroid: f.trunkCentroid
+      };
+    });
+  };
+
+  // Frame preview: draw the scrubbed frame's skeleton on a dark canvas.
+  const previewFrame = baseFrames[Math.min(previewIndex, Math.max(0, baseFrames.length - 1))];
+
+  // Redraw the skeleton preview whenever the scrubbed frame changes.
+  const previewDrawRef = useRef<(() => void) | null>(null);
+  previewDrawRef.current = () => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    canvas.width = 480;
+    canvas.height = 270;
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (previewFrame) {
+      drawSkeleton(ctx, previewFrame.landmarks, canvas.width, canvas.height, { lineWidth: 3, jointRadius: 4 });
+    } else {
+      ctx.fillStyle = "rgba(255,255,255,0.4)";
+      ctx.font = "13px sans-serif";
+      ctx.fillText("Scan a demo clip to preview its skeleton", 24, canvas.height / 2);
+    }
+  };
+  previewDrawRef.current();
+
+  // Scans the base demo clip and auto-calibrates everything from it.
+  const handleScanBaseClip = async () => {
+    if (!baseClip || scanBusy) return;
+    setScanBusy(true);
+    setScanError(null);
+    setScanProgressText("Scanning demo clip…");
+    try {
+      const frames = await scanVideoPoseFrames(
+        baseClip,
+        ({ currentTimeSeconds, durationSeconds, sampledFrames }) => {
+          setScanProgressText(`Scanning ${currentTimeSeconds.toFixed(1)}s / ${durationSeconds.toFixed(1)}s — ${sampledFrames} frames tracked`);
+        },
+        // Live preview: the video frame + tracked skeleton, drawn while scanning.
+        scanPreviewCanvasRef.current ? { canvas: scanPreviewCanvasRef.current } : undefined
+      );
+      if (frames.length < 10) {
+        throw new Error("Too few trackable frames — make sure the full body is visible in the clip.");
+      }
+      const result = calibrateFromFrames(frames);
+      setBaseFrames(frames);
+      setCalibration(result);
+      setSelectedPrimaryId(result.primary.id);
+      setSelectedSecondaryId(result.secondary.id);
+      setFsmConfig(result.derived.fsmConfig);
+      setTargetRom(result.suggestedTargetRom);
+      setRepSensitivityIndex(2);
+      setPreviewIndex(0);
+      // A new base clip invalidates any checkpoints marked on the previous one.
+      setCheckpoints({ ready: null, active: null, return: null });
+      setCheckpointLabelDraft("");
+      setCheckpointDescDraft("");
+      setActiveCheckpointRole("ready");
+      const confidenceText = { high: "high confidence", medium: "medium confidence — verify the numbers", low: "low confidence — the clip may not contain a clear movement, please verify" }[result.derived.confidence];
+      setScanProgressText(`Done — ${frames.length} frames analyzed. Suggested primary angle: “${result.primary.label}” (${confidenceText}).`);
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Scanning failed.");
+      setScanProgressText(null);
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
+  // Recomputes ready/activation/return with the given strictness scale —
+  // using the therapist's marked checkpoints when all three exist (reference
+  // behavior: more accurate, matches their intent), else inferring from the
+  // selected primary angle's series over the base clip.
+  const deriveWithScale = (scale: number): ExerciseFSMConfig | null => {
+    if (checkpoints.ready && checkpoints.active && checkpoints.return) {
+      return deriveFsmConfigFromCheckpoints(
+        checkpoints.ready.angle,
+        checkpoints.active.angle,
+        checkpoints.return.angle,
+        scale
+      ).fsmConfig;
+    }
+    if (!selectedPrimaryId || baseFrames.length === 0) return null;
+    const def = getAngleDefinitionById(selectedPrimaryId);
+    if (!def) return null;
+    return deriveFsmConfigFromSeries(seriesFor(def), scale).fsmConfig;
+  };
+
+  /** Applies a derived FSM's threshold/comparator fields, keeping any manual
+   * advanced-panel edits to minRepFrames / readyHoldSeconds / romReferenceAngle. */
+  const applyDerivedThresholds = (derived: ExerciseFSMConfig | null) => {
+    if (!derived) return;
+    setFsmConfig((prev) =>
+      prev
+        ? {
+            ...prev,
+            readyAngleThreshold: derived.readyAngleThreshold,
+            readyComparator: derived.readyComparator,
+            activationThreshold: derived.activationThreshold,
+            activationComparator: derived.activationComparator,
+            returnThreshold: derived.returnThreshold,
+            returnComparator: derived.returnComparator
+          }
+        : derived
+    );
+  };
+
+  // Therapist switches the primary tracking angle — re-derive the FSM from
+  // the base clip's series with the current strictness level.
+  const handlePrimaryChange = (id: string) => {
+    setSelectedPrimaryId(id);
+    applyDerivedThresholds(deriveWithScale(sensitivityLevels[repSensitivityIndex].scale));
+  };
+
+  const handleSecondaryChange = (id: string) => {
+    setSelectedSecondaryId(id);
+  };
+
+  // Strictness slider — re-derives ready/activation/return thresholds from the
+  // checkpoints (if marked) or the primary series, at the new scale.
+  const handleSensitivityChange = (index: number) => {
+    setRepSensitivityIndex(index);
+    applyDerivedThresholds(deriveWithScale(sensitivityLevels[index].scale));
+  };
+
+  // Difficulty change resets strictness to the auto-suggested middle level.
+  const handleDifficultyChange = (level: Difficulty) => {
+    setDifficulty(level);
+    setRepSensitivityIndex(2);
+    applyDerivedThresholds(deriveWithScale(DEFAULT_FSM_MARGIN_SCALE));
+  };
+
+  /** Primary angle at the currently scrubbed base-clip frame. */
+  const angleAtPreviewFrame = (): number | null => {
+    const frame = baseFrames[previewIndex];
+    const def = getAngleDefinitionById(selectedPrimaryId) ?? calibration?.primary.angleDefinition ?? null;
+    if (!frame || !def) return null;
+    return Math.round(extractConfiguredAngle(frame.landmarks, def).mean * 10) / 10;
+  };
+
+  // Therapist marks the scrubbed frame as the active checkpoint role: the
+  // primary angle there is stored, and once all three roles exist the FSM
+  // criteria are derived from those angles (reference behavior), then the UI
+  // auto-advances to the next unmarked role.
+  const handleMarkCheckpoint = () => {
+    const angle = angleAtPreviewFrame();
+    const frame = baseFrames[previewIndex];
+    if (angle === null || !frame) return;
+    const roleInfo = CHECKPOINT_ROLES.find((r) => r.role === activeCheckpointRole);
+    const checkpoint: ExerciseCheckpoint = {
+      role: activeCheckpointRole,
+      label: checkpointLabelDraft.trim() || roleInfo?.title || activeCheckpointRole,
+      description: checkpointDescDraft.trim() || undefined,
+      timestampSeconds: frame.videoTimeSeconds,
+      angle
+    };
+    const next = { ...checkpoints, [activeCheckpointRole]: checkpoint };
+    setCheckpoints(next);
+
+    if (next.ready && next.active && next.return) {
+      const derived = deriveFsmConfigFromCheckpoints(
+        next.ready.angle,
+        next.active.angle,
+        next.return.angle,
+        sensitivityLevels[repSensitivityIndex].scale
+      );
+      setFsmConfig(derived.fsmConfig);
+      setTargetRom(Math.max(10, Math.round(derived.range)));
+    }
+
+    setCheckpointLabelDraft("");
+    setCheckpointDescDraft("");
+    const nextRole = CHECKPOINT_ROLES.map((r) => r.role).find((role) => role !== activeCheckpointRole && !next[role]);
+    if (nextRole) setActiveCheckpointRole(nextRole);
+  };
+
+  const handleClearCheckpoint = (role: CheckpointRole) => {
+    setCheckpoints((prev) => ({ ...prev, [role]: null }));
+  };
+
+  // Selecting a role to edit prefills its drafts and jumps the scrubber to the
+  // nearest already-marked time (reference behavior).
+  const selectRoleForEditing = (role: CheckpointRole) => {
+    setActiveCheckpointRole(role);
+    const existing = checkpoints[role];
+    if (existing) {
+      setCheckpointLabelDraft(existing.label);
+      setCheckpointDescDraft(existing.description ?? "");
+      let bestIndex = 0;
+      let bestDiff = Infinity;
+      baseFrames.forEach((frame, index) => {
+        const diff = Math.abs(frame.videoTimeSeconds - existing.timestampSeconds);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestIndex = index;
+        }
+      });
+      setPreviewIndex(bestIndex);
+    } else {
+      setCheckpointLabelDraft("");
+      setCheckpointDescDraft("");
+    }
+  };
+
+
+  // Scans an additional master take or wrong-form clip (same scanner).
+  const handleScanExtraClip = async (kind: "master" | "wrong-form", file: File) => {
+    if (scanBusy) return;
+    setScanBusy(true);
+    setScanError(null);
+    setScanProgressText(`Scanning ${kind === "master" ? "master take" : "wrong-form clip"}…`);
+    try {
+      const frames = await scanVideoPoseFrames(
+        file,
+        ({ currentTimeSeconds, durationSeconds, sampledFrames }) => {
+          setScanProgressText(`Scanning ${currentTimeSeconds.toFixed(1)}s / ${durationSeconds.toFixed(1)}s — ${sampledFrames} frames tracked`);
+        },
+        scanPreviewCanvasRef.current ? { canvas: scanPreviewCanvasRef.current } : undefined
+      );
+      const clip: ScannedClip = {
+        id: Date.now(),
+        description:
+          (kind === "master" ? masterDescription : wrongFormDescription).trim() ||
+          `${kind === "master" ? "Master take" : "Wrong-form clip"} #${(kind === "master" ? masterClips : wrongFormClips).length + 1}`,
+        frames
+      };
+      if (kind === "master") {
+        setMasterClips((prev) => [...prev, clip]);
+        setMasterDescription("");
+      } else {
+        setWrongFormClips((prev) => [...prev, clip]);
+        setWrongFormDescription("");
+      }
+      setScanProgressText(`Done — ${frames.length} frames added.`);
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Scanning failed.");
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
+  /** Assembles the poseReference payload (the shape the backend stores under
+   * base_criteria.poseReference and scores against). */
+  const buildPoseReference = () => {
+    if (!primaryDef || !secondaryDef || !fsmConfig) return null;
+    return {
+      angleDefinition: primaryDef,
+      secondaryAngleDefinition: secondaryDef,
+      fsmConfig,
+      targetRom,
+      bveThreshold,
+      enableTrunkBve,
+      masterSamples: [
+        {
+          sampleId: 1,
+          description: `Doctor Master Reference (${(targetExercise?.name ?? exerciseName).trim() || "Exercise"})`,
+          totalFrames: baseFrames.length,
+          frames: convertFramesToFeatures(baseFrames)
+        },
+        ...masterClips.map((clip, index) => ({
+          sampleId: index + 2,
+          description: clip.description,
+          totalFrames: clip.frames.length,
+          frames: convertFramesToFeatures(clip.frames)
+        }))
+      ],
+      wrongFormSamples: wrongFormClips.map((clip, index) => ({
+        sampleId: index + 1,
+        description: clip.description,
+        totalFrames: clip.frames.length,
+        frames: convertFramesToFeatures(clip.frames)
+      })),
+      // Therapist-marked checkpoints — included only when all three exist
+      // (reference behavior: a partial set would be worse than the generic
+      // captions, since the session view falls back when the field is absent).
+      checkpoints:
+        checkpoints.ready && checkpoints.active && checkpoints.return
+          ? [checkpoints.ready, checkpoints.active, checkpoints.return]
+          : undefined
+    };
+  };
+
+  const handleDownloadReference = () => {
+    const reference = buildPoseReference();
+    if (!reference) return;
+    const blob = new Blob([JSON.stringify(reference, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "reference_data.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Saves the authored reference. Two paths:
+  //   • New exercise  — uploads the demo clip (it becomes the exercise's demo
+  //     video) and creates a draft via POST /exercises.
+  //   • Attach to an existing exercise — keeps that exercise's identity
+  //     (name/description/difficulty) and merges poseReference into its base
+  //     criteria: PATCH in place when it is still a draft, or a new draft
+  //     version when it is active (BR-6 — active versions are immutable).
+  const handleSave = async () => {
+    if (!token) return;
+    const poseReference = buildPoseReference();
+    if (!poseReference) return;
+    setSaveBusy(true);
+    setSaveError(null);
+    try {
+      let uploadedClipId: string | null = null;
+      if (baseClip && (!targetExercise || !targetExercise.demoVideoFileId)) {
+        const { file: uploaded } = await uploadFile(token, baseClip);
+        if (uploaded.fileType !== "video") {
+          throw new Error("The selected demo file must be a video.");
+        }
+        uploadedClipId = uploaded.id;
+      }
+
+      if (targetExercise) {
+        const payload = {
+          name: targetExercise.name,
+          description: targetExercise.description,
+          movementTracking: "pose" as const,
+          difficultyLevel: targetExercise.difficultyLevel,
+          // Merge, never replace: keeps the exercise's manual criteria
+          // (targetAngleDeg/repetitions/…) alongside the new AI reference.
+          baseCriteria: { ...targetExercise.baseCriteria, poseReference },
+          demoVideoFileId: targetExercise.demoVideoFileId ?? uploadedClipId
+        };
+        if (targetExercise.status === "draft") {
+          await updateExerciseDraft(token, targetExercise.id, payload);
+          setSavedExerciseName(targetExercise.name);
+        } else {
+          const { exercise: created } = await createExerciseVersion(token, targetExercise.id, payload);
+          setSavedExerciseName(`${created.name} (new draft v${created.versionNumber})`);
+        }
+        return;
+      }
+
+      if (!uploadedClipId) {
+        throw new Error("Select the base demo clip — it is stored as the exercise's demo video.");
+      }
+      await createExercise(token, {
+        name: exerciseName.trim(),
+        description: exerciseDescription.trim(),
+        movementTracking: "pose",
+        difficultyLevel: difficulty,
+        baseCriteria: { poseReference },
+        demoVideoFileId: uploadedClipId
+      });
+      setSavedExerciseName(exerciseName.trim());
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Saving failed.");
+    } finally {
+      setSaveBusy(false);
+    }
+  };
+
+  // New exercises need a name + the base clip (it becomes the demo video);
+  // attaching to an existing exercise needs neither when it already has a name
+  // and a demo video.
+  const needsBaseClip = !targetExercise || !targetExercise.demoVideoFileId;
+  const canSave = Boolean(
+    calibration &&
+      fsmConfig &&
+      primaryDef &&
+      secondaryDef &&
+      baseFrames.length >= 10 &&
+      (targetExercise || exerciseName.trim()) &&
+      (!needsBaseClip || baseClip)
+  );
 
   return (
     <section className="therapist-shell exercise-creation-page">
       <TherapistSidebar activeLabel="Exercise Library" onNavigate={onNavigate} onLogout={onLogout} />
       <div className="therapist-workspace">
         <header className="therapist-topbar">
-          <div className="creation-topbar-title"><Dumbbell size={18} /><div><strong>AI exercise workspace</strong><span>Configure reference movement and scoring rules</span></div></div>
-          <div className="therapist-topbar-profile"><div><strong>{displayName}</strong><small>Physical Therapist</small></div><span className="avatar-badge">{initialsFromName(displayName)}</span></div>
-        </header>
-        <main className="therapist-main exercise-creation-main ai-workspace-main">
-          <button type="button" className="text-action pd-back-link" onClick={onBack}><ArrowLeft size={14} /> Back to exercise</button>
-          <div className="ai-workspace-heading"><div><h1>AI configuration</h1><p>Elbow Extension · Mock configuration workspace</p></div><span className="mock-badge">UI mockup only</span></div>
-
-          <section className="creation-section-card">
-            <div className="creation-section-header"><Dumbbell size={20} /><div><strong>Reference movement dataset</strong><p className="library-card-sub">Use example videos to describe correct and incorrect movement patterns.</p></div></div>
-            <div className="dataset-grid">{videos.map(([title, count, first, second], index) => <div className="dataset-panel" key={title}><div className="dataset-panel-heading"><strong>{title}</strong><span>{count}</span></div>{[first, second].map((file) => <div className="dataset-video-card" key={file}><span className={`dataset-thumbnail ${index ? "bad-thumbnail" : ""}`}>▶</span><span><strong>{file}</strong><small>Mock video · 0:24</small>{index === 1 && <select className="dataset-reason" defaultValue="Insufficient ROM"><option>Insufficient ROM</option><option>Excessive ROM</option><option>Trunk compensation</option><option>Incorrect limb movement</option><option>Other</option></select>}</span><button type="button" className="text-action danger">Remove</button></div>)}<button type="button" className="secondary-button dataset-add-button"><Plus size={14} /> Add video</button></div>)}</div>
-          </section>
-
-          <section className="creation-section-card ai-checkpoint-section">
-            <div className="creation-section-header"><Flag size={20} /><div><strong>Demo checkpoints &amp; target ROM</strong><p className="library-card-sub">Set the movement phases and range target used by the AI rules.</p></div></div>
-            <div className="ai-checkpoint-grid">
-              {["Start position", "Peak of movement", "Return to start"].map((checkpoint, index) => <div className="ai-checkpoint-card" key={checkpoint}><span className="ai-checkpoint-number">{index + 1}</span><div><strong>{checkpoint}</strong><small>{index === 0 ? "Frame 1 · 0.00s" : index === 1 ? "Frame 136 · 4.50s" : "Frame 271 · 9.00s"}</small></div><CheckCircle2 size={16} /></div>)}
+          <div className="creation-topbar-title">
+            <Dumbbell size={20} />
+            <div>
+              <strong>AI Exercise Workspace</strong>
+              <span>Author a pose reference from demo clips</span>
             </div>
-            <div className="ai-rom-control"><div><strong>Target range of motion</strong><p className="library-card-sub">Patient must reach this angle for full ROM accuracy.</p></div><strong className="rom-slider-value">120°</strong></div>
-            <input type="range" min={0} max={180} defaultValue={120} style={{ width: "100%" }} aria-label="Target range of motion" />
-            <div className="rom-control-labels"><span>Lenient</span><span>Strict</span></div>
-          </section>
+          </div>
+          <div className="therapist-topbar-profile">
+            <div><strong>{displayName}</strong><small>Physical Therapist</small></div>
+            <span className="avatar-badge">{initialsFromName(displayName)}</span>
+          </div>
+        </header>
 
-          <section className="creation-section-card">
-            <div className="creation-section-header"><Flag size={20} /><div><strong>Movement rules</strong><p className="library-card-sub">Define the angle boundaries used for AI feedback.</p></div></div>
-            <div className="rule-list">{joints.map((joint) => <div className="rule-row" key={joint}><strong>{joint}</strong><label>Min<input type="number" defaultValue={20} /></label><label>Max<input type="number" defaultValue={160} /></label></div>)}</div>
-            <button type="button" className="secondary-button" onClick={() => setJoints((items) => [...items, `Joint ${items.length + 1}`])}><Plus size={14} /> Add Joint</button>
-            <div className="trunk-rules"><strong>Trunk rules</strong>{["Forward / backward lean", "Lateral lean", "Rotation"].map((rule) => <div className="rule-row" key={rule}><span>{rule}</span><label>Min<input type="number" defaultValue={-10} /></label><label>Max<input type="number" defaultValue={10} /></label></div>)}</div>
-          </section>
+        <main className="therapist-main exercise-creation-main ai-workspace-main">
+          <button type="button" className="text-action pd-back-link" onClick={onBack}>
+            <ArrowLeft size={14} /> Back to exercise creation
+          </button>
 
-          <section className="creation-section-card">
-            <div className="creation-section-header"><Camera size={20} /><div><strong>Therapist testing & scoring</strong><p className="library-card-sub">Preview the authored AI rules with simulated tracking data.</p></div></div>
-            <div className="testing-grid"><div className="testing-preview"><span className="testing-skeleton">◎<br />╱│╲<br />╱ ╲</span><span className="testing-checkpoint">Peak of movement</span></div><div className="testing-metrics"><span>Current joint angles <strong>Shoulder 84° · Elbow 142°</strong></span><span>Trunk angle <strong>6°</strong></span><span>Repetition count <strong>4 / 10</strong></span><span>Current score <strong className="score-good">87</strong></span><p className="testing-warning"><AlertTriangle size={14} /> Keep your trunk upright</p></div></div>
-            <div className="testing-actions"><button type="button" className="primary-button" onClick={() => setTestStarted(!testStarted)}>{testStarted ? "Stop Test" : "Start Test"}</button><label className="debug-toggle"><input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} /> Debug Mode</label></div>
-            {debug && <div className="debug-options"><label><input type="checkbox" defaultChecked /> Show skeleton</label><label><input type="checkbox" defaultChecked /> Show joint angles</label><label><input type="checkbox" defaultChecked /> Show checkpoints</label><label><input type="checkbox" /> Show scoring zones</label></div>}
-          </section>
+          {/* Page heading */}
+          <div className="ai-workspace-heading" style={{ marginBottom: 20 }}>
+            <div>
+              <h1>AI Reference Authoring</h1>
+              <p>Scan demo clips → auto-calibrate tracking angles and rep rules → save to the exercise library</p>
+            </div>
+          </div>
 
-          <section className="creation-section-card">
-            <div className="creation-section-header"><CheckCircle2 size={20} /><div><strong>Difficulty &amp; scoring</strong><p className="library-card-sub">Hard mode applies stronger penalties for movement deviation.</p></div></div>
-            <div className="difficulty-grid">{[["Easy", "12°", "Low"], ["Medium", "8°", "Medium"], ["Hard", "4°", "High"]].map(([level, tolerance, penalty]) => <div className={`difficulty-card difficulty-${level.toLowerCase()}`} key={level}><div><strong>{level}</strong><span>{penalty} penalty</span></div><p>ROM tolerance <b>{tolerance}</b></p><p>Trunk tolerance <b>{tolerance}</b></p><p>Start position <b>{tolerance}</b></p></div>)}</div>
-          </section>
+          {/* Success banner */}
+          {savedExerciseName && (
+            <div className="ai-banner ai-banner-success">
+              <CheckCircle2 size={20} />
+              <div>
+                <strong>Exercise created successfully!</strong>
+                <div>"{savedExerciseName}" was saved as a draft. You can publish it anytime from the Exercise Library.</div>
+              </div>
+            </div>
+          )}
+
+          {/* Scan progress / error banner */}
+          {(scanProgressText || scanError) && (
+            <div className={`ai-banner ${scanError ? "ai-banner-error" : "ai-banner-info"}`}>
+              {scanBusy && <Loader2 size={18} className="spin-icon" />}
+              <span>{scanError ?? scanProgressText}</span>
+            </div>
+          )}
+
+          {/* Single-column step flow: 1 → 2 → 3 → … each card is one step. */}
+          <div className="ai-author-stack">
+
+              {/* Step 1 — Exercise Identity */}
+              <section className="creation-section-card">
+                <div className="ai-card-step-tag">Step 1 · Exercise Setup</div>
+                <div className="creation-section-header">
+                  <Dumbbell size={20} />
+                  <div>
+                    <strong>Exercise setup</strong>
+                    <p className="library-card-sub">Exercise metadata saved with the pose reference.</p>
+                  </div>
+                </div>
+                <div className="ai-field">
+                  <label>Exercise name</label>
+                  <input
+                    className="ai-input"
+                    value={exerciseName}
+                    onChange={(e) => setExerciseName(e.target.value)}
+                    placeholder="e.g. Bilateral Elbow Extension"
+                  />
+                </div>
+                <div className="ai-field">
+                  <label>Instruction / Description</label>
+                  <input
+                    className="ai-input"
+                    value={exerciseDescription}
+                    onChange={(e) => setExerciseDescription(e.target.value)}
+                    placeholder="Short instruction shown to patients during session"
+                  />
+                </div>
+                <div className="ai-field">
+                  <label>Target Difficulty</label>
+                  <div className="ai-choice-row">
+                    {(["easy", "medium", "hard"] as Difficulty[]).map((level) => (
+                      <button
+                        key={level}
+                        type="button"
+                        className={`ai-choice ${difficulty === level ? "active" : ""}`}
+                        onClick={() => handleDifficultyChange(level)}
+                      >
+                        {level.charAt(0).toUpperCase() + level.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="library-card-sub" style={{ marginTop: 6 }}>
+                    Sets the sensitivity range for rep-counting thresholds.
+                  </p>
+                </div>
+              </section>
+
+              {/* Step 2 — Base Demo Clip */}
+              <section className="creation-section-card">
+                <div className="ai-card-step-tag">Step 2 · Base Demo Clip</div>
+                <div className="creation-section-header">
+                  <Film size={20} />
+                  <div>
+                    <strong>Base demo clip</strong>
+                    <p className="library-card-sub">One clean demonstration video to extract tracking angles &amp; rep thresholds.</p>
+                  </div>
+                </div>
+
+                <label className="ai-file-upload-area">
+                  <Upload size={24} className="ai-file-upload-icon" />
+                  <span className="ai-file-upload-label">
+                    {baseClip ? baseClip.name : "Click to select demo video (.mp4, .webm)"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="video/*"
+                    className="ai-file-hidden-input"
+                    onChange={(e) => setBaseClip(e.target.files?.[0] ?? null)}
+                    disabled={scanBusy}
+                  />
+                </label>
+
+                {/* Live scan preview — the video frame plus the tracked skeleton,
+                    drawn for every scanned frame (reference CreateExerciseView
+                    behavior). Doubles as the "no pose detected" warning surface. */}
+                <canvas ref={scanPreviewCanvasRef} className="ai-frame-preview" width={480} height={270} />
+
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ width: "100%", marginTop: 12, justifyContent: "center" }}
+                  onClick={handleScanBaseClip}
+                  disabled={!baseClip || scanBusy}
+                >
+                  {scanBusy ? <Loader2 size={16} className="spin-icon" /> : <Upload size={16} />}
+                  Scan &amp; Calibrate
+                </button>
+                {scanProgressText && <p className="ai-progress">{scanProgressText}</p>}
+                {scanError && <p className="ai-error">{scanError}</p>}
+              </section>
+
+              {/* Step 3 — Extra Master Takes (optional) */}
+              <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
+                <div className="ai-card-step-tag">Step 3 · Extra Master Takes (optional)</div>
+                <div className="creation-section-header">
+                  <Film size={20} />
+                  <div>
+                    <strong>
+                      Extra master takes
+                      {masterClips.length > 0 && <span className="ai-clip-count">{masterClips.length}</span>}
+                      {" "}<small>(optional)</small>
+                    </strong>
+                    <p className="library-card-sub">Additional correct demonstrations to improve DTW matching variance.</p>
+                  </div>
+                </div>
+                <div className="ai-field">
+                  <label>Take description</label>
+                  <input
+                    className="ai-input"
+                    value={masterDescription}
+                    onChange={(e) => setMasterDescription(e.target.value)}
+                    placeholder="e.g. Take 2, slightly faster tempo"
+                    disabled={scanBusy || !calibration}
+                  />
+                </div>
+                <label className="ai-file-upload-area ai-file-upload-area-sm">
+                  <Upload size={16} className="ai-file-upload-icon" />
+                  <span className="ai-file-upload-label">Upload additional master clip</span>
+                  <input
+                    type="file"
+                    accept="video/*"
+                    className="ai-file-hidden-input"
+                    disabled={scanBusy || !calibration}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleScanExtraClip("master", f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {masterClips.length > 0 && (
+                  <div className="ai-clip-list">
+                    {masterClips.map((clip) => (
+                      <div className="ai-clip-row" key={clip.id}>
+                        <CheckCircle2 size={14} className="ai-clip-ok" />
+                        <span style={{ flex: 1 }}>{clip.description}</span>
+                        <small>{clip.frames.length} frames</small>
+                        <button
+                          type="button"
+                          className="text-action danger"
+                          aria-label="Remove"
+                          onClick={() => setMasterClips((prev) => prev.filter((c) => c.id !== clip.id))}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Step 4 — Wrong-Form Clips (optional) */}
+              <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
+                <div className="ai-card-step-tag">Step 4 · Wrong-Form Clips (optional)</div>
+                <div className="creation-section-header">
+                  <Film size={20} />
+                  <div>
+                    <strong>
+                      Wrong-form clips
+                      {wrongFormClips.length > 0 && <span className="ai-clip-count ai-clip-count-err">{wrongFormClips.length}</span>}
+                      {" "}<small>(optional)</small>
+                    </strong>
+                    <p className="library-card-sub">Demonstrations of incorrect posture to train form boundary checks.</p>
+                  </div>
+                </div>
+                <div className="ai-field">
+                  <label>Form defect description</label>
+                  <input
+                    className="ai-input"
+                    value={wrongFormDescription}
+                    onChange={(e) => setWrongFormDescription(e.target.value)}
+                    placeholder="e.g. Trunk leaning forward, shoulder hike"
+                    disabled={scanBusy || !calibration}
+                  />
+                </div>
+                <label className="ai-file-upload-area ai-file-upload-area-sm">
+                  <Upload size={16} className="ai-file-upload-icon" />
+                  <span className="ai-file-upload-label">Upload wrong-form video clip</span>
+                  <input
+                    type="file"
+                    accept="video/*"
+                    className="ai-file-hidden-input"
+                    disabled={scanBusy || !calibration}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleScanExtraClip("wrong-form", f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {wrongFormClips.length > 0 && (
+                  <div className="ai-clip-list">
+                    {wrongFormClips.map((clip) => (
+                      <div className="ai-clip-row" key={clip.id}>
+                        <CheckCircle2 size={14} className="ai-clip-ok" />
+                        <span style={{ flex: 1 }}>{clip.description}</span>
+                        <small>{clip.frames.length} frames</small>
+                        <button
+                          type="button"
+                          className="text-action danger"
+                          aria-label="Remove"
+                          onClick={() => setWrongFormClips((prev) => prev.filter((c) => c.id !== clip.id))}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Step 5 — Auto-Calibration Result */}
+              <section className="creation-section-card">
+                <div className="ai-card-step-tag">Step 5 · Calibration Results</div>
+                <div className="creation-section-header">
+                  <Dumbbell size={20} />
+                  <div>
+                    <strong>Auto-calibration result</strong>
+                    <p className="library-card-sub">Best tracking angle candidates discovered by frame analysis.</p>
+                  </div>
+                </div>
+
+                {!calibration ? (
+                  <div className="ai-empty-state">
+                    <Film size={36} className="ai-empty-icon" />
+                    <p className="ai-empty">Upload and scan a demo clip on the left to see auto-calibrated angles.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="ai-candidate-table">
+                      <div className="ai-candidate-row ai-candidate-head">
+                        <span>Candidate angle</span>
+                        <span>Range</span>
+                        <span>Score</span>
+                        <span>Assign as</span>
+                      </div>
+                      {rankedCandidates.map((candidate) => (
+                        <div className="ai-candidate-row" key={candidate.id}>
+                          <strong>{candidate.label}</strong>
+                          <span>{candidate.range.toFixed(1)}°</span>
+                          <span>{candidate.score.toFixed(2)}</span>
+                          <span className="ai-candidate-actions">
+                            <button
+                              type="button"
+                              className={`ai-choice small ${selectedPrimaryId === candidate.id ? "active" : ""}`}
+                              onClick={() => handlePrimaryChange(candidate.id)}
+                            >
+                              Primary
+                            </button>
+                            <button
+                              type="button"
+                              className={`ai-choice small ${selectedSecondaryId === candidate.id ? "active" : ""}`}
+                              onClick={() => handleSecondaryChange(candidate.id)}
+                            >
+                              Secondary
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="ai-derived-summary">
+                      <span>Direction: <strong>{calibration.derived.direction}</strong></span>
+                      <span>Baseline: <strong>{calibration.derived.baseline}°</strong></span>
+                      <span>Extreme: <strong>{calibration.derived.extreme}°</strong></span>
+                      <span>Range: <strong>{calibration.derived.range}°</strong></span>
+                      <span className={`ai-confidence ai-confidence-${calibration.derived.confidence}`}>
+                        Confidence: {calibration.derived.confidence}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </section>
+
+              {/* Step 6 — Rep-Counting Criteria FSM */}
+              <section className="creation-section-card">
+                <div className="ai-card-step-tag">Step 6 · Rep-Counting Criteria</div>
+                <div className="creation-section-header">
+                  <Dumbbell size={20} />
+                  <div>
+                    <strong>Rep-counting criteria (FSM)</strong>
+                    <p className="library-card-sub">Thresholds for starting position, movement activation, and rep return.</p>
+                  </div>
+                </div>
+
+                {!fsmConfig ? (
+                  <div className="ai-empty-state">
+                    <p className="ai-empty">Criteria will be auto-generated once calibration completes.</p>
+                  </div>
+                ) : (
+                  <div className="ai-fsm-grid">
+                    <div className="ai-field">
+                      <label>Ready threshold (°) — {fsmConfig.readyComparator === "greaterThan" ? "above" : "below"}</label>
+                      <input
+                        className="ai-input"
+                        type="number"
+                        value={fsmConfig.readyAngleThreshold}
+                        onChange={(e) => setFsmConfig({ ...fsmConfig, readyAngleThreshold: Number(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="ai-field">
+                      <label>Activation threshold (°) — {fsmConfig.activationComparator === "greaterThan" ? "above" : "below"}</label>
+                      <input
+                        className="ai-input"
+                        type="number"
+                        value={fsmConfig.activationThreshold}
+                        onChange={(e) => setFsmConfig({ ...fsmConfig, activationThreshold: Number(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="ai-field">
+                      <label>Return threshold (°) — {fsmConfig.returnComparator === "greaterThan" ? "above" : "below"}</label>
+                      <input
+                        className="ai-input"
+                        type="number"
+                        value={fsmConfig.returnThreshold}
+                        onChange={(e) => setFsmConfig({ ...fsmConfig, returnThreshold: Number(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="ai-field">
+                      <label>Ready hold (seconds)</label>
+                      <input
+                        className="ai-input"
+                        type="number"
+                        step={0.5}
+                        min={0}
+                        value={fsmConfig.readyHoldSeconds}
+                        onChange={(e) => setFsmConfig({ ...fsmConfig, readyHoldSeconds: Number(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="ai-field">
+                      <label>Min frames per repetition</label>
+                      <input
+                        className="ai-input"
+                        type="number"
+                        min={1}
+                        value={fsmConfig.minRepFrames}
+                        onChange={(e) => setFsmConfig({ ...fsmConfig, minRepFrames: Math.max(1, Math.round(Number(e.target.value) || 1)) })}
+                      />
+                    </div>
+                    <div className="ai-field">
+                      <label>ROM reference angle (°)</label>
+                      <input
+                        className="ai-input"
+                        type="number"
+                        min={0}
+                        max={180}
+                        value={fsmConfig.romReferenceAngle ?? 180}
+                        onChange={(e) => setFsmConfig({ ...fsmConfig, romReferenceAngle: Number(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Hold time before rep counting starts (reference slider). */}
+                {fsmConfig && (
+                  <div className="ai-field" style={{ marginTop: 10 }}>
+                    <label>Starting-position hold before counting: {fsmConfig.readyHoldSeconds.toFixed(1)}s</label>
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={3}
+                      step={0.1}
+                      value={fsmConfig.readyHoldSeconds}
+                      onChange={(e) => setFsmConfig({ ...fsmConfig, readyHoldSeconds: Number(e.target.value) })}
+                      style={{ width: "100%", accentColor: "var(--primary)" }}
+                    />
+                  </div>
+                )}
+
+                {/* Advanced panel — raw numbers + editable comparators (reference
+                    "advanced" panel): editing here desyncs the strictness slider. */}
+                {fsmConfig && (
+                  <>
+                    <button type="button" className="text-action" onClick={() => setShowAdvanced((v) => !v)}>
+                      {showAdvanced ? "▾" : "▸"} Advanced — edit the raw thresholds and comparators
+                    </button>
+                    {showAdvanced && (
+                      <div className="ai-advanced-panel">
+                        <p className="ai-advanced-warning">
+                          ⚠️ Editing these values directly means the rep-counting strictness selector no longer matches
+                          the actual thresholds until it is changed again.
+                        </p>
+                        {(
+                          [
+                            ["ready", "Ready threshold", fsmConfig.readyAngleThreshold, fsmConfig.readyComparator],
+                            ["activation", "Activation threshold", fsmConfig.activationThreshold, fsmConfig.activationComparator],
+                            ["return", "Return threshold", fsmConfig.returnThreshold, fsmConfig.returnComparator]
+                          ] as const
+                        ).map(([key, label, value, comparator]) => (
+                          <div className="ai-field" key={key}>
+                            <label>{label} — comparator</label>
+                            <div className="ai-comparator-row">
+                              <input
+                                className="ai-input"
+                                type="number"
+                                value={value}
+                                onChange={(e) =>
+                                  setFsmConfig({
+                                    ...fsmConfig,
+                                    [`${key}Threshold`]: Number(e.target.value) || 0
+                                  } as ExerciseFSMConfig)
+                                }
+                              />
+                              <select
+                                className="ai-input"
+                                value={comparator}
+                                onChange={(e) =>
+                                  setFsmConfig({
+                                    ...fsmConfig,
+                                    [`${key}Comparator`]: e.target.value === "greaterThan" ? "greaterThan" : "lessThan"
+                                  } as ExerciseFSMConfig)
+                                }
+                              >
+                                <option value="greaterThan">greater than</option>
+                                <option value="lessThan">less than</option>
+                              </select>
+                            </div>
+                          </div>
+                        ))}
+                        <div className="ai-field">
+                          <label>Raw BVE threshold</label>
+                          <input
+                            className="ai-input"
+                            type="number"
+                            step={0.01}
+                            min={0}
+                            value={bveThreshold}
+                            onChange={(e) => setBveThreshold(Number(e.target.value) || 0)}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+
+              {/* Step 7 — Scanned Frame Preview */}
+              <section className="creation-section-card">
+                <div className="ai-card-step-tag">Step 7 · Verify Tracked Frames</div>
+                <div className="creation-section-header">
+                  <Film size={20} />
+                  <div>
+                    <strong>Scanned skeleton preview</strong>
+                    <p className="library-card-sub">Scrub through the tracked skeleton frames of your base clip.</p>
+                  </div>
+                </div>
+
+                <canvas ref={previewCanvasRef} className="ai-frame-preview" width={480} height={270} />
+
+                <div style={{ marginTop: 12 }}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, baseFrames.length - 1)}
+                    value={Math.min(previewIndex, Math.max(0, baseFrames.length - 1))}
+                    onChange={(e) => setPreviewIndex(Number(e.target.value))}
+                    disabled={baseFrames.length === 0}
+                    style={{ width: "100%", accentColor: "var(--primary)" }}
+                    aria-label="Preview frame"
+                  />
+                  <p className="library-card-sub" style={{ marginTop: 4 }}>
+                    {baseFrames.length > 0
+                      ? `Frame ${Math.min(previewIndex, baseFrames.length - 1) + 1} / ${baseFrames.length} · Timestamp: ${(previewFrame?.videoTimeSeconds ?? 0).toFixed(2)}s`
+                      : "No frames scanned yet."}
+                  </p>
+                </div>
+              </section>
+
+              {/* Step 4 — Checkpoint marking (reference CreateExerciseView):
+                  mark the starting position / peak / return frames on the base
+                  clip; all three angles re-derive the FSM criteria directly. */}
+              <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
+                <div className="ai-card-step-tag">Step 8 · Movement Checkpoints (optional)</div>
+                <div className="creation-section-header">
+                  <Flag size={20} />
+                  <div>
+                    <strong>
+                      Checkpoints
+                      {allCheckpointsSet && <span className="ai-clip-count">{CHECKPOINT_ROLES.length}</span>}
+                    </strong>
+                    <p className="library-card-sub">
+                      Scrub the preview above to each movement moment and mark it — when all three are marked the rep
+                      thresholds come from your own reference frames instead of statistics.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="ai-checkpoint-grid">
+                  {CHECKPOINT_ROLES.map(({ role, title, icon }) => (
+                    <button
+                      key={role}
+                      type="button"
+                      className={`ai-checkpoint-card${activeCheckpointRole === role ? " active" : ""}`}
+                      onClick={() => selectRoleForEditing(role)}
+                      disabled={!calibration}
+                    >
+                      <span className="ai-checkpoint-number">{checkpoints[role] ? "✓" : icon}</span>
+                      <div>
+                        <strong>{title}</strong>
+                        <small>
+                          {checkpoints[role]
+                            ? `${checkpoints[role]!.angle}° · ${checkpoints[role]!.timestampSeconds.toFixed(2)}s`
+                            : "not marked yet"}
+                        </small>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="ai-field">
+                  <label>Checkpoint name</label>
+                  <input
+                    className="ai-input"
+                    value={checkpointLabelDraft}
+                    onChange={(e) => setCheckpointLabelDraft(e.target.value)}
+                    placeholder={CHECKPOINT_ROLES.find((r) => r.role === activeCheckpointRole)?.hint}
+                    disabled={!calibration}
+                  />
+                </div>
+                <div className="ai-field">
+                  <label>Description (optional) — shown to the patient at this moment</label>
+                  <textarea
+                    className="ai-input"
+                    value={checkpointDescDraft}
+                    onChange={(e) => setCheckpointDescDraft(e.target.value)}
+                    placeholder="e.g. Extend the elbow fully without shrugging"
+                    style={{ minHeight: 54, fontFamily: "inherit", resize: "vertical" }}
+                    disabled={!calibration}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ width: "100%", justifyContent: "center" }}
+                  onClick={handleMarkCheckpoint}
+                  disabled={!calibration || baseFrames.length === 0}
+                >
+                  📌 Mark this frame as “{CHECKPOINT_ROLES.find((r) => r.role === activeCheckpointRole)?.title}”
+                </button>
+                <p className="ai-progress">
+                  {baseFrames.length > 0
+                    ? `Selected frame ${Math.min(previewIndex, baseFrames.length - 1) + 1} · primary angle here: ${
+                        angleAtPreviewFrame() ?? "—"
+                      }°`
+                    : "Scan a demo clip first."}
+                  {allCheckpointsSet ? " — rep thresholds are now derived from your checkpoints." : ""}
+                </p>
+
+                {CHECKPOINT_ROLES.filter(({ role }) => checkpoints[role]).length > 0 && (
+                  <div className="ai-checkpoint-list">
+                    {CHECKPOINT_ROLES.map(({ role, title }) => {
+                      const checkpoint = checkpoints[role];
+                      if (!checkpoint) return null;
+                      return (
+                        <div className="ai-checkpoint-item" key={role}>
+                          <div>
+                            <strong>{title}: {checkpoint.label}</strong>
+                            {checkpoint.description && <p>{checkpoint.description}</p>}
+                            <small>{checkpoint.timestampSeconds.toFixed(2)}s · {checkpoint.angle}°</small>
+                          </div>
+                          <button type="button" className="text-action danger" onClick={() => handleClearCheckpoint(role)}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* Step 9 — Save to Library */}
+              <section className="creation-section-card">
+                <div className="ai-card-step-tag">Step 9 · Save to Library</div>
+                <div className="creation-section-header">
+                  <Save size={20} />
+                  <div>
+                    <strong>Save exercise criteria</strong>
+                    <p className="library-card-sub">Persist this authored reference and criteria to the exercise library.</p>
+                  </div>
+                </div>
+
+                <div className="ai-field">
+                  <label>Save as</label>
+                  <select
+                    className="ai-input"
+                    value={targetExerciseId}
+                    onChange={(e) => setTargetExerciseId(e.target.value)}
+                  >
+                    <option value="new">New exercise (from the setup above)</option>
+                    {libraryExercises.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        Attach to: {item.name} (v{item.versionNumber} · {item.status})
+                      </option>
+                    ))}
+                  </select>
+                  {targetExercise ? (
+                    <>
+                      <p className="library-card-sub" style={{ marginTop: 4 }}>
+                        Keeps “{targetExercise.name}” (name, description, difficulty) and merges the AI reference into
+                        its criteria
+                        {targetExercise.baseCriteria.poseReference
+                          ? " — it already has a pose reference, which will be replaced."
+                          : "."}
+                      </p>
+                      {targetExercise.status === "active" && (
+                        <>
+                          <p className="library-card-sub">
+                            This version is active, so saving creates a new draft version (v{targetExercise.versionNumber + 1})
+                            — publish it from the library when you're happy.
+                          </p>
+                          <p className="ai-advanced-warning" style={{ marginTop: 6 }}>
+                            ⚠️ Patients' scheduled exercises still point at the current published version — after
+                            publishing, re-add/update this exercise in their plan so the new reference reaches sessions.
+                          </p>
+                        </>
+                      )}
+                      {!targetExercise.demoVideoFileId && !baseClip && (
+                        <p className="ai-error">This exercise has no demo video yet — select a base clip to add one.</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="library-card-sub" style={{ marginTop: 4 }}>
+                      Creates a new draft exercise using the name above; the base clip becomes its demo video.
+                    </p>
+                  )}
+                </div>
+
+                <div className="ai-field">
+                  <label>Rep-counting strictness level</label>
+                  <select
+                    className="ai-input"
+                    value={repSensitivityIndex}
+                    onChange={(e) => handleSensitivityChange(Number(e.target.value))}
+                    disabled={!calibration}
+                  >
+                    {sensitivityLevels.map((level, index) => (
+                      <option key={level.label} value={index}>{level.label}</option>
+                    ))}
+                  </select>
+                  <p className="library-card-sub" style={{ marginTop: 4 }}>
+                    {sensitivityLevels[repSensitivityIndex].desc} (difficulty {DIFFICULTY_INFO[difficulty].icon}{" "}
+                    {difficulty} allows {DIFFICULTY_INFO[difficulty].rangeText} around the analyzed value)
+                  </p>
+                </div>
+
+                {/* Target ROM — slider bounded to the measured range ±40%/160%
+                    (reference behavior), with the clinic's measured value shown. */}
+                <div className="ai-field">
+                  <label>Target ROM (°) — patient must move at least this far per rep</label>
+                  <input
+                    type="range"
+                    min={Math.max(5, Math.round((calibration?.derived.range ?? targetRom) * 0.4))}
+                    max={Math.round((calibration?.derived.range ?? targetRom) * 1.6) || 180}
+                    value={targetRom}
+                    onChange={(e) => setTargetRom(Number(e.target.value))}
+                    disabled={!calibration}
+                    style={{ width: "100%", accentColor: "var(--primary)" }}
+                  />
+                  <div className="ai-slider-row">
+                    <span className="library-card-sub">Lenient</span>
+                    <input
+                      className="ai-input"
+                      type="number"
+                      min={5}
+                      max={180}
+                      value={targetRom}
+                      onChange={(e) => setTargetRom(Number(e.target.value) || 0)}
+                      disabled={!calibration}
+                      style={{ width: 88, textAlign: "center" }}
+                    />
+                    <span className="library-card-sub">Strict</span>
+                  </div>
+                  {calibration && (
+                    <p className="library-card-sub">
+                      Measured from the demo clip: ±{Math.round(calibration.derived.range)}°
+                    </p>
+                  )}
+                </div>
+
+                {/* Trunk-compensation sensitivity as labeled presets (reference
+                    BVE_SENSITIVITY_LEVELS) instead of a raw number. */}
+                <div className="ai-field">
+                  <label>Trunk-compensation sensitivity (BVE)</label>
+                  <div className="ai-choice-row">
+                    {BVE_SENSITIVITY_LEVELS.map((level) => (
+                      <button
+                        key={level.value}
+                        type="button"
+                        className={`ai-choice small ${Math.abs(bveThreshold - level.value) < 1e-6 ? "active" : ""}`}
+                        onClick={() => setBveThreshold(level.value)}
+                        disabled={!calibration}
+                        title={level.desc}
+                      >
+                        {level.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="library-card-sub" style={{ marginTop: 4 }}>
+                    {BVE_SENSITIVITY_LEVELS.find((l) => Math.abs(l.value - bveThreshold) < 1e-6)?.desc ??
+                      `Custom value from the advanced panel: ${bveThreshold}`}
+                  </p>
+                </div>
+
+                <label className="ai-check">
+                  <input
+                    type="checkbox"
+                    checked={enableTrunkBve}
+                    onChange={(e) => setEnableTrunkBve(e.target.checked)}
+                    disabled={!calibration}
+                  />
+                  Penalize trunk-lean compensation (BVE)
+                </label>
+
+                <div className="ai-save-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={handleSave}
+                    disabled={!canSave || saveBusy}
+                  >
+                    {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
+                    Create Exercise
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={handleDownloadReference}
+                    disabled={!calibration}
+                  >
+                    Download reference_data.json
+                  </button>
+                </div>
+
+                {saveError && <p className="ai-error">{saveError}</p>}
+                {savedExerciseName && (
+                  <p className="ai-success">
+                    <CheckCircle2 size={16} /> “{savedExerciseName}” was created as a draft — publish it from the
+                    Exercise Library.
+                  </p>
+                )}
+              </section>
+
+          </div>
         </main>
       </div>
     </section>
