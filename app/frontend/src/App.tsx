@@ -18,6 +18,7 @@ import { PatientExerciseInstructionPage } from "./pages/PatientExerciseInstructi
 import { PatientHistoryPage } from "./pages/PatientHistoryPage";
 import { PatientProgressPage } from "./pages/PatientProgressPage";
 import { PatientSessionPage } from "./pages/PatientSessionPage";
+import type { PoseSessionSummary } from "./pages/PatientSessionPage";
 import { PatientSettingsPage } from "./pages/PatientSettingsPage";
 import { PatientTodayPage } from "./pages/PatientTodayPage";
 import { ProgramEditorPage } from "./pages/ProgramEditorPage";
@@ -180,10 +181,10 @@ function AppShell() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  // §6.3/§6.4 — PatientSessionPage's STOP hands off a raw recording here; this
-  // composes it into a PendingSessionAttempt (a local blob URL + mock AI read)
-  // and routes to the confirm screen instead of going back to Today directly.
-  const handleFinishRecording = (result: RecordingResult) => {
+  // PatientSessionPage's STOP hands off the recording plus, for pose sessions,
+  // the average of the successful server-scored repetitions. Other tracking
+  // modes retain the existing preview fallback until they have real scoring.
+  const handleFinishRecording = (result: RecordingResult, poseSummary?: PoseSessionSummary) => {
     const extension = result.mimeType.includes("mp4") ? "mp4" : "webm";
     const fileSlug = activeExercise.name.trim().toLowerCase().replace(/\s+/g, "-");
     setPendingAttempt({
@@ -195,7 +196,18 @@ function AppShell() {
       videoFileName: `${fileSlug}-attempt.${extension}`,
       videoSizeLabel: formatVideoSize(result.blob.size),
       videoMimeType: result.mimeType,
-      ...mockAiEvaluation()
+      scoreSource: poseSummary ? "pose_average" : "preview",
+      ...(poseSummary
+        ? {
+            aiScore: poseSummary.averageScore,
+            aiFeedback: `Average score from ${poseSummary.repScores.length} AI-scored repetition${poseSummary.repScores.length === 1 ? "" : "s"}.`,
+            aiMetrics: [
+              { label: "Scored repetitions", value: String(poseSummary.repScores.length) },
+              { label: "Score range", value: `${Math.min(...poseSummary.repScores)}–${Math.max(...poseSummary.repScores)}` },
+              { label: "Average score", value: String(poseSummary.averageScore) }
+            ]
+          }
+        : mockAiEvaluation())
     });
     setView("session-upload-confirm");
   };

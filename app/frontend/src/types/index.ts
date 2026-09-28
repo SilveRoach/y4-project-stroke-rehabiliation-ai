@@ -579,8 +579,9 @@ export interface PendingSessionAttempt {
   videoFileName: string;
   videoSizeLabel: string;
   videoMimeType: string;
-  // Generated client-side right after recording stops (ai/scoring.ts is still a
-  // stub — mocked, same caveat as CAMERA_TRACKING_MOCKUP_PLAN.md §2.5).
+  // Pose sessions carry the rounded average of successful server-scored reps;
+  // other modes retain the client-side preview until real scoring is available.
+  scoreSource?: "pose_average" | "preview";
   aiScore: number;
   aiFeedback: string;
   aiMetrics: Array<{ label: string; value: string }>;

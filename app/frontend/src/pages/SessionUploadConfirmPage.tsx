@@ -13,6 +13,7 @@
 
 import { AlertCircle, Loader2, RotateCcw, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { useState } from "react";
+import { PoseVideoPlayer } from "../components/PoseVideoPlayer";
 import { submitExerciseResult } from "../services/api";
 import { useAuth } from "../store/authStore";
 import type { PendingSessionAttempt } from "../types";
@@ -67,7 +68,7 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
         <div className="srr-layout">
           <div className="srr-video-col">
             <p className="pd-record-attachments-label">Your recording &middot; attempt {attemptNumber} if confirmed</p>
-            <video className="sud-video" src={attempt.videoBlobUrl} controls playsInline />
+            <PoseVideoPlayer src={attempt.videoBlobUrl} />
             <p>
               {attempt.videoFileName} &middot; {attempt.videoSizeLabel}
             </p>
@@ -93,8 +94,9 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
               )}
             </div>
             <p className="pd-modal-hint sud-hint">
-              This score is a mock preview &mdash; real AI evaluation isn&apos;t wired up yet. Your therapist can still
-              review this recording and add their own score later.
+              {attempt.scoreSource === "pose_average"
+                ? "This is the rounded average of the successful AI-scored repetitions in this recording. Your therapist can still review it and add their own score later."
+                : "This score is a preview — real AI evaluation isn&apos;t wired up for this tracking mode yet. Your therapist can still review this recording and add their own score later."}
             </p>
           </div>
         </div>

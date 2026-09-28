@@ -14,6 +14,7 @@
 
 import { ArrowLeft, Bell, Video } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { PoseVideoPlayer } from "../components/PoseVideoPlayer";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { ApiError, getFileContent, getScheduleDayReview, updateAttemptScoring } from "../services/api";
@@ -332,7 +333,7 @@ function AttemptReview({
       <div className="srr-video-col">
         <p className="pd-record-attachments-label">Patient recording · วิดีโอของผู้ป่วย</p>
         {videoUrl ? (
-          <video className="sud-video" src={videoUrl} controls playsInline />
+          <PoseVideoPlayer src={videoUrl} />
         ) : (
           <div className="srr-video-placeholder">
             {videoError ? null : <Video size={26} />}

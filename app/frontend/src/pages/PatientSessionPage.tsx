@@ -36,7 +36,13 @@ interface PatientSessionPageProps {
   // §6.3/§6.4 — called once STOP ends a recording with a result to review;
   // App.tsx routes to pages/SessionUploadConfirmPage.tsx from here instead of
   // going straight back to Today.
-  onFinishRecording: (result: RecordingResult) => void;
+  onFinishRecording: (result: RecordingResult, poseSummary?: PoseSessionSummary) => void;
+}
+
+/** The real aggregate sent to the upload-confirmation page after pose scoring. */
+export interface PoseSessionSummary {
+  averageScore: number;
+  repScores: number[];
 }
 
 const trackingCopy = {
@@ -51,15 +57,23 @@ const trackingCopy = {
 // 15fps); the skeleton redraws every frame from the cached landmarks.
 const HAND_DETECT_INTERVAL_MS = 66;
 
-// Parses PatientExercise.progressLabel's "X of Y" shape (data/patientMock.ts) into
-// its two numbers. Backs both the progress ring/percent and §2.5's local demo-motion
-// counter below — {total: 0} means the label didn't match, so the demo timer stays off.
+// Parses the two target formats used by PatientExercise:
+//   - legacy/mock progress: "X of Y"
+//   - scheduled exercise target: "Y reps" / "Y repetitions"
+// The real patient-session route supplies the second form via targetValueLabel.
+// Backs both the progress ring/percent and the live rep counter below.
 function parseProgress(progressLabel: string) {
-  const match = progressLabel.match(/(\d+)\s*of\s*(\d+)/i);
-  if (!match) {
-    return { done: 0, total: 0 };
+  const progressMatch = progressLabel.match(/(\d+)\s*of\s*(\d+)/i);
+  if (progressMatch) {
+    return { done: Number(progressMatch[1]), total: Number(progressMatch[2]) };
   }
-  return { done: Number(match[1]), total: Number(match[2]) };
+
+  const repsMatch = progressLabel.match(/(\d+)\s*(?:reps?|repetitions?)\b/i);
+  if (repsMatch) {
+    return { done: 0, total: Number(repsMatch[1]) };
+  }
+
+  return { done: 0, total: 0 };
 }
 
 // CAMERA_TRACKING_MOCKUP_PLAN.md §2.6 — same icon used for this trackingType
@@ -422,6 +436,10 @@ export function PatientSessionPage({
   // countdown timers after Restart/unmount are ignored via this.
   const repCycleRef = useRef(0);
   const demoDoneRef = useRef(initialDone);
+  // Every value here is a successful server-side score for this recording. A
+  // ref keeps the complete set available when MediaRecorder asynchronously
+  // finishes and hands the recording to the confirmation screen.
+  const poseRepScoresRef = useRef<number[]>([]);
   // handleStop captured for submitCompletedRep's auto-finish (all reps done →
   // existing STOP → SessionUploadConfirmPage flow). Assigned every render.
   const stopRef = useRef<() => void>(() => {});
@@ -458,6 +476,7 @@ export function PatientSessionPage({
     setFeedbackIndex(0);
     // Pose rep tracking resets with the exercise switch too.
     demoDoneRef.current = parsed.done;
+    poseRepScoresRef.current = [];
     repCycleRef.current += 1;
     scoringHoldRef.current = false;
     setRepFeedback(null);
@@ -533,6 +552,7 @@ export function PatientSessionPage({
       demoDoneRef.current = Math.min(repNumber, total > 0 ? total : repNumber);
       setDemoDone(demoDoneRef.current);
       setDemoScore(rep.score);
+      poseRepScoresRef.current.push(rep.score);
       setRepFeedback(rep.feedback);
       setPoseStatusText(`Rep ${repNumber}: ${rep.score} pts · รอบที่ ${repNumber}: ${rep.score} คะแนน`);
 
@@ -674,7 +694,14 @@ export function PatientSessionPage({
   useEffect(() => {
     if (awaitingFinishRef.current && recording.result) {
       awaitingFinishRef.current = false;
-      onFinishRecording(recording.result);
+      const repScores = poseRepScoresRef.current;
+      const poseSummary = repScores.length > 0
+        ? {
+            averageScore: Math.round(repScores.reduce((sum, score) => sum + score, 0) / repScores.length),
+            repScores: [...repScores]
+          }
+        : undefined;
+      onFinishRecording(recording.result, poseSummary);
     }
   }, [recording.result, onFinishRecording]);
 
@@ -686,6 +713,7 @@ export function PatientSessionPage({
     repCycleRef.current += 1;
     scoringHoldRef.current = false;
     demoDoneRef.current = demoDone;
+    poseRepScoresRef.current = [];
     // New session = time discontinuity — landmark filters start fresh.
     landmarkFiltersRef.current = [];
     gripGameRef.current?.reset();
@@ -749,6 +777,7 @@ export function PatientSessionPage({
     repCycleRef.current += 1;
     scoringHoldRef.current = false;
     demoDoneRef.current = initialDone;
+    poseRepScoresRef.current = [];
     setRepFeedback(null);
     lastPoseCaptionRef.current = "";
     landmarkFiltersRef.current = [];
