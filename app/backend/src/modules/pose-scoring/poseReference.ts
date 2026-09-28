@@ -111,6 +111,9 @@ export function resolvePoseReference(baseCriteria: unknown): PoseReference | nul
     targetRom: isFiniteNumber(ref.targetRom) ? ref.targetRom : DEFAULT_TARGET_ROM,
     bveThreshold: isFiniteNumber(ref.bveThreshold) ? ref.bveThreshold : DEFAULT_BVE_THRESHOLD,
     enableTrunkBve: typeof ref.enableTrunkBve === "boolean" ? ref.enableTrunkBve : DEFAULT_ENABLE_TRUNK_BVE,
+    // Not set = false (penalty enabled per the vector-type rule) — see comment
+    // on PoseReferencePublic.allowsTorsoMovement in poseScoring.types.ts.
+    allowsTorsoMovement: typeof ref.allowsTorsoMovement === "boolean" ? ref.allowsTorsoMovement : false,
     masterSamples,
     wrongFormSamples: wrongFormSamples.length > 0 ? wrongFormSamples : undefined
   };
@@ -124,6 +127,7 @@ export function toPublicReference(reference: PoseReference): PoseReferencePublic
     fsmConfig: reference.fsmConfig,
     targetRom: reference.targetRom,
     bveThreshold: reference.bveThreshold,
-    enableTrunkBve: reference.enableTrunkBve
+    enableTrunkBve: reference.enableTrunkBve,
+    allowsTorsoMovement: reference.allowsTorsoMovement
   };
 }

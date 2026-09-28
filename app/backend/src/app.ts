@@ -27,7 +27,12 @@ export function createApp(): Express {
   const app = express();
 
   app.use(cors());
-  app.use(express.json());
+  // Exercise-authoring payloads carry per-frame pose data for every master/
+  // wrong-form take (masterSamples/wrongFormSamples in poseReference) — a
+  // handful of demo clips easily exceeds express.json()'s 100kb default,
+  // which throws a raw (non-AppError) PayloadTooLargeError that the generic
+  // error handler below reports as an unhelpful "Something went wrong."
+  app.use(express.json({ limit: "10mb" }));
 
   // Liveness: process is up.
   app.get("/health", (_req: Request, res: Response) => {

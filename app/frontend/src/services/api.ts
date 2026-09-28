@@ -697,6 +697,7 @@ export function scorePoseRep(
     frames: FrameFeature[];
     peakRom: number;
     baseTrunkPoint: { x: number; y: number } | null;
+    baseShoulderWidthNorm?: number | null;
   }
 ): Promise<{ rep: PoseRepScoringResult }> {
   return apiRequest<{ rep: PoseRepScoringResult }>(`/scheduled-exercises/${scheduledExerciseId}/pose-rep-score`, {

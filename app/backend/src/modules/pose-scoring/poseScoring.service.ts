@@ -21,6 +21,8 @@ export interface PoseRepScoreResult {
     meanBve: number;
     bveThreshold: number;
     bvePenalty: number;
+    peakTorsoTwist: number;
+    torsoTwistPenalty: number;
     isKnnPass: boolean;
   };
 }
@@ -90,7 +92,26 @@ function normalizeFrame(raw: unknown): FrameFeature {
   };
   if (isFiniteNumber(f.leftElbowAngle)) frame.leftElbowAngle = f.leftElbowAngle;
   if (isFiniteNumber(f.rightElbowAngle)) frame.rightElbowAngle = f.rightElbowAngle;
+  if (isFiniteNumber(f.shoulderWidthNorm)) frame.shoulderWidthNorm = f.shoulderWidthNorm;
   return frame;
+}
+
+// peakTorsoTwist = the point where the shoulder-width ratio shrinks the most
+// from the rep's starting baseline (0 = still facing the camera the whole
+// rep, closer to 1 = twisted nearly sideways). Uses the peak, not the rep
+// average, because torso-twist compensation usually only shows up briefly at
+// the extreme of the movement — averaging over the whole rep (including the
+// start/return where the torso is usually still upright) would dilute the
+// signal past detection (see TORSO_TWIST_THRESHOLD in scoreEngine.ts). Frames
+// without shoulderWidthNorm (older clients, or master samples) fall back to
+// the baseline itself, contributing a ratio of 0 for that frame.
+function computePeakTorsoTwist(frames: FrameFeature[], baseShoulderWidthNorm: number | null | undefined): number {
+  const baseline =
+    isFiniteNumber(baseShoulderWidthNorm) && baseShoulderWidthNorm > 0
+      ? baseShoulderWidthNorm
+      : frames[0]?.shoulderWidthNorm || 1;
+  const twistRatios = frames.map((f) => Math.max(0, 1 - (f.shoulderWidthNorm ?? baseline) / baseline));
+  return twistRatios.length > 0 ? Math.max(...twistRatios) : 0;
 }
 
 // GET /scheduled-exercises/:id/pose-reference — the client-visible FSM/angle
@@ -156,6 +177,16 @@ export async function scorePoseRep(
   const repFeatures = extractRepFeatures(frames, bestDistance);
   const knnResult = classifyRep(knnModel, repFeatures);
 
+  // Only exercises that measure a vector angle against a fixed reference axis
+  // (e.g. External Rotation) are vulnerable to torso-twist making the
+  // measured angle "fake" — joint-angle exercises don't rely on a fixed
+  // reference axis the same way, so twisting the torso doesn't distort them
+  // the same way. allowsTorsoMovement opts an exercise out even when its
+  // angleDefinition is 'vector' (e.g. Shoulder Rotation, which naturally
+  // needs some torso movement as part of the exercise itself).
+  const isVectorAngleExercise = reference.angleDefinition?.type === "vector" && !reference.allowsTorsoMovement;
+  const peakTorsoTwist = computePeakTorsoTwist(frames, request.baseShoulderWidthNorm);
+
   // Final combination — the import project's exact scoring formula.
   const result = computeRepScore(
     request.repNumber,
@@ -165,8 +196,10 @@ export async function scorePoseRep(
     reference.targetRom,
     meanBve,
     reference.bveThreshold,
+    peakTorsoTwist,
     knnResult.isPass,
-    reference.enableTrunkBve
+    reference.enableTrunkBve,
+    isVectorAngleExercise
   );
 
   return {
@@ -183,6 +216,8 @@ export async function scorePoseRep(
         meanBve: result.meanBve,
         bveThreshold: reference.bveThreshold,
         bvePenalty: result.bvePenalty,
+        peakTorsoTwist: result.peakTorsoTwist,
+        torsoTwistPenalty: result.torsoTwistPenalty,
         isKnnPass: result.isKnnPass
       }
     }

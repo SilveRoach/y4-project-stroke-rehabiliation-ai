@@ -21,6 +21,22 @@ export function calculateTrunkCentroid(landmarks: PoseLandmark[]): { x: number; 
   return { x, y };
 }
 
+// Left-right shoulder distance divided by torso length (lTorso) of the same
+// frame — adapted from projectimport/Rehab-AI's ai/normalizers/torsoNormalizer.ts
+// (lTorso = mean distance from the shoulder midpoint to each hip landmark).
+// Computed directly from raw landmarks (this pipeline doesn't keep a fully
+// normalized landmark set around like the import project's ExerciseLiveView
+// did) — dividing by lTorso here has the same translation/scale-cancelling
+// effect as the import project's normalizedLandmarks[11]/[12] difference.
+function calculateShoulderWidthNorm(landmarks: PoseLandmark[]): number {
+  const neckX = (landmarks[11].x + landmarks[12].x) / 2;
+  const neckY = (landmarks[11].y + landmarks[12].y) / 2;
+  const distLeft = Math.hypot(neckX - landmarks[23].x, neckY - landmarks[23].y);
+  const distRight = Math.hypot(neckX - landmarks[24].x, neckY - landmarks[24].y);
+  const lTorso = (distLeft + distRight) / 2 || 1;
+  return Math.hypot(landmarks[11].x - landmarks[12].x, landmarks[11].y - landmarks[12].y) / lTorso;
+}
+
 export type ExerciseFSMState = "WAITING_READY_POSE" | "IN_REP_ACTIVE" | "IN_REP_RETURN";
 
 export interface ExerciseFSMFrameInput {
@@ -38,6 +54,10 @@ export interface CompletedRep {
   peakRom: number;
   /** Trunk centroid captured when the rep started (backend BVE baseline). */
   baseTrunkPoint: { x: number; y: number };
+  /** shoulderWidthNorm captured when the rep started — the baseline the
+   *  backend measures torso-twist shrinkage against. Null when the frame at
+   *  rep-start didn't have a computable value (should not normally happen). */
+  baseShoulderWidthNorm: number | null;
 }
 
 export interface ExerciseFSMOutput {
@@ -88,6 +108,7 @@ export class ExerciseFSM {
   private readyHoldStartMs: number | null = null;
   private repSequence: FrameFeature[] = [];
   private baseTrunkPoint: { x: number; y: number } | null = null;
+  private baseShoulderWidthNorm: number | null = null;
   private extremeAngleInRep = 0;
   private repCount = 0;
 
@@ -100,6 +121,7 @@ export class ExerciseFSM {
     this.readyHoldStartMs = null;
     this.repSequence = [];
     this.baseTrunkPoint = null;
+    this.baseShoulderWidthNorm = null;
   }
 
   getState(): ExerciseFSMState {
@@ -148,6 +170,7 @@ export class ExerciseFSM {
           this.state = "IN_REP_ACTIVE";
           readyCountdownSeconds = null;
           this.baseTrunkPoint = trunkCentroid;
+          this.baseShoulderWidthNorm = frameFeature.shoulderWidthNorm ?? null;
           this.repSequence = [];
           this.extremeAngleInRep = angle;
         }
@@ -178,7 +201,8 @@ export class ExerciseFSM {
         completedRep = {
           sequence: this.repSequence,
           peakRom: Math.abs(romReferenceAngle - this.extremeAngleInRep),
-          baseTrunkPoint: this.baseTrunkPoint ?? trunkCentroid
+          baseTrunkPoint: this.baseTrunkPoint ?? trunkCentroid,
+          baseShoulderWidthNorm: this.baseShoulderWidthNorm
         };
       }
     }
@@ -205,7 +229,8 @@ export function buildFrameFeature(
     elbowAngle: primary.mean,
     shoulderAngle: secondary.mean,
     pinchDistance: 0,
-    trunkCentroid
+    trunkCentroid,
+    shoulderWidthNorm: calculateShoulderWidthNorm(landmarks)
   };
   if (primary.left !== undefined) feature.leftElbowAngle = primary.left;
   if (primary.right !== undefined) feature.rightElbowAngle = primary.right;

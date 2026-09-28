@@ -524,7 +524,8 @@ export function PatientSessionPage({
         repNumber,
         frames: completed.sequence,
         peakRom: completed.peakRom,
-        baseTrunkPoint: completed.baseTrunkPoint
+        baseTrunkPoint: completed.baseTrunkPoint,
+        baseShoulderWidthNorm: completed.baseShoulderWidthNorm
       });
       if (cycle !== repCycleRef.current) return; // session restarted meanwhile
 

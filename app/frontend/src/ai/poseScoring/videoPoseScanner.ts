@@ -106,9 +106,16 @@ export async function scanVideoPoseFrames(
         previewCtx.clearRect(0, 0, canvas.width, canvas.height);
         previewCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
         if (filtered) {
+          // mirror: false — this is a plain uploaded demo clip drawn straight
+          // (ctx.drawImage above applies no flip), not a live selfie camera
+          // feed. drawSkeleton's mirror:true default assumes the caller
+          // already CSS-mirrored the video (see its JSDoc) — without this
+          // override the skeleton is drawn flipped relative to the frame it's
+          // overlaid on.
           drawSkeleton(previewCtx, filtered, canvas.width, canvas.height, {
             lineWidth: 3,
-            jointRadius: 5
+            jointRadius: 5,
+            mirror: false
           });
         }
       }

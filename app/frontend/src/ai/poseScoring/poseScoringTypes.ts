@@ -59,6 +59,13 @@ export interface FrameFeature {
   rightElbowAngle?: number;
   pinchDistance: number;
   trunkCentroid: { x: number; y: number };
+  /** Left-right shoulder distance divided by torso length (lTorso) of the same
+   *  frame — shrinks the more the torso twists away from the camera. Lets the
+   *  backend detect "twisting the whole torso" as a compensation on exercises
+   *  that measure a vector angle against a fixed reference axis. Optional:
+   *  only meaningful when paired with baseShoulderWidthNorm on the scoring
+   *  request (see scorePoseRep in services/api.ts). */
+  shoulderWidthNorm?: number;
 }
 
 /** GET /scheduled-exercises/:id/pose-reference response payload. */
@@ -69,6 +76,12 @@ export interface PoseReferencePublic {
   targetRom: number;
   bveThreshold: number;
   enableTrunkBve: boolean;
+  /** true = this exercise naturally requires torso movement (e.g. Shoulder
+   *  Rotation) — the backend disables its torso-twist penalty for this
+   *  exercise even though angleDefinition is 'vector'. Not used to change any
+   *  client-side behavior; carried here only because it's part of the same
+   *  wire payload the backend sends. */
+  allowsTorsoMovement?: boolean;
 }
 
 /** POST /scheduled-exercises/:id/pose-rep-score response payload. */
@@ -85,6 +98,8 @@ export interface PoseRepScoringResult {
     meanBve: number;
     bveThreshold: number;
     bvePenalty: number;
+    peakTorsoTwist: number;
+    torsoTwistPenalty: number;
     isKnnPass: boolean;
   };
 }

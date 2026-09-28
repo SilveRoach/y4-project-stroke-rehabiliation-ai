@@ -247,7 +247,10 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
     ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     if (previewFrame) {
-      drawSkeleton(ctx, previewFrame.landmarks, canvas.width, canvas.height, { lineWidth: 3, jointRadius: 4 });
+      // mirror: false — same reasoning as videoPoseScanner.ts's scan-preview
+      // draw: these landmarks come from the raw (unmirrored) uploaded demo
+      // clip, not a CSS-mirrored live camera feed.
+      drawSkeleton(ctx, previewFrame.landmarks, canvas.width, canvas.height, { lineWidth: 3, jointRadius: 4, mirror: false });
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.4)";
       ctx.font = "13px sans-serif";

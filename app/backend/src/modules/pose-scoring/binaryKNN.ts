@@ -6,11 +6,13 @@
 import { FrameFeature } from "./poseScoring.types";
 
 export interface RepFeatureVector {
-  /** Actual primary-angle range of this rep (max - min across its frames). */
+  /** Actual primary-angle range of this rep (max - min across its frames).
+   *  Debug-only — excluded from FEATURE_KEYS below (see comment there). */
   peakRom: number;
   /** Mean deviation of the trunk centroid from the rep's first frame. */
   meanBve: number;
-  /** Path-length-normalized DTW distance to the nearest master sample. */
+  /** Path-length-normalized DTW distance to the nearest master sample.
+   *  Debug-only — excluded from FEATURE_KEYS below (see comment there). */
   dtwDistance: number;
   /** Mean |leftAngle - rightAngle| across the rep — high = asymmetric. */
   asymmetry: number;
@@ -20,14 +22,17 @@ export interface RepFeatureVector {
   durationFrames: number;
 }
 
-const FEATURE_KEYS: (keyof RepFeatureVector)[] = [
-  "peakRom",
-  "meanBve",
-  "dtwDistance",
-  "asymmetry",
-  "jerk",
-  "durationFrames"
-];
+// peakRom and dtwDistance are deliberately excluded from the k-NN feature
+// vector (kept in RepFeatureVector above only for debug logging):
+// - peakRom already has its own dedicated scoring signal (romScore in
+//   scoreEngine.ts) — including it here would double-count ROM shortfall
+//   through two separate penalties for the same root cause.
+// - dtwDistance is already weighted 65% into the final score via dtwScore in
+//   scoreEngine.ts, and the synthetic "correct form" jitter examples used to
+//   train this k-NN model can't be recalibrated to realistic dtwDistance
+//   values under the now-normalized DTW metric (see dtwEvaluator.ts) without
+//   breaking the jerk feature's own calibration.
+const FEATURE_KEYS: (keyof RepFeatureVector)[] = ["meanBve", "asymmetry", "jerk", "durationFrames"];
 
 function mean(values: number[]): number {
   return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;

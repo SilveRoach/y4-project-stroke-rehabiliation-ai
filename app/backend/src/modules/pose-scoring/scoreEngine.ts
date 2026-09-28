@@ -25,6 +25,20 @@ const DTW_HARD_FLOOR_ALLOWANCE = 20;
 // the floor from unfairly capping them a second time.
 const DTW_HARD_FLOOR_ROM_GATE = 85;
 
+// "Whole-torso twist" penalty threshold/multiplier — separate from bvePenalty
+// because it's a different compensation mechanism (twisting/rotating, not
+// leaning/swaying). Only applies to exercises that measure a vector angle
+// against a fixed reference axis (e.g. External Rotation), where twisting the
+// torso instead of rotating the shoulder makes the measured angle "fake" for
+// the whole rep (not just an untidy rep — the number itself is wrong), so it
+// should be penalized harder than bvePenalty. The 0.08 threshold (~8% shoulder
+// width shrink, roughly a 23° torso twist) and the multiplier/cap below mirror
+// the values calibrated against real pose-tracking clips in the frontend
+// version of this file (see the import project's ai/scoring/scoreEngine.ts).
+const TORSO_TWIST_THRESHOLD = 0.08;
+const TORSO_TWIST_MULTIPLIER = 75;
+const TORSO_TWIST_PENALTY_CAP = 30;
+
 export function computeRepScore(
   repNum: number,
   dtwScore: number,
@@ -33,8 +47,10 @@ export function computeRepScore(
   targetRom: number,
   meanBve: number,
   bveThreshold: number,
+  peakTorsoTwist: number,
   isKnnPass: boolean,
-  isTrunkBveEnabled: boolean
+  isTrunkBveEnabled: boolean,
+  isVectorAngleExercise: boolean
 ): RepResult {
   const romScore = Math.min(100, Math.round((peakRom / targetRom) * 100));
 
@@ -43,7 +59,17 @@ export function computeRepScore(
     bvePenalty = Math.min(25, Math.round((meanBve - bveThreshold) * 2));
   }
 
-  let rawScore = DTW_WEIGHT * dtwScore + ROM_WEIGHT * romScore - bvePenalty;
+  // Additive and independently capped from bvePenalty — a rep that both
+  // leans/sways AND twists the torso should be penalized for both.
+  let torsoTwistPenalty = 0;
+  if (isVectorAngleExercise && peakTorsoTwist > TORSO_TWIST_THRESHOLD) {
+    torsoTwistPenalty = Math.min(
+      TORSO_TWIST_PENALTY_CAP,
+      Math.round((peakTorsoTwist - TORSO_TWIST_THRESHOLD) * TORSO_TWIST_MULTIPLIER)
+    );
+  }
+
+  let rawScore = DTW_WEIGHT * dtwScore + ROM_WEIGHT * romScore - bvePenalty - torsoTwistPenalty;
   if (!isKnnPass) rawScore -= 10; // penalize reps the form gate classifies as failing
 
   // DTW hard floor — see comments above. Requires a high romScore too, so
@@ -60,6 +86,9 @@ export function computeRepScore(
   if (isTrunkBveEnabled && meanBve > bveThreshold) {
     feedbackText += "ระวังอย่าเอียงลำตัวช่วยยก ให้เกร็งหน้าท้องไว้ ";
   }
+  if (torsoTwistPenalty > 0) {
+    feedbackText += "ระวังอย่าบิดลำตัวช่วยหมุนแขน ให้หันหน้าเข้ากล้องตลอดท่าและขยับแค่แขน ";
+  }
   if (romScore < 80) {
     feedbackText += "พยายามยกแขนให้สุดช่วงองศาเพิ่มอีกนิด ";
   }
@@ -73,7 +102,7 @@ export function computeRepScore(
     feedbackText +=
       "รูปแบบการเคลื่อนไหวโดยรวมของรอบนี้ต่างจากท่าที่ถูกต้องพอสมควร (เช่น ระยะไม่ถึง เอียงตัวช่วย ไม่สมมาตร หรือกระตุก) ลองทำช้าลงและควบคุมท่าให้นิ่งขึ้น ";
   }
-  if (finalRepScore >= 80 && bvePenalty === 0) {
+  if (finalRepScore >= 80 && bvePenalty === 0 && torsoTwistPenalty === 0) {
     feedbackText += "ทำได้ดีมาก ท่าทางถูกต้องและสม่ำเสมอ!";
   }
 
@@ -85,6 +114,8 @@ export function computeRepScore(
     romScore,
     meanBve,
     bvePenalty,
+    peakTorsoTwist,
+    torsoTwistPenalty,
     isKnnPass,
     finalRepScore,
     feedbackText

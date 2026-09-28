@@ -2,9 +2,12 @@
 // frontend/src/ai/classifiers/syntheticData.ts. Builds "correct form"
 // (label=1) and "incorrect form" (label=0) k-NN training examples from the
 // exercise's stored master samples, so the form gate works for any pose
-// exercise without real labeled patient data. The six negative distortions
-// mirror the clinically-recognized wrong-form patterns (reduced ROM, trunk
-// sway, asymmetry, jerk, too-fast, secondary-joint compensation).
+// exercise without real labeled patient data. The five negative distortions
+// mirror the clinically-recognized wrong-form patterns (trunk sway, asymmetry,
+// jerk, too-fast, secondary-joint compensation). A sixth distortion (reduced
+// ROM) was removed: peakRom already has its own dedicated scoring signal
+// (romScore in scoreEngine.ts), so training the form gate on it too would
+// double-count the same ROM shortfall through two separate penalties.
 
 import { FrameFeature, MasterSample } from "./poseScoring.types";
 import { evaluateDTW } from "./dtwEvaluator";
@@ -29,25 +32,6 @@ function jitterFrames(frames: FrameFeature[], rng: () => number, magnitudeDeg = 
       }
     };
   });
-}
-
-/** Reduced ROM: pull every frame's angle toward the rep's baseline angle. */
-function reduceRom(frames: FrameFeature[], severity: number): FrameFeature[] {
-  if (frames.length === 0) return frames;
-  const baseline = frames[0].elbowAngle;
-  const baselineL = frames[0].leftElbowAngle;
-  const baselineR = frames[0].rightElbowAngle;
-  const pull = (v: number, base: number) => base + (v - base) * (1 - severity);
-
-  return frames.map((f) => ({
-    ...f,
-    elbowAngle: pull(f.elbowAngle, baseline),
-    leftElbowAngle:
-      f.leftElbowAngle !== undefined && baselineL !== undefined ? pull(f.leftElbowAngle, baselineL) : f.leftElbowAngle,
-    rightElbowAngle:
-      f.rightElbowAngle !== undefined && baselineR !== undefined ? pull(f.rightElbowAngle, baselineR) : f.rightElbowAngle,
-    trunkCentroid: { ...f.trunkCentroid }
-  }));
 }
 
 /** Trunk sway: add an up-down drift curve to the trunk centroid (worst at peak effort). */
@@ -123,7 +107,6 @@ export function generateSyntheticTrainingSet(
 
   const POSITIVE_JITTER_COUNT = 5;
   const NEGATIVE_GENERATORS: { sourceType: string; build: (frames: FrameFeature[]) => FrameFeature[] }[] = [
-    { sourceType: "reduced-rom", build: (f) => reduceRom(f, 0.5 + rng() * 0.3) },
     { sourceType: "trunk-sway", build: (f) => addTrunkSway(f, 0.6 + rng() * 0.4) },
     { sourceType: "asymmetry", build: (f) => addAsymmetry(f, 0.6 + rng() * 0.4) },
     { sourceType: "jerk-noise", build: (f) => addJerkNoise(f, 0.6 + rng() * 0.4, rng) },
@@ -147,7 +130,7 @@ export function generateSyntheticTrainingSet(
       });
     }
 
-    // Incorrect: the six clinically-modeled wrong-form distortions.
+    // Incorrect: the five clinically-modeled wrong-form distortions.
     for (const gen of NEGATIVE_GENERATORS) {
       const corrupted = gen.build(cloneFrames(sample.frames));
       examples.push({

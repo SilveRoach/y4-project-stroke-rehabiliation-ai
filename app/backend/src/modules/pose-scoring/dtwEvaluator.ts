@@ -1,11 +1,51 @@
 // DTW evaluator — adapted verbatim from projectimport/Rehab-AI's
 // frontend/src/ai/evaluators/dtwEvaluator.ts (same DP recurrence, same
-// path-length normalization, same gamma). Types come from poseScoring.types.ts.
+// path-length normalization, same gamma, same per-sequence primary-angle
+// normalization). Types come from poseScoring.types.ts.
 
 import { FrameFeature } from "./poseScoring.types";
 
-function featureDistance(a: FrameFeature, b: FrameFeature): number {
-  const dElbow = a.elbowAngle - b.elbowAngle;
+/** Min-max range of the primary angle (elbowAngle) across one sequence, used
+ *  to normalize it before DTW comparison. Falls back to a range of 1 when the
+ *  sequence never moves, to avoid dividing by zero. */
+interface PrimaryAngleRange {
+  min: number;
+  range: number;
+}
+
+function computePrimaryAngleRange(frames: FrameFeature[]): PrimaryAngleRange {
+  if (frames.length === 0) return { min: 0, range: 1 };
+  let min = Infinity;
+  let max = -Infinity;
+  for (const f of frames) {
+    if (f.elbowAngle < min) min = f.elbowAngle;
+    if (f.elbowAngle > max) max = f.elbowAngle;
+  }
+  return { min, range: max - min || 1 };
+}
+
+// Compares the "shape/timing" of the primary angle (elbowAngle) by normalizing
+// each sequence to its own achieved range (0-100 scale) before comparing,
+// rather than comparing raw absolute degrees. Without this, a patient whose
+// ROM falls short of the target but otherwise moves correctly (same
+// timing/shape as the master clip, just a smaller range) gets penalized on
+// dtwScore too — even though romScore already penalizes the ROM shortfall
+// separately (see scoreEngine.ts), so it would be double-penalized for the
+// same root cause. shoulderAngle (the secondary angle, used to detect "a
+// different joint compensating") is still compared as raw absolute degrees,
+// deliberately NOT normalized — the real magnitude of that deviation is the
+// signal that needs to be caught, and normalizing it here would shrink an
+// obvious compensation down to its own sequence's range instead of letting it
+// stand out.
+function featureDistance(
+  a: FrameFeature,
+  aRange: PrimaryAngleRange,
+  b: FrameFeature,
+  bRange: PrimaryAngleRange
+): number {
+  const aElbowNorm = ((a.elbowAngle - aRange.min) / aRange.range) * 100;
+  const bElbowNorm = ((b.elbowAngle - bRange.min) / bRange.range) * 100;
+  const dElbow = aElbowNorm - bElbowNorm;
   const dShoulder = a.shoulderAngle - b.shoulderAngle;
   return Math.hypot(dElbow, dShoulder);
 }
@@ -18,6 +58,8 @@ export class DynamicTimeWarping {
   private n: number;
   private m: number;
   private matrix: Float64Array;
+  private range1: PrimaryAngleRange;
+  private range2: PrimaryAngleRange;
 
   constructor(seq1: FrameFeature[], seq2: FrameFeature[]) {
     this.seq1 = seq1;
@@ -25,6 +67,8 @@ export class DynamicTimeWarping {
     this.n = seq1.length;
     this.m = seq2.length;
     this.matrix = new Float64Array(Math.max(1, this.n * this.m));
+    this.range1 = computePrimaryAngleRange(seq1);
+    this.range2 = computePrimaryAngleRange(seq2);
     this.computeMatrix();
   }
 
@@ -35,21 +79,25 @@ export class DynamicTimeWarping {
     this.matrix[i * this.m + j] = v;
   }
 
+  private dist(i: number, j: number): number {
+    return featureDistance(this.seq1[i], this.range1, this.seq2[j], this.range2);
+  }
+
   private computeMatrix(): void {
     const { n, m } = this;
     if (n === 0 || m === 0) return;
 
-    this.set(0, 0, featureDistance(this.seq1[0], this.seq2[0]));
+    this.set(0, 0, this.dist(0, 0));
 
     for (let i = 1; i < n; i++) {
-      this.set(i, 0, this.at(i - 1, 0) + featureDistance(this.seq1[i], this.seq2[0]));
+      this.set(i, 0, this.at(i - 1, 0) + this.dist(i, 0));
     }
     for (let j = 1; j < m; j++) {
-      this.set(0, j, this.at(0, j - 1) + featureDistance(this.seq1[0], this.seq2[j]));
+      this.set(0, j, this.at(0, j - 1) + this.dist(0, j));
     }
     for (let i = 1; i < n; i++) {
       for (let j = 1; j < m; j++) {
-        const cost = featureDistance(this.seq1[i], this.seq2[j]);
+        const cost = this.dist(i, j);
         const up = this.at(i - 1, j);
         const left = this.at(i, j - 1);
         const diag = this.at(i - 1, j - 1);
