@@ -6,7 +6,7 @@
 
 import type { PoseLandmark } from "../poseDetection";
 import { extractConfiguredAngle } from "./angleExtraction";
-import type { AngleDefinition, ExerciseFSMConfig } from "./poseScoringTypes";
+import type { AngleDefinition, ExerciseFSMConfig, PoseLandmarkTriplet, PoseVectorPair } from "./poseScoringTypes";
 
 export interface CandidateAngleDefinition {
   id: string;
@@ -14,43 +14,71 @@ export interface CandidateAngleDefinition {
   angleDefinition: AngleDefinition;
 }
 
-// Default candidate set — covers elbow flexion/extension, shoulder raise,
-// and forearm-direction (vector) movements like external rotation. Poses that
+interface MovementTypeDef {
+  id: string;
+  label: string;
+  type: "joint" | "vector";
+  left: PoseLandmarkTriplet | PoseVectorPair;
+  right: PoseLandmarkTriplet | PoseVectorPair;
+}
+
+// Movement types covered — elbow flexion/extension, shoulder raise, and
+// forearm-direction (vector) movements like external rotation. Poses that
 // need z-depth or distance features (oblique twists, scapular protraction)
 // are not covered; the calibrator then suggests the closest candidate and
 // flags low confidence.
-export const CANDIDATE_ANGLE_DEFINITIONS: CandidateAngleDefinition[] = [
+const MOVEMENT_TYPE_DEFS: MovementTypeDef[] = [
   {
-    id: "bilateral_elbow",
-    label: "Elbow flexion/extension angle (both sides)",
-    angleDefinition: { type: "joint", bilateral: true, left: { a: 11, vertex: 13, c: 15 }, right: { a: 12, vertex: 14, c: 16 } }
+    id: "elbow",
+    label: "Elbow flexion/extension angle",
+    type: "joint",
+    left: { a: 11, vertex: 13, c: 15 },
+    right: { a: 12, vertex: 14, c: 16 }
   },
   {
-    id: "bilateral_shoulder",
-    label: "Shoulder raise/abduction angle (both sides)",
-    angleDefinition: { type: "joint", bilateral: true, left: { a: 23, vertex: 11, c: 13 }, right: { a: 24, vertex: 12, c: 14 } }
+    id: "shoulder",
+    label: "Shoulder raise/abduction angle",
+    type: "joint",
+    left: { a: 23, vertex: 11, c: 13 },
+    right: { a: 24, vertex: 12, c: 14 }
   },
   {
-    id: "bilateral_forearm_vertical",
-    label: "Forearm direction vs vertical (both sides) — rotation poses",
-    angleDefinition: {
-      type: "vector",
-      bilateral: true,
-      left: { from: 13, to: 15, reference: "vertical" },
-      right: { from: 14, to: 16, reference: "vertical" }
-    }
+    id: "forearm_vertical",
+    label: "Forearm direction vs vertical — rotation poses",
+    type: "vector",
+    left: { from: 13, to: 15, reference: "vertical" },
+    right: { from: 14, to: 16, reference: "vertical" }
   },
   {
-    id: "bilateral_forearm_horizontal",
-    label: "Forearm direction vs horizontal (both sides)",
-    angleDefinition: {
-      type: "vector",
-      bilateral: true,
-      left: { from: 13, to: 15, reference: "horizontal" },
-      right: { from: 14, to: 16, reference: "horizontal" }
-    }
+    id: "forearm_horizontal",
+    label: "Forearm direction vs horizontal",
+    type: "vector",
+    left: { from: 13, to: 15, reference: "horizontal" },
+    right: { from: 14, to: 16, reference: "horizontal" }
   }
 ];
+
+function buildBilateralDef(m: MovementTypeDef): AngleDefinition {
+  return m.type === "joint"
+    ? { type: "joint", bilateral: true, left: m.left as PoseLandmarkTriplet, right: m.right as PoseLandmarkTriplet }
+    : { type: "vector", bilateral: true, left: m.left as PoseVectorPair, right: m.right as PoseVectorPair };
+}
+
+function buildSingleDef(m: MovementTypeDef, side: "left" | "right"): AngleDefinition {
+  const point = m[side];
+  return m.type === "joint"
+    ? { type: "joint", bilateral: false, single: point as PoseLandmarkTriplet }
+    : { type: "vector", bilateral: false, single: point as PoseVectorPair };
+}
+
+// Legacy bilateral-only candidate set — kept for reference/back-compat, no
+// longer used as the default for rankCandidates/calibrateFromFrames (see
+// buildLateralityAwareCandidates below).
+export const CANDIDATE_ANGLE_DEFINITIONS: CandidateAngleDefinition[] = MOVEMENT_TYPE_DEFS.map((m) => ({
+  id: `bilateral_${m.id}`,
+  label: `${m.label} (both sides)`,
+  angleDefinition: buildBilateralDef(m)
+}));
 
 export interface FrameSample {
   landmarks: PoseLandmark[];
@@ -89,9 +117,50 @@ function scoreSeries(series: number[]): { range: number; score: number } {
   return { range, score };
 }
 
+// Below this range (degrees), a side isn't considered to have moved at all —
+// guards against a resting arm's tiny tracking jitter being counted as motion
+// (same threshold as the confidence:'low' cutoff in deriveFsmConfigFromSeries
+// below, so "did it really move" reads consistently across this file).
+export const MIN_MEANINGFUL_RANGE_DEG = 8;
+
+// If the less-active side's range is below this fraction of the dominant
+// side's range, treat the clip as a single-arm exercise. 0.35 leaves room for
+// a weaker arm that still moves a little even when both arms are intended.
+export const UNILATERAL_RANGE_RATIO_THRESHOLD = 0.35;
+
+/**
+ * Checks each movement type against this clip's actual left/right range of
+ * motion and returns one appropriate candidate per movement type — a
+ * bilateral candidate when both arms moved together, or a single-sided
+ * candidate for whichever arm actually moved when the clip is unilateral.
+ */
+export function buildLateralityAwareCandidates(frames: FrameSample[]): CandidateAngleDefinition[] {
+  return MOVEMENT_TYPE_DEFS.map((m) => {
+    const leftDef = buildSingleDef(m, "left");
+    const rightDef = buildSingleDef(m, "right");
+    const leftRange = scoreSeries(computeSeries(frames, leftDef)).range;
+    const rightRange = scoreSeries(computeSeries(frames, rightDef)).range;
+    const dominantRange = Math.max(leftRange, rightRange);
+    const minorRange = Math.min(leftRange, rightRange);
+    const ratio = dominantRange > 0 ? minorRange / dominantRange : 1;
+    const isUnilateral = dominantRange >= MIN_MEANINGFUL_RANGE_DEG && ratio < UNILATERAL_RANGE_RATIO_THRESHOLD;
+
+    if (isUnilateral) {
+      const dominantIsRight = rightRange >= leftRange;
+      return {
+        id: `${m.id}_single_${dominantIsRight ? "right" : "left"}`,
+        label: `${m.label} (${dominantIsRight ? "right" : "left"} arm only)`,
+        angleDefinition: dominantIsRight ? rightDef : leftDef
+      };
+    }
+
+    return { id: `bilateral_${m.id}`, label: `${m.label} (both sides)`, angleDefinition: buildBilateralDef(m) };
+  });
+}
+
 export function rankCandidates(
   frames: FrameSample[],
-  candidates: CandidateAngleDefinition[] = CANDIDATE_ANGLE_DEFINITIONS
+  candidates: CandidateAngleDefinition[] = buildLateralityAwareCandidates(frames)
 ): ScoredCandidate[] {
   return candidates
     .map((c) => {
@@ -271,10 +340,14 @@ export interface CalibrationResult {
   rankedCandidates: { id: string; label: string; range: number; score: number }[];
 }
 
-/** Entry point: analyzes the whole demo clip (landmark frame sequence). */
+/** Entry point: analyzes the whole demo clip (landmark frame sequence). The
+ *  default candidates come from buildLateralityAwareCandidates(frames) — a
+ *  pure function of this same frame set, so it always agrees with a
+ *  rankCandidates(frames) call made from the same frames, wherever it's
+ *  called from. */
 export function calibrateFromFrames(
   frames: FrameSample[],
-  candidates: CandidateAngleDefinition[] = CANDIDATE_ANGLE_DEFINITIONS
+  candidates: CandidateAngleDefinition[] = buildLateralityAwareCandidates(frames)
 ): CalibrationResult {
   const ranked = rankCandidates(frames, candidates);
   const primaryCandidate = ranked[0];

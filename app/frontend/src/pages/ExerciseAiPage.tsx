@@ -17,13 +17,14 @@ import { useAuth } from "../store/authStore";
 import { initialsFromName } from "../utils/displayName";
 import { drawSkeleton } from "../ai/poseDetection";
 import {
-  CANDIDATE_ANGLE_DEFINITIONS,
   DEFAULT_FSM_MARGIN_SCALE,
   calibrateFromFrames,
   deriveFsmConfigFromCheckpoints,
   deriveFsmConfigFromSeries,
+  rankCandidates,
   type CalibrationResult,
-  type FrameSample
+  type FrameSample,
+  type ScoredCandidate
 } from "../ai/poseScoring/exerciseAutoCalibrator";
 import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
 import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
@@ -148,6 +149,15 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
   // reference's behavior) — separate from the post-scan preview above.
   const scanPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Full per-clip candidate list from the last scan (id + label + the actual
+  // AngleDefinition + series/range/score), populated by handleScanBaseClip.
+  // getAngleDefinitionById resolves against this instead of the static
+  // CANDIDATE_ANGLE_DEFINITIONS export, because candidates are now generated
+  // per clip (buildLateralityAwareCandidates in exerciseAutoCalibrator.ts) —
+  // a single-arm clip's candidate ids (e.g. "elbow_single_right") only exist
+  // in this per-clip list, not in the static bilateral-only array.
+  const rankedCandidatesRef = useRef<ScoredCandidate[]>([]);
+
   // Therapist-marked checkpoints: ready / active / return angles taken from
   // scrubbed frames of the base clip. When all three are marked, the FSM
   // criteria are derived from these angles directly (more accurate than
@@ -206,7 +216,7 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
   }, [token, savedExerciseName]);
 
   const getAngleDefinitionById = (id: string | null): AngleDefinition | null =>
-    id ? CANDIDATE_ANGLE_DEFINITIONS.find((c) => c.id === id)?.angleDefinition ?? null : null;
+    id ? rankedCandidatesRef.current.find((c) => c.id === id)?.angleDefinition ?? null : null;
 
   const primaryDef = getAngleDefinitionById(selectedPrimaryId) ?? calibration?.primary.angleDefinition ?? null;
   const secondaryDef = getAngleDefinitionById(selectedSecondaryId) ?? calibration?.secondary.angleDefinition ?? null;
@@ -277,6 +287,11 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
       if (frames.length < 10) {
         throw new Error("Too few trackable frames — make sure the full body is visible in the clip.");
       }
+      // Ranked once here (per-clip laterality detection depends on this clip's
+      // own frames) and kept in rankedCandidatesRef so getAngleDefinitionById
+      // can resolve every candidate id shown in Step 5, not just the primary/
+      // secondary ones calibrateFromFrames already returns full definitions for.
+      rankedCandidatesRef.current = rankCandidates(frames);
       const result = calibrateFromFrames(frames);
       setBaseFrames(frames);
       setCalibration(result);
