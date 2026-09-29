@@ -1,4 +1,4 @@
-import { patientNavItems } from "./PatientSidebar";
+import { patientNavItems, patientNavLabels } from "./PatientSidebar";
 import type { PatientNavLabel } from "./PatientSidebar";
 
 // Mobile counterpart to PatientSidebar.tsx (hidden ≥900px via `.patient-bottom-nav`'s
@@ -13,7 +13,7 @@ interface PatientBottomNavProps {
 
 export function PatientBottomNav({ activeLabel, onNavigate }: PatientBottomNavProps) {
   return (
-    <nav className="patient-bottom-nav" aria-label="Patient mobile navigation">
+    <nav className="patient-bottom-nav" aria-label="เมนูสำหรับผู้ป่วย (มือถือ)">
       {patientNavItems.map(({ icon: Icon, label }) => (
         <button
           key={label}
@@ -22,7 +22,7 @@ export function PatientBottomNav({ activeLabel, onNavigate }: PatientBottomNavPr
           onClick={() => onNavigate(label)}
         >
           <Icon size={22} />
-          <span>{label}</span>
+          <span>{patientNavLabels[label]}</span>
         </button>
       ))}
     </nav>

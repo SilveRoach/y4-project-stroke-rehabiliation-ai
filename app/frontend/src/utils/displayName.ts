@@ -21,13 +21,17 @@ export function initialsFromName(name: string): string {
 }
 
 /**
- * Time-of-day greeting for the patient pages' shared topbar ("Good morning,
- * {name}"). Originally written inline in PatientTodayPage.tsx, moved here so
- * Progress and History render the exact same header chrome as Home/Today.
+ * Time-of-day greeting for the patient pages' shared topbar ("สวัสดีตอนเช้า").
+ * Originally written inline in PatientTodayPage.tsx, moved here so Progress and
+ * History render the exact same header chrome as Home/Today.
+ *
+ * Thai, and deliberately without the trailing comma the English wording carried:
+ * the greeting sits on its own line above the name, and Thai has no equivalent of
+ * that ", <name>" pause. Call sites must therefore not append a comma either.
  */
 export function timeOfDayGreeting(): string {
   const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
+  if (hour < 12) return "สวัสดีตอนเช้า";
+  if (hour < 18) return "สวัสดีตอนบ่าย";
+  return "สวัสดีตอนเย็น";
 }

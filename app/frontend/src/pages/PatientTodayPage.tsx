@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Flame,
   Heart,
   MessageSquare,
   Play,
@@ -27,15 +26,15 @@ import { timeOfDayGreeting } from "../utils/displayName";
 
 interface PatientTodayPageProps { onLogout: () => void; onNavigate: (label: PatientNavLabel) => void; onOpenInstruction: (exercise?: PatientTodayExercise) => void; }
 
-const exerciseStatusLabel: Record<ScheduledExerciseStatus, string> = { pending: "Not started", in_progress: "In progress", completed: "Done today", skipped: "Skipped", cancelled: "Cancelled" };
+const exerciseStatusLabel: Record<ScheduledExerciseStatus, string> = { pending: "ยังไม่เริ่ม", in_progress: "กำลังฝึก", completed: "ฝึกแล้ววันนี้", skipped: "ไม่ได้ฝึก", cancelled: "ยกเลิก" };
 
-const heatmapLabels: Record<HeatmapDayStatus, string> = { completed: "Completed", in_progress: "In progress", skipped: "Skipped", pending: "Pending", cancelled: "Cancelled" };
+const heatmapLabels: Record<HeatmapDayStatus, string> = { completed: "เสร็จสิ้น", in_progress: "กำลังฝึก", skipped: "พลาด", pending: "รอดำเนินการ", cancelled: "ไม่มีการฝึก" };
 
 // Difficulty tag on the exercise metadata line — same label/class convention as
 // PatientDetailPage's difficultyLabels/difficultyBadgeClass ("medium" renders as
 // the "moderate" amber badge). Colors come from the shared .difficulty-badge
 // rules; only the compact sizing lives in the .exercise-difficulty override.
-const exerciseDifficultyLabel: Record<PatientTodayExercise["difficultyLevel"], string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
+const exerciseDifficultyLabel: Record<PatientTodayExercise["difficultyLevel"], string> = { easy: "ง่าย", medium: "ปานกลาง", hard: "ยาก" };
 const exerciseDifficultyClass: Record<PatientTodayExercise["difficultyLevel"], string> = { easy: "easy", medium: "moderate", hard: "hard" };
 
 export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: PatientTodayPageProps) {
@@ -67,12 +66,12 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
   const [selectedPlanId, setSelectedPlanId] = useState<"all" | string>("all");
 
   useEffect(() => {
-    if (!token || !user) { setLoading(false); setError("Please log in again to view your rehabilitation schedule."); return; }
+    if (!token || !user) { setLoading(false); setError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อดูตารางการฝึกฟื้นฟู"); return; }
     let cancelled = false;
     setLoading(true); setError(null);
     getPatientToday(token, user.id)
       .then((data) => { if (!cancelled) setToday(data); })
-      .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "Couldn't load your rehabilitation schedule. Please try again."); })
+      .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "โหลดตารางการฝึกฟื้นฟูไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [token, user, reloadKey]);
@@ -208,7 +207,7 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
   const monthCells = buildMonthCalendar(calendarPlan, effectiveMonthKey);
   const monthLabel = (() => {
     const [y, m] = effectiveMonthKey.split("-").map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    return new Date(y, m - 1, 1).toLocaleDateString("th-TH-u-ca-gregory", { month: "long", year: "numeric" });
   })();
   const prevMonthKey = (() => {
     const [y, m] = effectiveMonthKey.split("-").map(Number);
@@ -223,19 +222,16 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
     if (next.has(exerciseId)) next.delete(exerciseId); else next.add(exerciseId);
     return next;
   });
-  const patientName = today?.patient.displayName ?? user?.displayName ?? user?.username ?? "Patient";
+  const patientName = today?.patient.displayName ?? user?.displayName ?? user?.username ?? "ผู้ป่วย";
   const avatarInitials = today?.patient.avatarInitials ?? patientName.slice(0, 2).toUpperCase();
   const avatarUrl = useProfilePicture(token, today?.patient.profilePictureFileId ?? null);
 
   if (loading || error) return <section className="therapist-shell">
     <PatientSidebar activeLabel="Home" onNavigate={onNavigate} onLogout={onLogout} displayName={patientName} avatarInitials={avatarInitials} avatarUrl={avatarUrl} />
-    <div className="therapist-workspace"><section className="today-main-panel exercise-panel" role={error ? "alert" : "status"}><p className="pd-empty-note">{loading ? "Loading your rehabilitation schedule…" : error}</p>{error && <button className="secondary-button" onClick={() => setReloadKey((key) => key + 1)}>Try again</button>}</section></div>
+    <div className="therapist-workspace"><section className="today-main-panel exercise-panel" role={error ? "alert" : "status"}><p className="pd-empty-note">{loading ? "กำลังโหลดตารางการฝึกฟื้นฟู…" : error}</p>{error && <button className="secondary-button" onClick={() => setReloadKey((key) => key + 1)}>ลองใหม่</button>}</section></div>
     <PatientBottomNav activeLabel="Home" onNavigate={onNavigate} />
   </section>;
 
-  // Streak is per-plan; "All Plans" (or a plan with nothing pending) shows the
-  // best streak among the visible plans rather than picking one arbitrarily.
-  const streak = Math.max(0, ...visiblePlans.map((plan) => plan.today?.streak ?? 0));
   const avgScore = today?.stats.averageScore;
   const sessions = today?.stats.completedSessions ?? 0;
 
@@ -245,21 +241,20 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
       <header className="pt-topbar">
         <div className="pt-identity">
           <span className={`avatar-badge pt-avatar${avatarUrl ? " with-photo" : ""}`}>
-            {avatarUrl ? <img src={avatarUrl} alt={`${patientName}'s profile picture`} /> : avatarInitials}
+            {avatarUrl ? <img src={avatarUrl} alt={`รูปโปรไฟล์ของ ${patientName}`} /> : avatarInitials}
           </span>
-          <div><p className="pt-greeting">{timeOfDayGreeting()},</p><h1>{patientName}</h1></div>
+          <div><p className="pt-greeting">{timeOfDayGreeting()}</p><h1>{patientName}</h1></div>
         </div>
-        <span className="streak-pill"><Flame size={15} /> {streak}-day streak</span>
       </header>
       <div className="today-grid">
         <div className="pt-hero-block">
           <section className="today-main-panel hero-progress-card">
             <div className="pt-hero-left">
               <ProgressRing value={completionPercent} label={`${completionPercent}%`} size={46} />
-              <div className="pt-hero-copy"><strong>{completedCount}/{totalCount} Done</strong><span>Today's rehab session</span></div>
+              <div className="pt-hero-copy"><strong>เสร็จแล้ว {completedCount}/{totalCount}</strong><span>การฝึกฟื้นฟูวันนี้</span></div>
             </div>
             <button className="primary-button pt-continue-btn" onClick={() => onOpenInstruction(nextExercise)} disabled={!nextExercise}>
-              {nextExercise ? "Continue" : totalCount > 0 ? "Complete" : "No exercises"} <Play size={13} fill="currentColor" />
+              {nextExercise ? "ทำต่อ" : totalCount > 0 ? "เสร็จสิ้น" : "ไม่มีการฝึก"} <Play size={13} fill="currentColor" />
             </button>
           </section>
           <div className="linear-progress" aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></div>
@@ -267,7 +262,7 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
 
         <section className="summary-card pt-calendar-card">
           {calendarView === "week" ? <>
-            <div className="week-strip-heading"><p className="eyebrow">Upcoming</p><button type="button" className="text-action" onClick={() => setCalendarView("month")}>View month</button></div>
+            <div className="week-strip-heading"><p className="eyebrow">กำลังจะถึง</p><button type="button" className="text-action" onClick={() => setCalendarView("month")}>ดูรายเดือน</button></div>
             <div className="week-strip" ref={weekStripRef} onScroll={handleStripScroll}>{stripCells.map((cell) => {
               const isCentered = cell.iso === centeredIso;
               return <button
@@ -283,11 +278,11 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
               </button>;
             })}</div>
             <div className="pd-legend week-strip-legend">
-              <span><span className="pd-legend-dot status-completed" />Completed</span>
-              <span><span className="pd-legend-dot status-in_progress" />In progress</span>
-              <span><span className="pd-legend-dot status-missing" />Missed</span>
-              <span><span className="pd-legend-dot status-pending" />Pending</span>
-              <span><span className="pd-legend-dot status-none" />No exercise</span>
+              <span><span className="pd-legend-dot status-completed" />เสร็จสิ้น</span>
+              <span><span className="pd-legend-dot status-in_progress" />กำลังฝึก</span>
+              <span><span className="pd-legend-dot status-missing" />พลาด</span>
+              <span><span className="pd-legend-dot status-pending" />รอดำเนินการ</span>
+              <span><span className="pd-legend-dot status-none" />ไม่มีการฝึก</span>
             </div>
           </> : <>
             <div className="pd-calendar-header">
@@ -296,7 +291,7 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
                 className="icon-button pd-calendar-nav"
                 onClick={() => setViewMonthKey(prevMonthKey)}
                 disabled={prevMonthKey < monthRange.min}
-                aria-label="Previous month"
+                aria-label="เดือนก่อนหน้า"
               >
                 <ChevronLeft size={14} />
               </button>
@@ -306,12 +301,12 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
                 className="icon-button pd-calendar-nav"
                 onClick={() => setViewMonthKey(nextMonthKey)}
                 disabled={nextMonthKey > monthRange.max}
-                aria-label="Next month"
+                aria-label="เดือนถัดไป"
               >
                 <ChevronRight size={14} />
               </button>
             </div>
-            <div className="pd-calendar-weekdays">{["S", "M", "T", "W", "T", "F", "S"].map((day, index) => <span key={index}>{day}</span>)}</div>
+            <div className="pd-calendar-weekdays">{["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."].map((day, index) => <span key={index}>{day}</span>)}</div>
             <div className="pd-calendar-grid">
               {monthCells.map((cell) => {
                 const hasPlanDay = cell.dayIndex !== null && cell.status !== null;
@@ -330,10 +325,10 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
                     className={className}
                     title={
                       hasPlanDay
-                        ? `${cell.iso} · ${heatmapLabels[cell.status!]}${cell.otherMonth ? " (next/prev month)" : ""}`
+                        ? `${cell.iso} · ${heatmapLabels[cell.status!]}${cell.otherMonth ? " (เดือนก่อนหน้า/ถัดไป)" : ""}`
                         : cell.otherMonth
                           ? undefined
-                          : `${cell.iso}${cell.outside ? " · No session scheduled" : ""}`
+                          : `${cell.iso}${cell.outside ? " · ไม่มีตารางฝึก" : ""}`
                     }
                     onClick={() => cell.dayIndex !== null && setSelectedDayIndex(cell.dayIndex)}
                   >
@@ -354,15 +349,15 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
               ))}
               <span>
                 <span className="pd-legend-dot status-none" />
-                No exercise
+                ไม่มีการฝึก
               </span>
             </div>
-            <button type="button" className="text-action" onClick={() => setCalendarView("week")}>Back to week</button>
+            <button type="button" className="text-action" onClick={() => setCalendarView("week")}>กลับไปมุมมองรายสัปดาห์</button>
           </>}
         </section>
 
         <section className="today-main-panel exercise-panel">
-          <div className="pt-exercises-heading"><h2>Today's Exercises</h2><span className="pt-count-badge">{totalCount}</span></div>
+          <div className="pt-exercises-heading"><h2>ท่าฝึกวันนี้</h2><span className="pt-count-badge">{totalCount}</span></div>
           {activePlans.length > 1 && (
             // Same dropdown switcher as the Progress page's (pp-plan-switcher):
             // a single full-width select instead of the old chip row that could
@@ -372,9 +367,9 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
               className="pp-plan-switcher"
               value={selectedPlanId}
               onChange={(event) => setSelectedPlanId(event.target.value)}
-              aria-label="Select rehabilitation plan"
+              aria-label="เลือกแผนการฟื้นฟู"
             >
-              <option value="all">All Plans</option>
+              <option value="all">ทุกแผน</option>
               {activePlans.map((plan) => (
                 <option key={plan.id} value={plan.id}>
                   {plan.name}
@@ -382,7 +377,7 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
               ))}
             </select>
           )}
-          {allPlans.length === 0 ? <p className="pd-empty-note">You have no active or available schedule.</p> : totalCount === 0 ? <p className="pd-empty-note">No exercises are scheduled for this program day.</p> : <div className="exercise-list" aria-label="Today's exercises">{exerciseGroups.map((group) => <Fragment key={group.planId}>
+          {allPlans.length === 0 ? <p className="pd-empty-note">คุณยังไม่มีแผนการฟื้นฟูที่ใช้งานอยู่</p> : totalCount === 0 ? <p className="pd-empty-note">ไม่มีการฝึกในวันที่กำหนดของแผนนี้</p> : <div className="exercise-list" aria-label="ท่าฝึกวันนี้">{exerciseGroups.map((group) => <Fragment key={group.planId}>
             {showGroupLabels && <p className="pt-exercise-group-label">{group.planName}</p>}
             {group.exercises.map((exercise) => {
               const Icon = trackingIcon[exercise.movementTracking];
@@ -400,7 +395,7 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
                       className="exercise-note-icon-btn"
                       role="button"
                       tabIndex={0}
-                      aria-label={noteExpanded ? "Hide therapist note" : "Show therapist note"}
+                      aria-label={noteExpanded ? "ซ่อนคำแนะนำนักกายภาพบำบัด" : "แสดงคำแนะนำนักกายภาพบำบัด"}
                       onClick={(event) => { event.stopPropagation(); toggleNote(exercise.id); }}
                       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.stopPropagation(); event.preventDefault(); toggleNote(exercise.id); } }}
                     ><MessageSquare size={13} /></span>}
@@ -433,11 +428,11 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
         <div className="pt-stats-grid">
           <div className="summary-card pt-stat-card">
             <span className="pt-stat-icon avg"><Heart size={18} /></span>
-            <div className="pt-stat-body"><span className="pt-stat-label">Avg Score</span><strong>{avgScore ?? "—"}{avgScore !== null && avgScore !== undefined ? "%" : ""} <TrendingUp size={14} className="pt-stat-trend" /></strong></div>
+            <div className="pt-stat-body"><span className="pt-stat-label">คะแนนเฉลี่ย</span><strong>{avgScore ?? "—"}{avgScore !== null && avgScore !== undefined ? "%" : ""} <TrendingUp size={14} className="pt-stat-trend" /></strong></div>
           </div>
           <div className="summary-card pt-stat-card">
             <span className="pt-stat-icon sessions"><CalendarCheck size={18} /></span>
-            <div className="pt-stat-body"><span className="pt-stat-label">Sessions</span><strong>{sessions} <small>this mo.</small></strong></div>
+            <div className="pt-stat-body"><span className="pt-stat-label">จำนวนครั้งที่ฝึก</span><strong>{sessions} <small>เดือนนี้</small></strong></div>
           </div>
         </div>
       </div>

@@ -9,7 +9,6 @@ import type { RecordingResult } from "./hooks/useSessionRecording";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
 import { AdminUserManagementPage } from "./pages/AdminUserManagementPage";
-import { ExerciseCreationPage } from "./pages/ExerciseCreationPage";
 import { ExerciseAiPage } from "./pages/ExerciseAiPage";
 import { ExerciseLibraryPage } from "./pages/ExerciseLibraryPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -59,7 +58,6 @@ type View =
   | "therapist-dashboard"
   | "therapist-patients"
   | "therapist-library"
-  | "exercise-creation"
   | "exercise-ai"
   | "therapist-sessions"
   | "therapist-settings"
@@ -307,7 +305,7 @@ function AppShell() {
       setSelectedExercise(exercise);
       setCreationName(exercise.name);
       setCreationTracking(exercise.movementTracking);
-      setView("exercise-creation");
+      setView("exercise-ai");
     } catch {
       window.alert("Could not load exercise details.");
     }
@@ -445,19 +443,19 @@ function AppShell() {
             setSelectedExercise(null);
             setCreationName(name);
             setCreationTracking(tracking);
-            setView("exercise-creation");
+            setView("exercise-ai");
           }}
           onSelectExercise={(exercise) => {
             setSelectedExercise(exercise);
             setCreationName(exercise.name);
             setCreationTracking(exercise.movementTracking);
             setExerciseCreationReturn("therapist-library");
-            setView("exercise-creation");
+            setView("exercise-ai");
           }}
         />
       )}
-      {view === "exercise-creation" && (
-        <ExerciseCreationPage
+      {view === "exercise-ai" && (
+        <ExerciseAiPage
           exercise={selectedExercise}
           initialName={creationName}
           initialTracking={creationTracking}
@@ -469,17 +467,6 @@ function AppShell() {
             setSelectedExercise(null);
             setView(exerciseCreationReturn);
           }}
-          onLogout={() => {
-            logout();
-            setView("login");
-          }}
-          onNavigate={handleTherapistNavigate}
-          onOpenAi={() => setView("exercise-ai")}
-        />
-      )}
-      {view === "exercise-ai" && (
-        <ExerciseAiPage
-          onBack={() => setView("exercise-creation")}
           onLogout={() => {
             logout();
             setView("login");
@@ -524,7 +511,7 @@ function AppShell() {
             setCreationName(exercise.name);
             setCreationTracking(exercise.movementTracking);
             setExerciseCreationReturn("patient-detail");
-            setView("exercise-creation");
+            setView("exercise-ai");
           }}
         />
       )}

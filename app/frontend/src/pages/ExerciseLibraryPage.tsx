@@ -1,4 +1,4 @@
-import { AlertTriangle, Ban, Bell, CheckCircle2, Dumbbell, Hand, Plus, Search, X } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Dumbbell, Hand, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { FilePicker } from "../components/FilePicker";
@@ -180,9 +180,6 @@ export function ExerciseLibraryPage({ onLogout, onNavigate, onCreateNew, onSelec
             <p>{loading ? "Loading…" : `${exercises.length} exercises`}</p>
           </div>
           <div className="therapist-topbar-actions">
-            <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
-              <Bell size={17} />
-            </button>
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>

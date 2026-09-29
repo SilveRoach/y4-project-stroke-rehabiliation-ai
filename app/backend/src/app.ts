@@ -27,6 +27,15 @@ export function createApp(): Express {
   const app = express();
 
   app.use(cors());
+
+  // Safety net for Postgres BIGINT columns: Prisma surfaces them as JS bigints
+  // (e.g. files.file_size) and JSON.stringify throws "Do not know how to
+  // serialize a BigInt", which 500s the whole request. Services convert file
+  // rows explicitly (files/file.service.ts#toFileDto), so this only guarantees a
+  // stray bigint degrades to a JSON number instead of failing the response —
+  // it is what previously broke PatientDetailPage for any patient whose plan had
+  // an attached medical file.
+  app.set("json replacer", (_key: string, value: unknown) => (typeof value === "bigint" ? Number(value) : value));
   // Exercise-authoring payloads carry per-frame pose data for every master/
   // wrong-form take (masterSamples/wrongFormSamples in poseReference) — a
   // handful of demo clips easily exceeds express.json()'s 100kb default,

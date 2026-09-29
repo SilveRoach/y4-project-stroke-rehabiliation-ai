@@ -13,6 +13,17 @@ import type { ComponentType } from "react";
 
 export type PatientNavLabel = "Home" | "Progress" | "History" | "Settings";
 
+// `PatientNavLabel` values stay English on purpose: they are the navigation
+// contract App.tsx's handlePatientNavigate switches on, and the key both nav
+// components compare `activeLabel` against. Only the *display* text is Thai, so
+// translating the chrome can't desync a clicked button from its view.
+export const patientNavLabels: Record<PatientNavLabel, string> = {
+  Home: "หน้าแรก",
+  Progress: "ความก้าวหน้า",
+  History: "ประวัติการฝึก",
+  Settings: "ตั้งค่า"
+};
+
 export const patientNavItems: Array<{ icon: ComponentType<{ size?: number }>; label: PatientNavLabel }> = [
   { icon: Home, label: "Home" },
   { icon: ClipboardList, label: "Progress" },
@@ -38,11 +49,11 @@ export function PatientSidebar({ activeLabel, onNavigate, onLogout, displayName,
         <span className="therapist-brand-mark">R</span>
         <div>
           <strong>RehabiAI</strong>
-          <small>Patient</small>
+          <small>ผู้ป่วย</small>
         </div>
       </div>
 
-      <nav aria-label="Patient navigation" className="therapist-nav">
+      <nav aria-label="เมนูสำหรับผู้ป่วย" className="therapist-nav">
         {patientNavItems.map(({ icon: Icon, label }) => (
           <button
             key={label}
@@ -51,23 +62,23 @@ export function PatientSidebar({ activeLabel, onNavigate, onLogout, displayName,
             onClick={() => onNavigate(label)}
           >
             <Icon size={17} />
-            {label}
+            {patientNavLabels[label]}
           </button>
         ))}
       </nav>
 
       <div className="therapist-sidebar-profile">
         <span className={`avatar-badge${avatarUrl ? " with-photo" : ""}`}>
-          {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : avatarInitials}
+          {avatarUrl ? <img src={avatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : avatarInitials}
         </span>
         <div>
           <strong>{displayName}</strong>
-          <small>Patient</small>
+          <small>ผู้ป่วย</small>
         </div>
       </div>
 
       <button type="button" className="sidebar-link logout" onClick={onLogout}>
-        Log out
+        ออกจากระบบ
       </button>
     </aside>
   );

@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   Ban,
-  Bell,
   Dumbbell,
   Hand,
 } from "lucide-react";
@@ -270,9 +269,6 @@ export function ExerciseCreationPage({
             </div>
           </div>
           <div className="therapist-topbar-actions">
-            <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
-              <Bell size={17} />
-            </button>
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>

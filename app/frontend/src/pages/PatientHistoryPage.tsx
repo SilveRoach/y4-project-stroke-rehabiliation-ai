@@ -43,11 +43,20 @@ interface PatientHistoryPageProps {
 }
 
 const heatmapLabels: Record<HeatmapDayStatus, string> = {
-  completed: "Completed",
-  in_progress: "In progress",
-  skipped: "Skipped",
-  pending: "Upcoming",
-  cancelled: "Cancelled"
+  completed: "เสร็จสิ้น",
+  in_progress: "กำลังฝึก",
+  skipped: "พลาด",
+  pending: "รอดำเนินการ",
+  cancelled: "ไม่มีการฝึก"
+};
+
+// Same Thai terms the Progress page uses for a plan's own status chip.
+const planStatusLabels: Record<RehabPlanStatus, string> = {
+  draft: "แบบร่าง",
+  active: "ใช้งานอยู่",
+  paused: "พักไว้",
+  completed: "เสร็จสิ้น",
+  cancelled: "ยกเลิก"
 };
 
 const trackingIcons: Record<ExerciseTrackingType, typeof Dumbbell> = {
@@ -56,10 +65,12 @@ const trackingIcons: Record<ExerciseTrackingType, typeof Dumbbell> = {
   none: Ban
 };
 
+// Matches PatientSessionPage's live-hint wording ("กำลังติดตามร่างกาย",
+// "กำลังติดตามมือ") so the tracking vocabulary is the same across patient pages.
 const trackingLabels: Record<ExerciseTrackingType, string> = {
-  pose: "Pose tracking",
-  virtual_grip: "Virtual grip",
-  none: "No AI tracking"
+  pose: "ติดตามร่างกาย",
+  virtual_grip: "ติดตามมือ",
+  none: "ไม่ติดตามด้วย AI"
 };
 
 interface CalendarCell {
@@ -109,7 +120,7 @@ function mapServerPlansToHistory(serverPlans: any[]): HistoryPlan[] {
 
         return {
           id: ex.id,
-          name: ex.exerciseLibrary?.name ?? ex.exerciseName ?? "Exercise",
+          name: ex.exerciseLibrary?.name ?? ex.exerciseName ?? "ท่าฝึก",
           trackingType: ex.exerciseLibrary?.movementTracking ?? ex.movementTracking ?? "none",
           difficultyLevel: ex.exerciseLibrary?.difficultyLevel ?? ex.difficultyLevel,
           targetValueLabel: formatTargetValue(ex.targetValue),
@@ -213,15 +224,29 @@ function monthOfTodayOrPlanStart(plan: HistoryPlan | undefined): ViewedMonth {
 }
 
 function viewedMonthLabel(viewed: ViewedMonth): string {
-  return new Date(viewed.year, viewed.month, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  // Thai month names with a Gregorian year — see utils/patientToday.ts#viewedMonthLabel
+  // for why `th-TH-u-ca-gregory` is used instead of plain `th-TH` (Buddhist era).
+  return new Date(viewed.year, viewed.month, 1).toLocaleDateString("th-TH-u-ca-gregory", { month: "long", year: "numeric" });
+}
+
+// Thai short date with year ("22 ก.ย. 2026") for the plan range line, whose ISO
+// YYYY-MM-DD labels would otherwise sit oddly next to Thai month names.
+function thaiDateLabel(iso: string): string {
+  if (!ISO_DATE_RE.test(iso)) return iso;
+  return new Date(`${iso}T00:00:00`).toLocaleDateString("th-TH-u-ca-gregory", {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  });
 }
 
 function dayDateLabel(day: HistoryDay, index: number): string {
   if (day.dateLabel && ISO_DATE_RE.test(day.dateLabel)) {
     const date = new Date(`${day.dateLabel}T00:00:00`);
-    return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    // Thai weekday + Thai month, no year (matching utils/rehabPlan.ts#dayDateLabel).
+    return date.toLocaleDateString("th-TH", { weekday: "short", month: "short", day: "numeric" });
   }
-  return `Day ${index + 1}`;
+  return `วันที่ ${index + 1}`;
 }
 
 export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageProps) {
@@ -247,14 +272,14 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
 
   // Same fallback chain as PatientTodayPage: server name first, then whatever
   // the auth store has, then the generic label.
-  const displayName = serverPatient?.displayName ?? user?.displayName ?? user?.username ?? "Patient";
+  const displayName = serverPatient?.displayName ?? user?.displayName ?? user?.username ?? "ผู้ป่วย";
   const avatarInitials = serverPatient?.avatarInitials ?? initialsFromName(displayName);
   const avatarUrl = useProfilePicture(token, serverPatient?.profilePictureFileId ?? null);
 
   useEffect(() => {
     if (!token || !user) {
       setLoading(false);
-      setError("Please log in again to view your rehabilitation history.");
+      setError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อดูประวัติการฟื้นฟูของคุณ");
       return;
     }
 
@@ -279,7 +304,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Couldn't load your history. Please try again.");
+          setError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดประวัติการฝึกของคุณได้ กรุณาลองใหม่อีกครั้ง");
         }
       })
       .finally(() => {
@@ -291,7 +316,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
     };
   }, [token, user, reloadKey]);
 
-  // Only active or completed plans are selectable in the "Rehab plan" dropdown —
+  // Only active or completed plans are selectable in the "แผนการฟื้นฟู" dropdown —
   // draft/cancelled plans have no meaningful day-by-day history to browse.
   const selectablePlans = useMemo(
     () => plans.filter((plan) => plan.status === "active" || plan.status === "completed"),
@@ -344,17 +369,17 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>History</h1>
-            <p>Your rehab plans and day-by-day progress</p>
+            <h1>ประวัติการฝึก</h1>
+            <p>แผนการฟื้นฟูและความก้าวหน้ารายวันของคุณ</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>
-                <small>Patient</small>
+                <small>ผู้ป่วย</small>
               </div>
               <span className={`avatar-badge${avatarUrl ? " with-photo" : ""}`}>
-                {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : avatarInitials}
+                {avatarUrl ? <img src={avatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : avatarInitials}
               </span>
             </div>
           </div>
@@ -363,13 +388,13 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
         <main className="therapist-main patient-page-main">
           {loading ? (
             <div className="summary-card" role="status">
-              <p className="pd-empty-note">Loading your rehabilitation history…</p>
+              <p className="pd-empty-note">กำลังโหลดประวัติการฟื้นฟูของคุณ…</p>
             </div>
           ) : error ? (
             <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)" }}>
               <p style={{ margin: "0 0 12px", color: "var(--danger, #d33)" }}>{error}</p>
               <button type="button" className="secondary-button" onClick={() => setReloadKey((k) => k + 1)}>
-                Try again
+                ลองใหม่
               </button>
             </div>
           ) : selectedPlan ? (
@@ -379,25 +404,25 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                   <div>
                     <strong>{selectedPlan.name}</strong>
                     <p>
-                      {selectedPlan.status.charAt(0).toUpperCase() + selectedPlan.status.slice(1)} plan &middot;{" "}
-                      {selectedPlan.startDateLabel || "No start date"}
-                      {selectedPlan.endDateLabel ? ` – ${selectedPlan.endDateLabel}` : ""}
+                      {planStatusLabels[selectedPlan.status]} &middot;{" "}
+                      {selectedPlan.startDateLabel ? thaiDateLabel(selectedPlan.startDateLabel) : "ไม่ระบุวันเริ่ม"}
+                      {selectedPlan.endDateLabel ? ` – ${thaiDateLabel(selectedPlan.endDateLabel)}` : ""}
                     </p>
                   </div>
                 </div>
 
                 <div className="pp-calendar-month-nav">
-                  <button type="button" className="icon-button" onClick={() => changeMonth(-1)} aria-label="Previous month">
+                  <button type="button" className="icon-button" onClick={() => changeMonth(-1)} aria-label="เดือนก่อนหน้า">
                     <ChevronLeft size={16} />
                   </button>
                   <strong>{viewedMonthLabel(viewedMonth)}</strong>
-                  <button type="button" className="icon-button" onClick={() => changeMonth(1)} aria-label="Next month">
+                  <button type="button" className="icon-button" onClick={() => changeMonth(1)} aria-label="เดือนถัดไป">
                     <ChevronRight size={16} />
                   </button>
                 </div>
 
                 <div className="pd-calendar-weekdays">
-                  {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+                  {["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."].map((day, index) => (
                     <span key={index}>{day}</span>
                   ))}
                 </div>
@@ -414,7 +439,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                         cell.status
                           ? heatmapLabels[cell.status]
                           : cell.dateNumber !== null
-                            ? "No plan scheduled"
+                            ? "ไม่มีแผนในวันนี้"
                             : undefined
                       }
                       onClick={() => cell.dayIndex !== null && cell.status && handleSelectDay(cell.dayIndex, cell.status)}
@@ -432,7 +457,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                   ))}
                   <span>
                     <span className="pd-legend-dot no_plan" />
-                    No plan
+                    ไม่มีแผน
                   </span>
                 </div>
               </div>
@@ -445,12 +470,12 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                       <p>{heatmapLabels[selectedDay.status]}</p>
                     </div>
                     <button type="button" className="text-action" onClick={() => setSelectedDayIndex(null)}>
-                      <ArrowLeft size={13} /> Back to day-by-day
+                      <ArrowLeft size={13} /> กลับไปมุมมองวันต่อวัน
                     </button>
                   </div>
 
                   {selectedDay.exercises.length === 0 ? (
-                    <p className="pd-empty-note">No exercises were recorded for this day.</p>
+                    <p className="pd-empty-note">ไม่มีการบันทึกท่าฝึกสำหรับวันนี้</p>
                   ) : (
                     <div className="pd-session-list">
                       {selectedDay.exercises.map((exercise) => {
@@ -467,10 +492,10 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                             </div>
                             <div className="pd-session-actions">
                               {exercise.score !== undefined ? (
-                                <span className="pd-session-score">Score {exercise.score}</span>
+                                <span className="pd-session-score">คะแนน {exercise.score}</span>
                               ) : (
                                 <span className="pd-session-skipped">
-                                  {exercise.status === "completed" ? "Completed" : "Not scored"}
+                                  {exercise.status === "completed" ? "เสร็จสิ้น" : "ยังไม่มีคะแนน"}
                                 </span>
                               )}
                             </div>
@@ -484,14 +509,14 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                 <div className="summary-card pp-history-panel">
                   <div className="therapist-chart-heading">
                     <div>
-                      <strong>Day by day</strong>
-                      <p>{selectedPlan.days.length} days in this plan</p>
+                      <strong>วันต่อวัน</strong>
+                      <p>{selectedPlan.days.length} วันในแผนนี้</p>
                     </div>
                   </div>
 
                   {plans.length > 1 && (
                     <label className="pp-plan-select" style={{ marginBottom: 16 }}>
-                      Rehab plan
+                      แผนการฟื้นฟู
                       <select
                         className="admin-role-select"
                         value={selectedPlan.id}
@@ -499,7 +524,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                       >
                         {plans.map((plan) => (
                           <option key={plan.id} value={plan.id}>
-                            {plan.name} ({plan.status})
+                            {plan.name} ({planStatusLabels[plan.status]})
                           </option>
                         ))}
                       </select>
@@ -508,7 +533,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
 
                   <div className="pd-session-list">
                     {selectedPlan.days.length === 0 ? (
-                      <p className="pd-empty-note">No schedule days have been created for this plan yet.</p>
+                      <p className="pd-empty-note">ยังไม่มีวันที่กำหนดสำหรับแผนนี้</p>
                     ) : (
                       selectedPlan.days.map((day, index) => {
                         const scoredExercises = day.exercises.filter((ex) => ex.score !== undefined);
@@ -527,15 +552,15 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                               <strong>{dayDateLabel(day, index)}</strong>
                               <small>
                                 {day.exercises.length > 0
-                                  ? `${day.exercises.length} exercise${day.exercises.length === 1 ? "" : "s"}`
-                                  : "No exercises"}
+                                  ? `${day.exercises.length} ท่าฝึก`
+                                  : "ไม่มีท่าฝึก"}
                               </small>
                             </div>
                             <div className="pd-session-actions">
                               {day.status === "skipped" ? (
-                                <span className="pd-session-skipped">Skipped</span>
+                                <span className="pd-session-skipped">พลาด</span>
                               ) : avgScore !== null ? (
-                                <span className="pd-session-score">Avg {avgScore}</span>
+                                <span className="pd-session-score">เฉลี่ย {avgScore}</span>
                               ) : null}
                               <span
                                 className={`badge-pill ${
@@ -555,7 +580,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
             </div>
           ) : (
             <div className="summary-card">
-              <p className="pd-empty-note">You have no rehabilitation plans yet.</p>
+              <p className="pd-empty-note">คุณยังไม่มีแผนการฟื้นฟู</p>
             </div>
           )}
         </main>

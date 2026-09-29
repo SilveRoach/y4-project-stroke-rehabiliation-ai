@@ -21,7 +21,11 @@ function inferFileType(mimeType: string | undefined): FilesType {
   return match?.[0] ?? FilesType.other;
 }
 
-function toFileDto(file: {
+// `files.file_size` is a Postgres BIGINT, so Prisma hands it back as a JS bigint
+// and JSON.stringify throws "Do not know how to serialize a BigInt" on it. Every
+// response that carries a file row must pass it through this mapper (exported for
+// other modules that nest `file` relations — see rehabilitation-plans/rehab.service.ts).
+export function toFileDto(file: {
   id: string;
   fileType: FilesType;
   originalName: string;

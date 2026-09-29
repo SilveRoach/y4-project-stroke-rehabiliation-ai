@@ -1,4 +1,4 @@
-import { Award, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Flame, TrendingUp } from "lucide-react";
+import { Award, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
@@ -9,8 +9,8 @@ import { useAuth } from "../store/authStore";
 import { initialsFromName, timeOfDayGreeting } from "../utils/displayName";
 import { trackingIcon } from "./ProgramEditorPage";
 import { ProgressRing } from "./PatientTodayPage";
-import { buildMonthCalendar, calendarPeriodLabel, planMonthRange } from "./PatientDetailPage";
-import { computeStreak, currentDayIndex, dayDateLabel, ISO_DATE_RE } from "../utils/rehabPlan";
+import { buildMonthCalendar, planMonthRange } from "./PatientDetailPage";
+import { currentDayIndex, dayDateLabel, ISO_DATE_RE } from "../utils/rehabPlan";
 import type {
   HeatmapDayStatus,
   PatientRehabPlan,
@@ -24,7 +24,7 @@ import { formatTargetValue as sharedFormatTargetValue } from "../utils/targetVal
 // Fetches live rehabilitation plans, schedule days, and performance results
 // for the authenticated patient via GET /api/v1/patients/:patientId/plans.
 // Calculates real completion rate, average score from recorded attempts,
-// current streak, and day-by-day calendar heatmap.
+// and a day-by-day calendar heatmap. All patient-facing copy is Thai.
 
 interface PatientProgressPageProps {
   onLogout: () => void;
@@ -32,27 +32,27 @@ interface PatientProgressPageProps {
 }
 
 const heatmapLabels: Record<HeatmapDayStatus, string> = {
-  completed: "Completed",
-  in_progress: "In progress",
-  skipped: "Skipped",
-  pending: "Upcoming",
-  cancelled: "Cancelled"
+  completed: "เสร็จสิ้น",
+  in_progress: "กำลังฝึก",
+  skipped: "พลาด",
+  pending: "รอดำเนินการ",
+  cancelled: "ไม่มีการฝึก"
 };
 
 const planStatusLabels: Record<RehabPlanStatus, string> = {
-  draft: "Draft",
-  active: "Active",
-  paused: "Paused",
-  completed: "Completed",
-  cancelled: "Cancelled"
+  draft: "แบบร่าง",
+  active: "ใช้งานอยู่",
+  paused: "พักไว้",
+  completed: "เสร็จสิ้น",
+  cancelled: "ยกเลิก"
 };
 
 const exerciseStatusLabels: Record<ScheduledExerciseStatus, string> = {
-  pending: "Pending",
-  in_progress: "In progress",
-  completed: "Completed",
-  skipped: "Skipped",
-  cancelled: "Cancelled"
+  pending: "ยังไม่เริ่ม",
+  in_progress: "กำลังฝึก",
+  completed: "ฝึกแล้ว",
+  skipped: "ไม่ได้ฝึก",
+  cancelled: "ยกเลิก"
 };
 
 const exerciseStatusBadgeClass: Record<ScheduledExerciseStatus, string> = {
@@ -67,6 +67,22 @@ const exerciseStatusBadgeClass: Record<ScheduledExerciseStatus, string> = {
 // target value (which Prisma returns as a JS object/array/primitive/null) into
 // a human-readable string. Without this, JSON objects produce "[object Object]".
 const formatTargetValue = sharedFormatTargetValue;
+
+// Thai plan-period label for the calendar footnote (e.g. "กันยายน – ตุลาคม 2026",
+// or "14 วัน" for a plan with no date anchor). PatientDetailPage's own
+// calendarPeriodLabel() is left as-is because the therapist-facing Schedule card
+// still uses it in English — this page is Thai, so it formats its own.
+function thaiPeriodLabel(plan: PatientRehabPlan): string {
+  const monthYear = (date: Date): string =>
+    date.toLocaleDateString("th-TH-u-ca-gregory", { month: "long", year: "numeric" });
+  if (!ISO_DATE_RE.test(plan.startDateLabel)) return `${plan.heatmap.length} วัน`;
+  const start = new Date(`${plan.startDateLabel}T00:00:00`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + plan.heatmap.length - 1);
+  const startLabel = monthYear(start);
+  const endLabel = monthYear(end);
+  return startLabel === endLabel ? startLabel : `${startLabel} – ${endLabel}`;
+}
 
 function mapServerPlans(serverPlans: any[]): PatientRehabPlan[] {
   return serverPlans.map((sp: any) => {
@@ -153,14 +169,14 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
 
   // Same fallback chain as PatientTodayPage: server name first, then whatever
   // the auth store has, then the generic label.
-  const displayName = serverPatient?.displayName ?? user?.displayName ?? user?.username ?? "Patient";
+  const displayName = serverPatient?.displayName ?? user?.displayName ?? user?.username ?? "ผู้ป่วย";
   const avatarInitials = serverPatient?.avatarInitials ?? initialsFromName(displayName);
   const avatarUrl = useProfilePicture(token, serverPatient?.profilePictureFileId ?? null);
 
   useEffect(() => {
     if (!token || !user) {
       setLoading(false);
-      setError("Please log in again to view your progress.");
+      setError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อดูความก้าวหน้า");
       return;
     }
 
@@ -178,7 +194,7 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Couldn't load your progress. Please try again.");
+          setError(err instanceof ApiError ? err.message : "โหลดข้อมูลความก้าวหน้าไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
         }
       })
       .finally(() => {
@@ -206,13 +222,6 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
       ? plans
       : plans.filter((plan) => plan.id === selectedPlanId);
 
-  // Streak pill shows the best streak among the visible plans (same
-  // convention as PatientTodayPage's "All Plans" view).
-  const streak = visiblePlans.reduce(
-    (best, plan) => Math.max(best, computeStreak(plan.days, currentDayIndex(plan.days))),
-    0
-  );
-
   return (
     <section className="therapist-shell">
       <PatientSidebar
@@ -226,24 +235,21 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
 
       <div className="therapist-workspace">
         {/* Compact mobile-friendly header, reusing PatientTodayPage's pt-topbar
-            chrome (avatar + greeting + streak pill) instead of the wide
-            therapist-topbar whose two-column profile block wastes phone space. */}
+            chrome (avatar + greeting) instead of the wide therapist-topbar whose
+            two-column profile block wastes phone space. */}
         <header className="pt-topbar">
           <div className="pt-identity">
             <span className={`avatar-badge pt-avatar${avatarUrl ? " with-photo" : ""}`}>
-              {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : avatarInitials}
+              {avatarUrl ? <img src={avatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : avatarInitials}
             </span>
-            <div><p className="pt-greeting">{timeOfDayGreeting()},</p><h1>{displayName}</h1></div>
+            <div><p className="pt-greeting">{timeOfDayGreeting()}</p><h1>{displayName}</h1></div>
           </div>
-          {visiblePlans.length > 0 && (
-            <span className="streak-pill"><Flame size={15} /> {streak}-day streak</span>
-          )}
         </header>
 
         <main className="therapist-main patient-page-main">
           {loading ? (
             <div className="summary-card">
-              <p className="pd-empty-note">Loading your progress…</p>
+              <p className="pd-empty-note">กำลังโหลดข้อมูลความก้าวหน้า…</p>
             </div>
           ) : error ? (
             <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)" }}>
@@ -254,12 +260,12 @@ export function PatientProgressPage({ onLogout, onNavigate }: PatientProgressPag
                 style={{ marginTop: 12 }}
                 onClick={() => setReloadKey((k) => k + 1)}
               >
-                Try again
+                ลองใหม่
               </button>
             </div>
           ) : visiblePlans.length === 0 ? (
             <div className="summary-card">
-              <p className="pd-empty-note">No active rehab plan right now &mdash; check History for past plans.</p>
+              <p className="pd-empty-note">ยังไม่มีแผนการฟื้นฟูที่ใช้งานอยู่ — ดูประวัติการฝึกสำหรับแผนที่ผ่านมา</p>
             </div>
           ) : (
             <PlanProgress
@@ -321,9 +327,9 @@ function PlanProgress({
           className="pp-plan-switcher"
           value={selectedPlanId}
           onChange={(event) => onSelectPlan(event.target.value)}
-          aria-label="Select rehabilitation plan"
+          aria-label="เลือกแผนการฟื้นฟู"
         >
-          <option value="all">All Plans</option>
+          <option value="all">ทุกแผน</option>
           {allPlans.map((candidate) => (
             <option key={candidate.id} value={candidate.id}>
               {candidate.name}
@@ -340,12 +346,12 @@ function PlanProgress({
           <div className="pt-hero-left">
             <ProgressRing value={completionPercent} label={`${completionPercent}%`} size={46} />
             <div className="pt-hero-copy">
-              <strong>{totalCompletedDays}/{totalDays} Days done</strong>
-              <span>{showAll ? `${plans.length} active plan${plans.length === 1 ? "" : "s"}` : plans[0].name}</span>
+              <strong>เสร็จแล้ว {totalCompletedDays}/{totalDays} วัน</strong>
+              <span>{showAll ? `${plans.length} แผนที่ใช้งานอยู่` : plans[0].name}</span>
             </div>
           </div>
           {showAll ? (
-            <span className="badge-pill good">All Plans</span>
+            <span className="badge-pill good">ทุกแผน</span>
           ) : (
             plans[0] && <span className={`pd-program-status ${plans[0].status}`}>{planStatusLabels[plans[0].status]}</span>
           )}
@@ -363,7 +369,7 @@ function PlanProgress({
         <div className="pp-summary-stat">
           <span className="pt-stat-icon avg"><Award size={18} /></span>
           <div className="pt-stat-body">
-            <span className="pt-stat-label">Avg Score</span>
+            <span className="pt-stat-label">คะแนนเฉลี่ย</span>
             <strong>
               {averageScore !== null ? averageScore : "—"}{averageScore !== null ? "%" : ""}{" "}
               <TrendingUp size={14} className="pt-stat-trend" />
@@ -373,9 +379,9 @@ function PlanProgress({
         <div className="pp-summary-stat">
           <span className="pt-stat-icon plan"><CalendarDays size={18} /></span>
           <div className="pt-stat-body">
-            <span className="pt-stat-label">Completed Days</span>
+            <span className="pt-stat-label">วันที่ฝึกสำเร็จ</span>
             <strong>
-              {totalCompletedDays} <small>of {totalDays}</small>
+              {totalCompletedDays} <small>จาก {totalDays}</small>
             </strong>
           </div>
         </div>
@@ -443,7 +449,7 @@ function mergePlansForAllView(plans: PatientRehabPlan[]): PatientRehabPlan {
     const dates = plans.flatMap((plan) => plan.days.map((day) => day.dateLabel!)).sort();
     return {
       id: "all",
-      name: "All Plans",
+      name: "ทุกแผน",
       status: "active",
       startDateLabel: dates[0] ?? plans[0].startDateLabel,
       endDateLabel: dateKeys[dateKeys.length - 1],
@@ -476,7 +482,7 @@ function mergePlansForAllView(plans: PatientRehabPlan[]): PatientRehabPlan {
   const startCandidates = plans.map((plan) => plan.startDateLabel).filter((label) => ISO_DATE_RE.test(label)).sort();
   return {
     id: "all",
-    name: "All Plans",
+    name: "ทุกแผน",
     status: "active",
     startDateLabel: startCandidates[0] ?? plans[0]?.startDateLabel ?? "",
     heatmap: days.map((day) => day.status),
@@ -527,7 +533,7 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
   );
   const monthLabel = (() => {
     const [y, m] = effectiveMonthKey.split("-").map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    return new Date(y, m - 1, 1).toLocaleDateString("th-TH-u-ca-gregory", { month: "long", year: "numeric" });
   })();
   const prevMonthKey = (() => {
     const [y, m] = effectiveMonthKey.split("-").map(Number);
@@ -562,7 +568,7 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
             type="button"
             className="icon-button pd-calendar-nav"
             onClick={() => setViewMonthKey(prevMonthKey)}
-            aria-label="Previous month"
+            aria-label="เดือนก่อนหน้า"
           >
             <ChevronLeft size={14} />
           </button>
@@ -571,13 +577,13 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
             type="button"
             className="icon-button pd-calendar-nav"
             onClick={() => setViewMonthKey(nextMonthKey)}
-            aria-label="Next month"
+            aria-label="เดือนถัดไป"
           >
             <ChevronRight size={14} />
           </button>
         </div>
         <div className="pd-calendar-weekdays">
-          {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+          {["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."].map((day, index) => (
             <span key={index}>{day}</span>
           ))}
         </div>
@@ -603,10 +609,10 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
                 className={className}
                 title={
                   hasPlanDay
-                    ? `${cell.iso} · ${heatmapLabels[cell.status!]}${cell.otherMonth ? " (next/prev month)" : ""}`
+                    ? `${cell.iso} · ${heatmapLabels[cell.status!]}${cell.otherMonth ? " (เดือนก่อนหน้า/ถัดไป)" : ""}`
                     : cell.otherMonth
                       ? undefined
-                      : `${cell.iso}${cell.outside ? " · No session scheduled" : ""}`
+                      : `${cell.iso}${cell.outside ? " · ไม่มีตารางฝึก" : ""}`
                 }
                 onClick={() => cell.dayIndex !== null && setSelectedDayIndex(cell.dayIndex)}
               >
@@ -624,12 +630,12 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
           ))}
         </div>
         <p className="pp-calendar-footnote">
-          {calendarPeriodLabel(plan)} &middot; Day {todayIndex + 1} of {plan.days.length}
+          {thaiPeriodLabel(plan)} &middot; วันที่ {todayIndex + 1} จาก {plan.days.length}
           {selectedDayIndex !== null && (
             <>
               {" "}
               <button type="button" className="text-action" onClick={() => setSelectedDayIndex(null)}>
-                Back to today
+                กลับไปวันนี้
               </button>
             </>
           )}
@@ -638,17 +644,17 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
 
       <div className="summary-card">
         <p className="eyebrow">
-          {dayDateLabel(plan, viewIndex)}&apos;s exercises
-          {viewIndex === todayIndex && <span className="next-pill">Today</span>}
+          ท่าบริหารของ {dayDateLabel(plan, viewIndex)}
+          {viewIndex === todayIndex && <span className="next-pill">วันนี้</span>}
         </p>
         {viewDay.exercises.length === 0 ? (
-          <p className="pd-empty-note">No exercises assigned for this day.</p>
+          <p className="pd-empty-note">ไม่มีการฝึกที่กำหนดไว้สำหรับวันนี้</p>
         ) : (
           // Compact exercise-card list (PatientTodayPage's mobile idiom) —
           // replaces the 5-column therapist-table that required horizontal
           // scrolling on phones. Icon color follows the exercise's tracking
           // type, and the right-side status dot/badge mirrors Today's rows.
-          <div className="exercise-list" aria-label="Selected day's exercises">
+          <div className="exercise-list" aria-label="ท่าบริหารของวันที่เลือก">
             {viewDay.exercises.map((exercise) => {
               const Icon = trackingIcon[exercise.movementTracking];
               const isDone = exercise.status === "completed";
@@ -665,7 +671,7 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
                     <strong>{exercise.exerciseName}</strong>
                   </span>
                   <small>
-                    {exercise.targetValueLabel || "Free form"}
+                    {exercise.targetValueLabel || "ไม่ระบุ"}
                     {(exercise as TaggedExercise).planName
                       ? ` · ${(exercise as TaggedExercise).planName}`
                       : ""}
@@ -682,9 +688,9 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
       </div>
 
       <div className="summary-card">
-        <p className="eyebrow">Coming up</p>
+        <p className="eyebrow">กำลังจะถึง</p>
         {comingUp.length === 0 ? (
-          <p className="pd-empty-note">No upcoming days have exercises scheduled yet.</p>
+          <p className="pd-empty-note">ยังไม่มีวันถัดไปที่มีท่าบริหารกำหนดไว้</p>
         ) : (
           <div className="pd-session-list">
             {comingUp.map(({ day, index }) => (
@@ -692,7 +698,7 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
                 <div className="pp-history-row-label">
                   <strong>{dayDateLabel(plan, index)}</strong>
                   <small>
-                    {day.exercises.length} exercise{day.exercises.length === 1 ? "" : "s"} &middot;{" "}
+                    {day.exercises.length} ท่าบริหาร &middot;{" "}
                     {day.exercises.map((exercise) => exercise.exerciseName).join(", ")}
                   </small>
                 </div>
