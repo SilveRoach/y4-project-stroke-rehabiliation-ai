@@ -1,4 +1,4 @@
-import { ArrowLeft, Ban, Bell, Dumbbell, GripVertical, Hand, Plus, Save, X } from "lucide-react";
+import { ArrowLeft, Ban, Dumbbell, GripVertical, Hand, Plus, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
@@ -366,9 +366,6 @@ export function ProgramEditorPage({
             </p>
           </div>
           <div className="therapist-topbar-actions">
-            <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
-              <Bell size={17} />
-            </button>
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{therapistDisplayName}</strong>

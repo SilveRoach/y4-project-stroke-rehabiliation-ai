@@ -30,6 +30,37 @@ const planIncludeWithDaysAndExercises = {
   }
 };
 
+// `rehabilitation_plan_attachments.file` (and `files` generally) carry a BIGINT
+// `file_size`, which Prisma returns as a JS bigint. Express's res.json() →
+// JSON.stringify throws `TypeError: Do not know how to serialize a BigInt` on
+// those, which 500'd every plan/attachment response for a patient that has at
+// least one attached medical file (GET /patients/:id/plans,
+// GET /patients/:id/attachments, GET /plans/:planId, and the plan create/patch
+// responses the PatientDetailPage re-reads). Convert at the service boundary via
+// the files module's own DTO mapper, which is the conversion rule already used
+// for GET /files/:fileId.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function serializeAttachment<T extends { file?: any }>(attachment: T): T {
+  if (!attachment) return attachment;
+  return {
+    ...attachment,
+    file: attachment.file ? fileService.toFileDto(attachment.file) : attachment.file
+  };
+}
+
+// Any plan shape built with `planIncludeWithDaysAndExercises` nests
+// attachments[].file — run it through the same conversion so every caller
+// (controllers returning plans, and PatientDetailPage's mapServerPlans) receives
+// a JSON-serializable payload.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function serializePlan<T extends { attachments?: any[] }>(plan: T): T {
+  if (!plan) return plan;
+  return {
+    ...plan,
+    attachments: (plan.attachments ?? []).map((attachment) => serializeAttachment(attachment))
+  };
+}
+
 export async function getPatientPlans(
   patientId: string,
   actorId: string,
@@ -74,7 +105,8 @@ export async function getPatientPlans(
   });
 
   return {
-    plans,
+    // Attachments nest a file row: convert BIGINT file_size before res.json() — see serializePlan.
+    plans: plans.map((plan) => serializePlan(plan)),
     patient: {
       displayName: patientName,
       avatarInitials: initialsFromName(patientName),
@@ -201,7 +233,7 @@ export async function createPlan(
       include: planIncludeWithDaysAndExercises
     });
 
-    return full;
+    return full ? serializePlan(full) : full;
   });
 
   return created;
@@ -213,7 +245,7 @@ export async function getPlanById(planId: string) {
     include: planIncludeWithDaysAndExercises
   });
   if (!plan) throw new NotFoundError("Plan not found.");
-  return plan;
+  return serializePlan(plan);
 }
 
 export async function updatePlanMetadata(
@@ -272,7 +304,7 @@ export async function updatePlanMetadata(
       where: { id: planId },
       include: planIncludeWithDaysAndExercises
     });
-    return full;
+    return full ? serializePlan(full) : full;
   });
 
   return updated;
@@ -305,7 +337,7 @@ export async function updatePlanStatus(actorId: string, planId: string, status: 
     data: { status: status as any, updatedBy: actorId, updatedAt: new Date() },
     include: planIncludeWithDaysAndExercises
   });
-  return updated;
+  return serializePlan(updated);
 }
 
 // --- DELETE /schedule-days/:dayId -------------------------------------------
@@ -577,8 +609,10 @@ export async function getPatientAttachments(patientId: string) {
   });
 
   return {
-    attachments: planAttachments,
-    files: patientFiles
+    // `files` rows carry BIGINT file_size, so map both collections through the
+    // file DTO before they reach res.json().
+    attachments: planAttachments.map((attachment) => serializeAttachment(attachment)),
+    files: patientFiles.map((file) => fileService.toFileDto(file))
   };
 }
 
@@ -607,7 +641,7 @@ export async function addPlanAttachment(
     }
   });
 
-  return attachment;
+  return serializeAttachment(attachment);
 }
 
 export async function removePlanAttachment(actorId: string, planId: string, attachmentId: string) {

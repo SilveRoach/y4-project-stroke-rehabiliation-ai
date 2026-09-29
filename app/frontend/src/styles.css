@@ -488,18 +488,6 @@ input:focus {
   gap: 10px;
 }
 
-.streak-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 999px;
-  background: var(--warning-light);
-  color: var(--warning);
-  padding: 5px 10px;
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
 .today-grid {
   display: grid;
   gap: 18px;
@@ -1032,8 +1020,9 @@ input:focus {
 }
 
 /* Redesigned Home stats row (design reference) — two icon+value cards (Avg
-   Score, Sessions) instead of the old 3-up stats-strip; the streak now lives
-   solely in the header pill, so it isn't repeated down here. */
+   Score, Sessions) instead of the old 3-up stats-strip. Home shows no streak at
+   all (its header streak pill was removed), so it isn't repeated down here
+   either; the `.streak-pill` rule was dropped once Progress's own pill went too. */
 .pt-stats-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1258,7 +1247,8 @@ div.exercise-card:hover {
 .week-strip-cell small {
   font-size: 0.62rem;
   font-weight: 700;
-  text-transform: uppercase;
+  /* No `text-transform: uppercase` — Thai has no letter case, so it's a no-op at
+     best and would mangle any Latin text mixed in. */
 }
 
 .week-strip-cell strong {
@@ -2712,23 +2702,6 @@ div.exercise-card:hover {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.therapist-bell {
-  position: relative;
-  border-radius: 10px;
-}
-
-.therapist-bell::after {
-  content: "";
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--error);
-  border: 1.5px solid #ffffff;
 }
 
 .therapist-topbar-profile {
@@ -5891,7 +5864,8 @@ div.exercise-card:hover {
   font-size: 0.66rem;
   font-weight: 700;
   text-align: center;
-  text-transform: uppercase;
+  /* Thai weekday abbreviations (อา. จ. อ. …) are not uppercased — see
+     .week-strip-cell small above. */
 }
 
 .pd-calendar-grid {
@@ -9993,13 +9967,52 @@ tr.admin-user-row:hover .admin-row-open-hint {
    flow). Two-column layout like the reference project's; colors come from the
    shared CSS variables, so no new palette is introduced. --- */
 
-/* Single-column step flow: each card is one numbered step, stacked top to
-   bottom (1 → 2 → 3 …), so the therapist walks the page like a checklist. */
+/* Mixed step flow: a two-column grid where lighter cards pair up row by row
+   (Step 1 | Step 2, Step 3 | Step 4, Step 7 | Step 8) and the dense steps
+   (5, 6, 9) opt into a full-width row via .ai-card-full. Fills main's full
+   content width so the rows line up with the heading/banners above (no empty
+   strip on the right). */
 .ai-author-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-content: start;
+}
+
+/* Cards that should span both columns of the stack. */
+.ai-card-full {
+  grid-column: 1 / -1;
+}
+
+/* The grid gap provides the spacing — drop the card's own bottom margin so
+   row and column gaps match. */
+.ai-author-stack > .creation-section-card {
+  margin-bottom: 0;
+}
+
+/* Step 8 sits in a half-width column — stack its checkpoint cards instead of
+   squeezing 3 across ~450px. */
+.ai-author-stack > section:not(.ai-card-full) .ai-checkpoint-grid {
+  grid-template-columns: 1fr;
+}
+
+/* Step 1 (การตั้งค่าท่า): the card stretches to its grid row height (Step 2's
+   preview makes that row taller), so the description box — the last field —
+   flexes to absorb the leftover space instead of leaving a gap at the bottom. */
+.ai-setup-card {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  max-width: 1000px;
+}
+
+.ai-setup-card > .ai-field:last-child {
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 0; /* no stray gap below the stretched textarea */
+}
+
+.ai-setup-card > .ai-field:last-child > textarea {
+  flex: 1 1 auto;
+  min-height: 4.9em; /* never shorter than its rows={3} (~3 lines + padding) */
 }
 
 .ai-field {
@@ -10186,7 +10199,6 @@ tr.admin-user-row:hover .admin-row-open-hint {
 
 .ai-frame-preview {
   width: 100%;
-  max-width: 480px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: #0f172a;
@@ -10281,7 +10293,7 @@ tr.admin-user-row:hover .admin-row-open-hint {
 
 @media (max-width: 1100px) {
   .ai-author-stack {
-    max-width: 100%;
+    grid-template-columns: 1fr;
   }
 }
 
@@ -10305,18 +10317,6 @@ tr.admin-user-row:hover .admin-row-open-hint {
   background: var(--success-light);
   border: 1px solid #bbf7d0;
   color: #15803d;
-}
-
-.ai-banner-error {
-  background: var(--error-light);
-  border: 1px solid #fecaca;
-  color: #b91c1c;
-}
-
-.ai-banner-info {
-  background: var(--primary-light);
-  border: 1px solid #bfdbfe;
-  color: var(--primary-dark);
 }
 
 .ai-card-step-tag {
@@ -10461,3 +10461,60 @@ tr.admin-user-row:hover .admin-row-open-hint {
   min-width: 160px;
   justify-content: center;
 }
+.ai-author-stack.manual > section:nth-of-type(n + 2):not(.ai-manual-criteria-card) {
+  display: none;
+}
+
+/* Manual mode hides everything but Step 1 + the criteria card — keep them
+   full-width so the 2-column grid doesn't leave an empty cell next to Step 1. */
+.ai-author-stack.manual > section {
+  grid-column: 1 / -1;
+}
+
+.ai-manual-criteria-card {
+  display: none;
+}
+
+.ai-author-stack.manual .ai-manual-criteria-card {
+  display: grid;
+}
+
+.ai-author-stack.readonly {
+  opacity: 0.68;
+  pointer-events: none;
+}
+
+.ai-lifecycle-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 12px 14px;
+}
+
+.ai-lifecycle-bar.archived {
+  border-left-color: var(--darkgray);
+}
+
+.ai-lifecycle-bar > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.ai-lifecycle-bar span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.ai-lifecycle-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+

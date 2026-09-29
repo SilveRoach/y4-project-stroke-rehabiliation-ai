@@ -1,0 +1,134 @@
+diff --git a/app/frontend/src/styles.css b/app/frontend/src/styles.css
+index 57ebdcb..0bca4f1 100644
+--- a/app/frontend/src/styles.css
++++ b/app/frontend/src/styles.css
+@@ -488,18 +488,6 @@ input:focus {
+   gap: 10px;
+ }
+ 
+-.streak-pill {
+-  display: inline-flex;
+-  align-items: center;
+-  gap: 5px;
+-  border-radius: 999px;
+-  background: var(--warning-light);
+-  color: var(--warning);
+-  padding: 5px 10px;
+-  font-size: 0.78rem;
+-  font-weight: 800;
+-}
+-
+ .today-grid {
+   display: grid;
+   gap: 18px;
+@@ -1032,8 +1020,9 @@ input:focus {
+ }
+ 
+ /* Redesigned Home stats row (design reference) — two icon+value cards (Avg
+-   Score, Sessions) instead of the old 3-up stats-strip; the streak now lives
+-   solely in the header pill, so it isn't repeated down here. */
++   Score, Sessions) instead of the old 3-up stats-strip. Home shows no streak at
++   all (its header streak pill was removed), so it isn't repeated down here
++   either; the `.streak-pill` rule was dropped once Progress's own pill went too. */
+ .pt-stats-grid {
+   display: grid;
+   grid-template-columns: repeat(2, 1fr);
+@@ -1258,7 +1247,8 @@ div.exercise-card:hover {
+ .week-strip-cell small {
+   font-size: 0.62rem;
+   font-weight: 700;
+-  text-transform: uppercase;
++  /* No `text-transform: uppercase` — Thai has no letter case, so it's a no-op at
++     best and would mangle any Latin text mixed in. */
+ }
+ 
+ .week-strip-cell strong {
+@@ -2714,23 +2704,6 @@ div.exercise-card:hover {
+   gap: 12px;
+ }
+ 
+-.therapist-bell {
+-  position: relative;
+-  border-radius: 10px;
+-}
+-
+-.therapist-bell::after {
+-  content: "";
+-  position: absolute;
+-  top: 7px;
+-  right: 7px;
+-  width: 7px;
+-  height: 7px;
+-  border-radius: 50%;
+-  background: var(--error);
+-  border: 1.5px solid #ffffff;
+-}
+-
+ .therapist-topbar-profile {
+   display: none;
+   align-items: center;
+@@ -5891,7 +5864,8 @@ div.exercise-card:hover {
+   font-size: 0.66rem;
+   font-weight: 700;
+   text-align: center;
+-  text-transform: uppercase;
++  /* Thai weekday abbreviations (อา. จ. อ. …) are not uppercased — see
++     .week-strip-cell small above. */
+ }
+ 
+ .pd-calendar-grid {
+@@ -10461,3 +10435,54 @@ tr.admin-user-row:hover .admin-row-open-hint {
+   min-width: 160px;
+   justify-content: center;
+ }
++.ai-author-stack.manual > section:nth-of-type(n + 2):not(.ai-manual-criteria-card) {
++  display: none;
++}
++
++.ai-manual-criteria-card {
++  display: none;
++}
++
++.ai-author-stack.manual .ai-manual-criteria-card {
++  display: grid;
++}
++
++.ai-author-stack.readonly {
++  opacity: 0.68;
++  pointer-events: none;
++}
++
++.ai-lifecycle-bar {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  margin-bottom: 16px;
++  border: 1px solid var(--border);
++  border-left: 4px solid var(--primary);
++  border-radius: 12px;
++  background: var(--card);
++  padding: 12px 14px;
++}
++
++.ai-lifecycle-bar.archived {
++  border-left-color: var(--darkgray);
++}
++
++.ai-lifecycle-bar > div:first-child {
++  display: grid;
++  gap: 3px;
++}
++
++.ai-lifecycle-bar span {
++  color: var(--text-secondary);
++  font-size: 0.78rem;
++}
++
++.ai-lifecycle-actions {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++

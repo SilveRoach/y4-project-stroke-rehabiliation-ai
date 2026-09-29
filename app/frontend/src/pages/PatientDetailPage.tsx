@@ -1,7 +1,6 @@
 import {
   ArrowLeft,
   Ban,
-  Bell,
   Calendar,
   Check,
   CheckCircle2,
@@ -1133,9 +1132,6 @@ export function PatientDetailPage({
             <p>{patientCode}</p>
           </div>
           <div className="therapist-topbar-actions">
-            <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
-              <Bell size={17} />
-            </button>
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{therapistDisplayName}</strong>

@@ -1,6 +1,5 @@
 import {
   Activity,
-  Bell,
   Clock,
   Search,
   TrendingUp,
@@ -152,9 +151,6 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
             </p>
           </div>
           <div className="therapist-topbar-actions">
-            <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
-              <Bell size={17} />
-            </button>
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>

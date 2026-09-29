@@ -28,30 +28,21 @@ export function currentDayIndex(days: ScheduleDay[]): number {
   return Math.max(days.length - 1, 0);
 }
 
-// Walks ScheduleDay.status backward from today (inclusive if today is completed), counting
-// consecutive "completed" days until the streak breaks.
-export function computeStreak(days: ScheduleDay[], todayIndex: number): number {
-  let streak = 0;
-  const startIdx = days[todayIndex]?.status === "completed" ? todayIndex : todayIndex - 1;
-  for (let i = startIdx; i >= 0; i--) {
-    if (days[i]?.status !== "completed") break;
-    streak++;
-  }
-  return streak;
-}
-
+// Thai short date label ("อ. 29 ก.ย.") for the pages that show a day heading.
+// Uses the Thai locale but leaves the year out entirely, so the Buddhist-era vs
+// Gregorian question (see patientToday.ts#viewedMonthLabel) never arises here.
 export function dayDateLabel(plan: PatientRehabPlan, dayIndex: number): string {
   const day = plan.days[dayIndex];
   if (day?.dateLabel && ISO_DATE_RE.test(day.dateLabel)) {
     const date = new Date(`${day.dateLabel}T00:00:00`);
-    return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    return date.toLocaleDateString("th-TH", { weekday: "short", month: "short", day: "numeric" });
   }
   if (!ISO_DATE_RE.test(plan.startDateLabel)) {
-    return `Day ${dayIndex + 1}`;
+    return `วันที่ ${dayIndex + 1}`;
   }
   const date = new Date(`${plan.startDateLabel}T00:00:00`);
   date.setDate(date.getDate() + dayIndex);
-  return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return date.toLocaleDateString("th-TH", { weekday: "short", month: "short", day: "numeric" });
 }
 
 // ISO (yyyy-mm-dd) date a given day index in a plan falls on, or null if the plan

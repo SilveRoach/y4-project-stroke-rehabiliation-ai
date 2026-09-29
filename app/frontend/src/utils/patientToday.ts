@@ -283,8 +283,12 @@ export function buildMonthExerciseCells(exerciseDates: Set<string>, viewed: View
   return cells;
 }
 
+// Thai month name with a Gregorian (ค.ศ.) year. `th-TH` on its own would switch
+// the year to the Buddhist era ("กันยายน 2569"), disagreeing with every other
+// date in the app (ISO strings, plan start/end labels, the therapist UI), so
+// `th-TH-u-ca-gregory` keeps Thai month names with the same 2026-style year.
 export function viewedMonthLabel(viewed: ViewedMonth): string {
-  return new Date(viewed.year, viewed.month, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  return new Date(viewed.year, viewed.month, 1).toLocaleDateString("th-TH-u-ca-gregory", { month: "long", year: "numeric" });
 }
 
 // Adapter that reshapes the Today payload into the PatientRehabPlan shape the
@@ -379,7 +383,7 @@ export function buildTodayExerciseStripCells(
       key: iso,
       iso,
       dateNumber: date.getDate(),
-      weekdayLabel: date.toLocaleDateString("en-US", { weekday: "short" }),
+      weekdayLabel: date.toLocaleDateString("th-TH", { weekday: "short" }),
       status: dateStatusMap.get(iso) ?? "none",
       isToday: i === 0
     });
@@ -388,7 +392,7 @@ export function buildTodayExerciseStripCells(
 }
 
 // Defaults the calendar to the month containing the primary (first active) plan's
-// own "today" date, same anchor Home's hero/streak/exercise-list already use —
+// own "today" date, same anchor Home's hero/exercise-list already use —
 // falls back to the real current month when no active plan is date-anchored.
 export function monthOfPrimaryPlanToday(plans: PatientRehabPlan[]): ViewedMonth {
   const primary = plans.find((plan) => plan.status === "active");

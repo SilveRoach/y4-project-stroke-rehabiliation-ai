@@ -1,0 +1,307 @@
+diff --git a/app/frontend/src/pages/ExerciseAiPage.tsx b/app/frontend/src/pages/ExerciseAiPage.tsx
+index 8167b9f..17ffd62 100644
+--- a/app/frontend/src/pages/ExerciseAiPage.tsx
++++ b/app/frontend/src/pages/ExerciseAiPage.tsx
+@@ -9,7 +9,7 @@
+ // Layout mirrors the import's two-column workspace; styling stays on this
+ // project's color scheme (creation-section-card / CSS variables).
+ 
+-import { ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Loader2, Save, Trash2, Upload } from "lucide-react";
++import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Hand, Loader2, Save, Trash2, Upload } from "lucide-react";
+ import { useEffect, useRef, useState } from "react";
+ import { TherapistSidebar } from "../components/TherapistSidebar";
+ import type { TherapistNavLabel } from "../components/TherapistSidebar";
+@@ -28,11 +28,15 @@ import {
+ import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
+ import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
+ import type { ExerciseFSMConfig, FrameFeature, AngleDefinition } from "../ai/poseScoring/poseScoringTypes";
+-import { createExercise, createExerciseVersion, getExerciseLibrary, updateExerciseDraft, uploadFile } from "../services/api";
+-import type { ExerciseLibraryDifficulty, ExerciseLibraryItem } from "../types";
++import { ApiError, archiveExercise, createExercise, createExerciseVersion, getExerciseLibrary, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
++import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType } from "../types";
+ 
+ interface ExerciseAiPageProps {
++  exercise?: ExerciseLibraryItem | null;
++  initialName?: string;
++  initialTracking?: ExerciseTrackingType;
+   onBack: () => void;
++  onSaved: () => void;
+   onLogout: () => void;
+   onNavigate: (label: TherapistNavLabel) => void;
+ }
+@@ -104,14 +108,26 @@ const BVE_SENSITIVITY_LEVELS: { value: number; label: string; desc: string }[] =
+   { value: 0.28, label: "Very lenient", desc: "For early-stage patients who still lean to support themselves." }
+ ];
+ 
+-export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageProps) {
++export function ExerciseAiPage({
++  exercise = null,
++  initialName = "",
++  initialTracking = "pose",
++  onBack,
++  onSaved,
++  onLogout,
++  onNavigate
++}: ExerciseAiPageProps) {
+   const { token, user } = useAuth();
+   const displayName = user?.displayName || user?.username || "Therapist";
+ 
+   // Exercise identity / payload fields.
+-  const [exerciseName, setExerciseName] = useState("");
+-  const [exerciseDescription, setExerciseDescription] = useState("");
+-  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
++  const [exerciseName, setExerciseName] = useState(exercise?.name ?? initialName);
++  const [exerciseDescription, setExerciseDescription] = useState(exercise?.description ?? "");
++  const [movementTracking, setMovementTracking] = useState<ExerciseTrackingType>(exercise?.movementTracking ?? initialTracking);
++  const [difficulty, setDifficulty] = useState<Difficulty>(exercise?.difficultyLevel ?? "medium");
++  const [repetitions, setRepetitions] = useState(exercise?.baseCriteria.repetitions?.toString() ?? "10");
++  const [holdSeconds, setHoldSeconds] = useState(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
++  const [targetGripStrength, setTargetGripStrength] = useState(exercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+ 
+   // Demo-clip scanning state. Only ONE clip can scan at a time (the scanner
+   // drives a hidden <video> element); one shared busy flag guards all inputs.
+@@ -168,6 +184,7 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+   const [saveBusy, setSaveBusy] = useState(false);
+   const [saveError, setSaveError] = useState<string | null>(null);
+   const [savedExerciseName, setSavedExerciseName] = useState<string | null>(null);
++  const [lifecycleBusy, setLifecycleBusy] = useState<"publish" | "archive" | null>(null);
+   // "new" = create a new exercise; otherwise the id of an existing pose exercise
+   // to attach this reference to (draft → update in place, active → new version).
+   const [targetExerciseId, setTargetExerciseId] = useState<string>("new");
+@@ -182,7 +199,21 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+   // exercise instead of always creating a new one. Archived versions are
+   // excluded — attaching to them would resurrect a retired row.
+   const targetExercise =
+-    targetExerciseId === "new" ? null : libraryExercises.find((item) => item.id === targetExerciseId) ?? null;
++    exercise ?? (targetExerciseId === "new" ? null : libraryExercises.find((item) => item.id === targetExerciseId) ?? null);
++  const isOwner = !targetExercise || (user ? targetExercise.createdById === user.id || user.role === "admin" : false);
++  const isArchived = targetExercise?.status === "archived";
++  const isPoseExercise = movementTracking === "pose";
++
++  useEffect(() => {
++    setExerciseName(exercise?.name ?? initialName);
++    setExerciseDescription(exercise?.description ?? "");
++    setMovementTracking(exercise?.movementTracking ?? initialTracking);
++    setDifficulty(exercise?.difficultyLevel ?? "medium");
++    setRepetitions(exercise?.baseCriteria.repetitions?.toString() ?? "10");
++    setHoldSeconds(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
++    setTargetGripStrength(exercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
++    setSavedExerciseName(null);
++  }, [exercise, initialName, initialTracking]);
+ 
+   useEffect(() => {
+     if (!token) return;
+@@ -534,14 +565,17 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+   //     criteria: PATCH in place when it is still a draft, or a new draft
+   //     version when it is active (BR-6 — active versions are immutable).
+   const handleSave = async () => {
+-    if (!token) return;
+-    const poseReference = buildPoseReference();
+-    if (!poseReference) return;
++    if (!token || !isOwner || isArchived) return;
++    const poseReference = (calibration ? buildPoseReference() : targetExercise?.baseCriteria.poseReference) ?? undefined;
++    if (isPoseExercise && !poseReference) {
++      setSaveError("Scan a demo clip to create the pose reference before saving.");
++      return;
++    }
+     setSaveBusy(true);
+     setSaveError(null);
+     try {
+       let uploadedClipId: string | null = null;
+-      if (baseClip && (!targetExercise || !targetExercise.demoVideoFileId)) {
++      if (baseClip) {
+         const { file: uploaded } = await uploadFile(token, baseClip);
+         if (uploaded.fileType !== "video") {
+           throw new Error("The selected demo file must be a video.");
+@@ -551,14 +585,28 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+ 
+       if (targetExercise) {
+         const payload = {
+-          name: targetExercise.name,
+-          description: targetExercise.description,
+-          movementTracking: "pose" as const,
+-          difficultyLevel: targetExercise.difficultyLevel,
++          name: exerciseName.trim(),
++          description: exerciseDescription.trim(),
++          movementTracking,
++          difficultyLevel: difficulty,
+           // Merge, never replace: keeps the exercise's manual criteria
+           // (targetAngleDeg/repetitions/…) alongside the new AI reference.
+-          baseCriteria: { ...targetExercise.baseCriteria, poseReference },
+-          demoVideoFileId: targetExercise.demoVideoFileId ?? uploadedClipId
++          baseCriteria: isPoseExercise
++            ? {
++                ...targetExercise.baseCriteria,
++                repetitions: repetitions ? Number(repetitions) : undefined,
++                holdSeconds: holdSeconds ? Number(holdSeconds) : undefined,
++                targetAngleDeg: targetRom,
++                poseReference
++              }
++            : movementTracking === "virtual_grip"
++              ? {
++                  targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined,
++                  repetitions: repetitions ? Number(repetitions) : undefined,
++                  holdSeconds: holdSeconds ? Number(holdSeconds) : undefined
++                }
++              : { repetitions: repetitions ? Number(repetitions) : undefined },
++          demoVideoFileId: uploadedClipId ?? targetExercise.demoVideoFileId ?? null
+         };
+         if (targetExercise.status === "draft") {
+           await updateExerciseDraft(token, targetExercise.id, payload);
+@@ -570,15 +618,19 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+         return;
+       }
+ 
+-      if (!uploadedClipId) {
++      if (isPoseExercise && !uploadedClipId) {
+         throw new Error("Select the base demo clip — it is stored as the exercise's demo video.");
+       }
+       await createExercise(token, {
+         name: exerciseName.trim(),
+         description: exerciseDescription.trim(),
+-        movementTracking: "pose",
++        movementTracking,
+         difficultyLevel: difficulty,
+-        baseCriteria: { poseReference },
++        baseCriteria: isPoseExercise
++          ? { repetitions: repetitions ? Number(repetitions) : undefined, holdSeconds: holdSeconds ? Number(holdSeconds) : undefined, targetAngleDeg: targetRom, poseReference }
++          : movementTracking === "virtual_grip"
++            ? { targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined, repetitions: repetitions ? Number(repetitions) : undefined, holdSeconds: holdSeconds ? Number(holdSeconds) : undefined }
++            : { repetitions: repetitions ? Number(repetitions) : undefined },
+         demoVideoFileId: uploadedClipId
+       });
+       setSavedExerciseName(exerciseName.trim());
+@@ -589,17 +641,30 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+     }
+   };
+ 
++  const handleLifecycleAction = async (action: "publish" | "archive") => {
++    if (!token || !targetExercise || !isOwner) return;
++    setLifecycleBusy(action);
++    setSaveError(null);
++    try {
++      if (action === "publish") await publishExercise(token, targetExercise.id);
++      else await archiveExercise(token, targetExercise.id);
++      onSaved();
++    } catch (err) {
++      setSaveError(err instanceof ApiError ? err.message : `Couldn't ${action} this exercise.`);
++    } finally {
++      setLifecycleBusy(null);
++    }
++  };
++
+   // New exercises need a name + the base clip (it becomes the demo video);
+   // attaching to an existing exercise needs neither when it already has a name
+   // and a demo video.
+-  const needsBaseClip = !targetExercise || !targetExercise.demoVideoFileId;
++  const needsBaseClip = isPoseExercise && (!targetExercise || !targetExercise.demoVideoFileId);
+   const canSave = Boolean(
+-    calibration &&
+-      fsmConfig &&
+-      primaryDef &&
+-      secondaryDef &&
+-      baseFrames.length >= 10 &&
+-      (targetExercise || exerciseName.trim()) &&
++    isOwner &&
++      !isArchived &&
++      exerciseName.trim() &&
++      (!isPoseExercise || (calibration && fsmConfig && primaryDef && secondaryDef && baseFrames.length >= 10) || targetExercise?.baseCriteria.poseReference) &&
+       (!needsBaseClip || baseClip)
+   );
+ 
+@@ -645,6 +710,27 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+             </div>
+           )}
+ 
++          {targetExercise && (
++            <div className={`ai-lifecycle-bar ${targetExercise.status}`}>
++              <div>
++                <strong>{targetExercise.name} · v{targetExercise.versionNumber}</strong>
++                <span>{targetExercise.status === "active" ? "Active — saving edits creates a new draft version." : targetExercise.status === "draft" ? "Draft — changes save to this version." : "Archived — this version is read-only."}</span>
++              </div>
++              {isOwner && !isArchived && (
++                <div className="ai-lifecycle-actions">
++                  {targetExercise.status === "draft" && <button type="button" className="secondary-button" disabled={lifecycleBusy !== null} onClick={() => void handleLifecycleAction("publish")}>{lifecycleBusy === "publish" ? "Publishing…" : "Publish"}</button>}
++                  <button type="button" className="text-action danger" disabled={lifecycleBusy !== null} onClick={() => void handleLifecycleAction("archive")}>{lifecycleBusy === "archive" ? "Archiving…" : <><Archive size={14} /> Archive</>}</button>
++                </div>
++              )}
++            </div>
++          )}
++
++          {!isOwner && targetExercise && (
++            <div className="library-warning-banner">
++              <AlertTriangle size={16} /> This exercise was created by {targetExercise.createdByName || "another therapist"}. It is open in read-only mode.
++            </div>
++          )}
++
+           {/* Scan progress / error banner */}
+           {(scanProgressText || scanError) && (
+             <div className={`ai-banner ${scanError ? "ai-banner-error" : "ai-banner-info"}`}>
+@@ -654,7 +740,7 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+           )}
+ 
+           {/* Single-column step flow: 1 → 2 → 3 → … each card is one step. */}
+-          <div className="ai-author-stack">
++          <div className={`ai-author-stack ${isPoseExercise ? "" : "manual"} ${!isOwner || isArchived ? "readonly" : ""}`}>
+ 
+               {/* Step 1 — Exercise Identity */}
+               <section className="creation-section-card">
+@@ -702,6 +788,20 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+                     Sets the sensitivity range for rep-counting thresholds.
+                   </p>
+                 </div>
++                <div className="ai-field">
++                  <label>Movement tracking</label>
++                  <select
++                    className="ai-input"
++                    value={movementTracking}
++                    disabled={Boolean(targetExercise) || isArchived || !isOwner}
++                    onChange={(event) => setMovementTracking(event.target.value as ExerciseTrackingType)}
++                  >
++                    <option value="pose">Pose tracking</option>
++                    <option value="virtual_grip">Virtual grip</option>
++                    <option value="none">No AI tracking</option>
++                  </select>
++                  {targetExercise && <p className="library-card-sub" style={{ marginTop: 4 }}>Tracking type is fixed for an existing exercise version.</p>}
++                </div>
+               </section>
+ 
+               {/* Step 2 — Base Demo Clip */}
+@@ -1400,6 +1500,37 @@ export function ExerciseAiPage({ onBack, onLogout, onNavigate }: ExerciseAiPageP
+                 )}
+               </section>
+ 
++              <section className="creation-section-card ai-manual-criteria-card">
++                <div className="ai-card-step-tag">Step 2 · Exercise criteria</div>
++                <div className="creation-section-header">
++                  {movementTracking === "virtual_grip" ? <Hand size={20} /> : <Dumbbell size={20} />}
++                  <div>
++                    <strong>{movementTracking === "virtual_grip" ? "Virtual grip criteria" : "Exercise criteria"}</strong>
++                    <p className="library-card-sub">Set the criteria used when this activity is assigned to a patient.</p>
++                  </div>
++                </div>
++                {movementTracking === "virtual_grip" && (
++                  <label className="ai-field">Target grip strength
++                    <input className="ai-input" type="number" min="0" value={targetGripStrength} onChange={(event) => setTargetGripStrength(event.target.value)} disabled={isArchived || !isOwner} />
++                  </label>
++                )}
++                <label className="ai-field">Repetitions
++                  <input className="ai-input" type="number" min="1" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} disabled={isArchived || !isOwner} />
++                </label>
++                {movementTracking === "virtual_grip" && (
++                  <label className="ai-field">Hold duration (seconds)
++                    <input className="ai-input" type="number" min="0" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} disabled={isArchived || !isOwner} />
++                  </label>
++                )}
++                <div className="ai-save-actions">
++                  <button type="button" className="primary-button" onClick={handleSave} disabled={!canSave || saveBusy}>
++                    {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
++                    {targetExercise?.status === "active" ? `Save as v${targetExercise.versionNumber + 1} draft` : targetExercise ? "Save changes" : "Create draft"}
++                  </button>
++                </div>
++                {saveError && <p className="ai-error">{saveError}</p>}
++              </section>
++
+           </div>
+         </main>
+       </div>

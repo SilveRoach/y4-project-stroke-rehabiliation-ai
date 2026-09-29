@@ -32,11 +32,13 @@ interface PatientContactForm {
   emergencyContactPhone: string;
 }
 
+// Thai short date with a Gregorian year ("22 ก.ย. 2026") — same convention as
+// utils/patientToday.ts#viewedMonthLabel (`th-TH-u-ca-gregory`, not the Buddhist era).
 function formatDateLabel(iso?: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso.includes("T") ? iso : `${iso}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", {
+  return d.toLocaleDateString("th-TH-u-ca-gregory", {
     day: "2-digit",
     month: "short",
     year: "numeric"
@@ -44,11 +46,30 @@ function formatDateLabel(iso?: string | null): string {
 }
 
 const genderLabels: Record<string, string> = {
-  male: "Male",
-  female: "Female",
-  other: "Other",
-  unknown: "Not specified"
+  male: "ชาย",
+  female: "หญิง",
+  other: "อื่น ๆ",
+  unknown: "ไม่ระบุ"
 };
+
+// useProfilePicture is shared with the (English) Admin/Therapist settings pages,
+// so its client-side error strings stay English there. Map the known ones to Thai
+// for display here — same pattern as PatientProgressPage's thaiPeriodLabel.
+// Unknown messages (e.g. backend ApiError text) pass through untranslated.
+const uploadErrorLabels: Record<string, string> = {
+  "Please log in again to change your profile picture.":
+    "กรุณาเข้าสู่ระบบอีกครั้งเพื่อเปลี่ยนรูปโปรไฟล์",
+  "Please choose an image file (JPG, PNG, etc.).":
+    "กรุณาเลือกไฟล์รูปภาพ (JPG, PNG ฯลฯ)",
+  "The selected file must be an image.": "ไฟล์ที่เลือกต้องเป็นรูปภาพ",
+  "Failed to upload your profile picture. Please try again.":
+    "ไม่สามารถอัปโหลดรูปโปรไฟล์ได้ กรุณาลองใหม่อีกครั้ง"
+};
+
+function thaiUploadError(message: string | null): string | null {
+  if (!message) return message;
+  return uploadErrorLabels[message] ?? message;
+}
 
 export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPageProps) {
   const { token, user: authUser } = useAuth();
@@ -93,7 +114,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
   useEffect(() => {
     if (!token || !authUser) {
       setLoading(false);
-      setFetchError("Please log in again to view your settings.");
+      setFetchError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อดูการตั้งค่าของคุณ");
       return;
     }
 
@@ -123,7 +144,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
       })
       .catch((err) => {
         if (!cancelled) {
-          setFetchError(err instanceof ApiError ? err.message : "Couldn't load your profile. Please try again.");
+          setFetchError(err instanceof ApiError ? err.message : "ไม่สามารถโหลดโปรไฟล์ของคุณได้ กรุณาลองใหม่อีกครั้ง");
         }
       })
       .finally(() => {
@@ -206,7 +227,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
       setSavedSuccess(true);
       window.setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err) {
-      setSaveError(err instanceof ApiError ? err.message : "Failed to update profile. Please try again.");
+      setSaveError(err instanceof ApiError ? err.message : "ไม่สามารถอัปเดตโปรไฟล์ได้ กรุณาลองใหม่อีกครั้ง");
     } finally {
       setSaving(false);
     }
@@ -217,7 +238,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
     [form.firstName, form.lastName].filter(Boolean).join(" ") ||
     authUser?.displayName ||
     authUser?.username ||
-    "Patient";
+    "ผู้ป่วย";
 
   const avatarInitials = initialsFromName(displayName);
 
@@ -235,17 +256,17 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Settings</h1>
-            <p>Profile and contact information</p>
+            <h1>ตั้งค่า</h1>
+            <p>ข้อมูลโปรไฟล์และข้อมูลการติดต่อของคุณ</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>
-                <small>Patient</small>
+                <small>ผู้ป่วย</small>
               </div>
               <span className={`avatar-badge${profilePicUrl ? " with-photo" : ""}`}>
-                {profilePicUrl ? <img src={profilePicUrl} alt={`${displayName}'s profile picture`} /> : avatarInitials}
+                {profilePicUrl ? <img src={profilePicUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : avatarInitials}
               </span>
             </div>
           </div>
@@ -254,20 +275,20 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
         <main className="therapist-main settings-main patient-page-main ps-main">
           {loading ? (
             <div className="summary-card" role="status">
-              <p className="pd-empty-note">Loading your profile…</p>
+              <p className="pd-empty-note">กำลังโหลดโปรไฟล์ของคุณ…</p>
             </div>
           ) : fetchError ? (
             <div className="summary-card" role="alert" style={{ borderColor: "var(--danger, #d33)" }}>
               <p style={{ margin: "0 0 12px", color: "var(--danger, #d33)" }}>{fetchError}</p>
               <button type="button" className="secondary-button" onClick={() => setReloadKey((k) => k + 1)}>
-                Try again
+                ลองใหม่
               </button>
             </div>
           ) : (
             <form className={`ps-card${isEditing ? " editing" : ""}`} onSubmit={handleSubmit}>
               <div className={`ps-avatar-circle lg${profilePicUrl ? " with-photo" : ""}`}>
                 {profilePicUrl ? (
-                  <img className="ps-avatar-img" src={profilePicUrl} alt={`${displayName}'s profile picture`} />
+                  <img className="ps-avatar-img" src={profilePicUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} />
                 ) : (
                   avatarInitials
                 )}
@@ -291,15 +312,15 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
               >
                 <Camera size={13} />{" "}
                 {picUpload.uploading
-                  ? "Uploading…"
+                  ? "กำลังอัปโหลด…"
                   : profilePicUrl
-                    ? "Change photo"
-                    : "Upload photo"}
+                    ? "เปลี่ยนรูปภาพ"
+                    : "อัปโหลดรูปภาพ"}
               </button>
 
               {isEditing && (
                 <span className="ps-editing-pill">
-                  <Pencil size={12} /> Editing profile
+                  <Pencil size={12} /> กำลังแก้ไขโปรไฟล์
                 </span>
               )}
 
@@ -310,7 +331,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                   style={{ borderColor: "var(--danger, #d33)", margin: "0 20px 16px", width: "calc(100% - 40px)" }}
                 >
                   <p style={{ margin: 0, color: "var(--danger, #d33)", display: "flex", alignItems: "center", gap: 6 }}>
-                    <AlertCircle size={16} /> {saveError ?? picUpload.uploadError}
+                    <AlertCircle size={16} /> {saveError ?? thaiUploadError(picUpload.uploadError)}
                   </p>
                 </div>
               )}
@@ -322,7 +343,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                   style={{ borderColor: "var(--primary, #2e7559)", margin: "0 20px 16px", width: "calc(100% - 40px)", background: "rgba(46, 117, 89, 0.08)" }}
                 >
                   <p style={{ margin: 0, color: "var(--primary, #2e7559)", display: "flex", alignItems: "center", gap: 6 }}>
-                    <CheckCircle2 size={16} /> Profile updated successfully.
+                    <CheckCircle2 size={16} /> อัปเดตโปรไฟล์เรียบร้อยแล้ว
                   </p>
                 </div>
               )}
@@ -330,28 +351,28 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
               <div className="ps-panels">
                 <section className="ps-panel">
                   <div className="settings-section-heading">
-                    <User size={15} /> <strong>Profile</strong>
+                    <User size={15} /> <strong>ข้อมูลส่วนตัว</strong>
                   </div>
                   <SettingsField
-                    label="First name"
+                    label="ชื่อ"
                     value={form.firstName}
                     editing={isEditing}
                     onChange={updateField("firstName")}
                   />
                   <SettingsField
-                    label="Last name"
+                    label="นามสกุล"
                     value={form.lastName}
                     editing={isEditing}
                     onChange={updateField("lastName")}
                   />
                   <SettingsField
-                    label="Phone number"
+                    label="เบอร์โทรศัพท์"
                     value={form.phoneNumber}
                     editing={isEditing}
                     onChange={updateField("phoneNumber")}
                   />
                   <SettingsField
-                    label="Date of birth"
+                    label="วันเกิด"
                     type="date"
                     value={form.dateOfBirth}
                     editing={isEditing}
@@ -359,7 +380,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                     displayValue={formatDateLabel(form.dateOfBirth)}
                   />
                   <div className="ps-field">
-                    <span className="ps-field-label">Gender</span>
+                    <span className="ps-field-label">เพศ</span>
                     {isEditing ? (
                       <select
                         className="admin-role-select"
@@ -372,54 +393,54 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                           }))
                         }
                       >
-                        <option value="unknown">Not specified</option>
-                        <option value="male">Male</option>
-                        <option value="female">Female</option>
-                        <option value="other">Other</option>
+                        <option value="unknown">ไม่ระบุ</option>
+                        <option value="male">ชาย</option>
+                        <option value="female">หญิง</option>
+                        <option value="other">อื่น ๆ</option>
                       </select>
                     ) : (
                       <p className="ps-field-value">{genderLabels[form.gender] ?? form.gender}</p>
                     )}
                   </div>
                   <div className="ps-field">
-                    <span className="ps-field-label">Assigned PT</span>
+                    <span className="ps-field-label">นักกายภาพบำบัดที่ดูแล</span>
                     <p className="ps-field-value">
                       {profile?.assignedTherapist
                         ? `${profile.assignedTherapist.displayName}${profile.assignedTherapist.licenseNumber ? ` · ${profile.assignedTherapist.licenseNumber}` : ""}`
-                        : "No physical therapist assigned yet"}
+                        : "ยังไม่มีนักกายภาพบำบัดที่ดูแล"}
                     </p>
                   </div>
                   <div className="ps-field">
-                    <span className="ps-field-label">Admission date</span>
+                    <span className="ps-field-label">วันที่เข้ารับการรักษา</span>
                     <p className="ps-field-value">{formatDateLabel(profile?.createdAtIso ?? profile?.createdAtLabel)}</p>
                   </div>
                 </section>
 
                 <section className="ps-panel">
                   <div className="settings-section-heading">
-                    <Phone size={15} /> <strong>Contact Information</strong>
+                    <Phone size={15} /> <strong>ข้อมูลการติดต่อ</strong>
                   </div>
                   <SettingsField
-                    label="Email address"
+                    label="อีเมล"
                     type="email"
                     value={form.email}
                     editing={isEditing}
                     onChange={updateField("email")}
                   />
                   <SettingsField
-                    label="Home address"
+                    label="ที่อยู่"
                     value={form.address}
                     editing={isEditing}
                     onChange={updateField("address")}
                   />
                   <SettingsField
-                    label="Emergency contact name"
+                    label="ชื่อผู้ติดต่อฉุกเฉิน"
                     value={form.emergencyContactName}
                     editing={isEditing}
                     onChange={updateField("emergencyContactName")}
                   />
                   <SettingsField
-                    label="Emergency contact phone"
+                    label="เบอร์โทรผู้ติดต่อฉุกเฉิน"
                     value={form.emergencyContactPhone}
                     editing={isEditing}
                     onChange={updateField("emergencyContactPhone")}
@@ -437,7 +458,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                       onClick={discardChanges}
                       disabled={saving}
                     >
-                      <X size={14} /> Discard changes
+                      <X size={14} /> ยกเลิกการแก้ไข
                     </button>
                     <button
                       key="patient-save-btn"
@@ -445,7 +466,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                       className="primary-button"
                       disabled={saving}
                     >
-                      <Save size={14} /> {saving ? "Saving…" : "Save changes"}
+                      <Save size={14} /> {saving ? "กำลังบันทึก…" : "บันทึกการเปลี่ยนแปลง"}
                     </button>
                   </>
                 ) : (
@@ -456,7 +477,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                       className="secondary-button"
                       onClick={onLogout}
                     >
-                      <LogOut size={14} /> Log out
+                      <LogOut size={14} /> ออกจากระบบ
                     </button>
                     <button
                       key="patient-edit-btn"
@@ -464,7 +485,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                       className="primary-button"
                       onClick={startEditing}
                     >
-                      <Pencil size={14} /> Edit profile
+                      <Pencil size={14} /> แก้ไขโปรไฟล์
                     </button>
                   </>
                 )}

@@ -12,7 +12,7 @@
 // therapist or admin) — see session.service.ts's updateAttemptScoring. Only
 // synthesized/mock fallback attempts (no server row) remain client-side only.
 
-import { ArrowLeft, Bell, Video } from "lucide-react";
+import { ArrowLeft, Video } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PoseVideoPlayer } from "../components/PoseVideoPlayer";
 import { TherapistSidebar } from "../components/TherapistSidebar";
@@ -183,9 +183,6 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
             </p>
           </div>
           <div className="therapist-topbar-actions">
-            <button type="button" className="icon-button therapist-bell" aria-label="Notifications">
-              <Bell size={17} />
-            </button>
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{therapistProfile.displayName}</strong>
