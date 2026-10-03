@@ -917,6 +917,8 @@ export interface SyncSchedulesResponse {
   today: string;
   updatedDaysCount: number;
   updatedExercisesCount: number;
+  /** Plans flipped active → completed because today is past their end date. */
+  updatedPlansCount: number;
   summary: {
     daysSkipped: number;
     daysCompleted: number;
@@ -925,6 +927,7 @@ export interface SyncSchedulesResponse {
     exercisesSkipped: number;
     exercisesPending: number;
     exercisesCompleted: number;
+    plansCompleted: number;
   };
 }
 

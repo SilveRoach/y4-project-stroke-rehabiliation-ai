@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PatientNavLabel } from "./components/PatientSidebar";
+import type { AdminNavLabel } from "./components/AdminSidebar";
 import type { TherapistNavLabel } from "./components/TherapistSidebar";
 import { Toast } from "./components/Toast";
 import { patientProgram } from "./data/patientMock";
@@ -323,11 +324,25 @@ function AppShell() {
   };
 
   // Same idea as handleTherapistNavigate/handlePatientNavigate above, for the
-  // admin-role sidebar (components/AdminSidebar.tsx).
-  const handleAdminNavigate = (label: "Dashboard" | "Users" | "Settings") => {
+  // admin-role sidebar (components/AdminSidebar.tsx). "Exercise Library" routes
+  // admins into the shared Exercise Library section (ExerciseLibraryPage — the
+  // therapist's page, reused), which renders this same admin sidebar back.
+  const handleAdminNavigate = (label: AdminNavLabel) => {
     if (label === "Dashboard") setView("admin-dashboard");
     if (label === "Users") setView("admin-users");
     if (label === "Settings") setView("admin-settings");
+    if (label === "Exercise Library") setView("therapist-library");
+  };
+
+  // The Exercise Library section (library → AI authoring workspace) is shared
+  // by both roles: each page renders TherapistSidebar for therapists and
+  // AdminSidebar for admins (decided inside the page from useAuth), so this one
+  // handler dispatches the clicked label by the SIGNED-IN role — the labels
+  // overlap ("Dashboard", "Settings") but mean different views per role, and
+  // role-specific labels (Patients/Sessions vs Users) simply fall through.
+  const handleExerciseLibraryNavigate = (label: TherapistNavLabel | AdminNavLabel) => {
+    if (user?.role === "admin") handleAdminNavigate(label as AdminNavLabel);
+    else handleTherapistNavigate(label as TherapistNavLabel);
   };
 
   return (
@@ -438,7 +453,7 @@ function AppShell() {
             logout();
             setView("login");
           }}
-          onNavigate={handleTherapistNavigate}
+          onNavigate={handleExerciseLibraryNavigate}
           onCreateNew={(name, tracking) => {
             setSelectedExercise(null);
             setCreationName(name);
@@ -471,7 +486,7 @@ function AppShell() {
             logout();
             setView("login");
           }}
-          onNavigate={handleTherapistNavigate}
+          onNavigate={handleExerciseLibraryNavigate}
         />
       )}
       {view === "therapist-sessions" && (
@@ -550,6 +565,7 @@ function AppShell() {
           }}
           onNavigateUsers={() => handleAdminNavigate("Users")}
           onNavigateSettings={() => handleAdminNavigate("Settings")}
+          onNavigateExerciseLibrary={() => handleAdminNavigate("Exercise Library")}
         />
       )}
       {view === "admin-users" && (
@@ -560,6 +576,7 @@ function AppShell() {
           }}
           onNavigateDashboard={() => handleAdminNavigate("Dashboard")}
           onNavigateSettings={() => handleAdminNavigate("Settings")}
+          onNavigateExerciseLibrary={() => handleAdminNavigate("Exercise Library")}
         />
       )}
       {view === "admin-settings" && (
@@ -570,6 +587,7 @@ function AppShell() {
           }}
           onNavigateDashboard={() => handleAdminNavigate("Dashboard")}
           onNavigateUsers={() => handleAdminNavigate("Users")}
+          onNavigateExerciseLibrary={() => handleAdminNavigate("Exercise Library")}
         />
       )}
     </main>

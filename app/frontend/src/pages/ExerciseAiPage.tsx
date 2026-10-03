@@ -13,6 +13,8 @@ import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, 
 import { useEffect, useRef, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
+import { AdminSidebar } from "../components/AdminSidebar";
+import type { AdminNavLabel } from "../components/AdminSidebar";
 import { useAuth } from "../store/authStore";
 import { initialsFromName } from "../utils/displayName";
 import { drawSkeleton } from "../ai/poseDetection";
@@ -40,7 +42,10 @@ interface ExerciseAiPageProps {
   onBack: () => void;
   onSaved: () => void;
   onLogout: () => void;
-  onNavigate: (label: TherapistNavLabel) => void;
+  // Union of both sidebars' contracts — this page renders TherapistSidebar for
+  // therapists and AdminSidebar for admins (same section, same label), so App
+  // passes one role-dispatching handler (handleExerciseLibraryNavigate).
+  onNavigate: (label: TherapistNavLabel | AdminNavLabel) => void;
 }
 
 type Difficulty = Extract<ExerciseLibraryDifficulty, "easy" | "medium" | "hard">;
@@ -230,6 +235,10 @@ export function ExerciseAiPage({
   const isOwner = !targetExercise || (user ? targetExercise.createdById === user.id || user.role === "admin" : false);
   const isArchived = targetExercise?.status === "archived";
   const isPoseExercise = movementTracking === "pose";
+  // Admins reach this workspace from AdminSidebar's "Exercise Library" item —
+  // they get the AdminSidebar back (same section highlighted) so they can
+  // navigate out again; therapists keep the TherapistSidebar exactly as before.
+  const isAdmin = user?.role === "admin";
 
   // One object URL per selected file — created on selection and revoked when
   // it's replaced or removed, so the Step 2 player can replay the clip freely
@@ -833,7 +842,11 @@ export function ExerciseAiPage({
 
   return (
     <section className="therapist-shell exercise-creation-page">
-      <TherapistSidebar activeLabel="Exercise Library" onNavigate={onNavigate} onLogout={onLogout} />
+      {isAdmin ? (
+        <AdminSidebar activeLabel="Exercise Library" onNavigate={onNavigate} onLogout={onLogout} />
+      ) : (
+        <TherapistSidebar activeLabel="Exercise Library" onNavigate={onNavigate} onLogout={onLogout} />
+      )}
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div className="creation-topbar-title">

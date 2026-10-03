@@ -42,6 +42,8 @@ interface AdminUserManagementPageProps {
   onLogout: () => void;
   onNavigateDashboard: () => void;
   onNavigateSettings: () => void;
+  // Routes into the shared Exercise Library section (see handleAdminNavigate).
+  onNavigateExerciseLibrary: () => void;
 }
 
 // Column-header sorting (replaces the old role-filter dropdown): each sortable
@@ -168,7 +170,7 @@ function TherapistRowAvatar({
   );
 }
 
-export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavigateSettings }: AdminUserManagementPageProps) {
+export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavigateSettings, onNavigateExerciseLibrary }: AdminUserManagementPageProps) {
   const { token, user } = useAuth();
   // Real logged-in admin for the sidebar/topbar profile chrome, same idiom as
   // the patient pages (PatientTodayPage.tsx) — replaces the static
@@ -293,6 +295,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
         onNavigate={(label: AdminNavLabel) => {
           if (label === "Dashboard") onNavigateDashboard();
           if (label === "Settings") onNavigateSettings();
+          if (label === "Exercise Library") onNavigateExerciseLibrary();
         }}
         onLogout={onLogout}
       />

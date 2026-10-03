@@ -24,6 +24,8 @@ interface AdminSettingsPageProps {
   onLogout: () => void;
   onNavigateDashboard: () => void;
   onNavigateUsers: () => void;
+  // Routes into the shared Exercise Library section (see handleAdminNavigate).
+  onNavigateExerciseLibrary: () => void;
 }
 
 interface AdminProfileForm {
@@ -48,7 +50,7 @@ function formatDateLabel(iso: string): string {
   });
 }
 
-export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUsers }: AdminSettingsPageProps) {
+export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUsers, onNavigateExerciseLibrary }: AdminSettingsPageProps) {
   // Real logged-in admin for the topbar/sidebar profile chrome and the form's
   // pre-filled display name — mirrors PatientSettingsPage.tsx's idiom of
   // sourcing the shared chrome from the auth store instead of a static mock.
@@ -176,6 +178,7 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
   const handleNavigate = (label: AdminNavLabel) => {
     if (label === "Dashboard") onNavigateDashboard();
     if (label === "Users") onNavigateUsers();
+    if (label === "Exercise Library") onNavigateExerciseLibrary();
   };
 
   return (

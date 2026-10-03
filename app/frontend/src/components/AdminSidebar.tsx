@@ -1,10 +1,10 @@
-import { Settings, Shield, Users } from "lucide-react";
+import { Dumbbell, Settings, Shield, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../store/authStore";
 import { initialsFromName } from "../utils/displayName";
 
-// Shared sidebar for every admin-role page (Dashboard, Users, Settings).
-// Previously AdminDashboardPage.tsx and AdminUserManagementPage.tsx each
+// Shared sidebar for every admin-role page (Dashboard, Users, Exercise Library,
+// Settings). Previously AdminDashboardPage.tsx and AdminUserManagementPage.tsx each
 // copy-pasted their own <aside className="therapist-sidebar admin-sidebar">
 // block with a locally-scoped two-item `navItems` array and no "Settings" entry
 // at all — mirrors the same duplication TherapistSidebar.tsx was written to
@@ -12,8 +12,13 @@ import { initialsFromName } from "../utils/displayName";
 // shares one real navigation contract (`onNavigate`) instead of near-identical
 // copies drifting out of sync — see App.tsx's `handleAdminNavigate` for where
 // the label turns into a view change.
+//
+// "Exercise Library" routes admins into the therapist-authored Exercise
+// Library/AI-workspace section (ExerciseLibraryPage/ExerciseAiPage — those
+// pages swap this sidebar in for admins, so the label reappears here with the
+// section's active state and gives a way back out).
 
-export type AdminNavLabel = "Dashboard" | "Users" | "Settings";
+export type AdminNavLabel = "Dashboard" | "Users" | "Exercise Library" | "Settings";
 
 interface AdminSidebarProps {
   activeLabel: AdminNavLabel;
@@ -27,6 +32,9 @@ interface AdminSidebarProps {
 const navItems: Array<{ icon: ComponentType<{ size?: number }>; label: AdminNavLabel }> = [
   { icon: Shield, label: "Dashboard" },
   { icon: Users, label: "Users" },
+  // Same icon the therapist sidebar uses for this section, so the item reads
+  // identically for both roles.
+  { icon: Dumbbell, label: "Exercise Library" },
   { icon: Settings, label: "Settings" }
 ];
 

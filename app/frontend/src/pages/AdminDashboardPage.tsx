@@ -28,9 +28,11 @@ interface AdminDashboardPageProps {
   onLogout: () => void;
   onNavigateUsers: () => void;
   onNavigateSettings: () => void;
+  // Routes into the shared Exercise Library section (see handleAdminNavigate).
+  onNavigateExerciseLibrary: () => void;
 }
 
-export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettings }: AdminDashboardPageProps) {
+export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettings, onNavigateExerciseLibrary }: AdminDashboardPageProps) {
   const { token, user } = useAuth();
   const adminDisplayName = user?.displayName || user?.username || "Admin";
   const adminInitials = initialsFromName(adminDisplayName);
@@ -57,7 +59,9 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
       setSyncFeedback({
         type: "success",
         message: result.message || "Schedule synchronization completed successfully.",
-        details: `Updated ${result.updatedDaysCount} schedule day(s) and ${result.updatedExercisesCount} scheduled exercise(s) (Skipped: ${result.summary.daysSkipped} days, ${result.summary.exercisesSkipped} exercises).`
+        details: `Updated ${result.updatedDaysCount} schedule day(s) and ${result.updatedExercisesCount} scheduled exercise(s)${
+          result.updatedPlansCount > 0 ? `, completed ${result.updatedPlansCount} plan(s) past their end date` : ""
+        } (Skipped: ${result.summary.daysSkipped} days, ${result.summary.exercisesSkipped} exercises).`
       });
       // Refresh dashboard data so stats and logs update immediately
       getAdminDashboard(token).then((data) => setDashboardData(data)).catch(() => {});
@@ -193,6 +197,7 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
         onNavigate={(label: AdminNavLabel) => {
           if (label === "Users") onNavigateUsers();
           if (label === "Settings") onNavigateSettings();
+          if (label === "Exercise Library") onNavigateExerciseLibrary();
         }}
         onLogout={onLogout}
       />
@@ -209,7 +214,7 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
               className="admin-sync-button"
               onClick={handleSyncSchedules}
               disabled={syncing}
-              title="Synchronize schedule day and exercise statuses based on assignment date and current today's date"
+              title="Synchronize schedule day and exercise statuses based on assignment date and current today's date, and complete patient plans whose end date has passed"
             >
               <RefreshCw size={15} className={syncing ? "spin-icon" : ""} />
               <span>{syncing ? "Syncing Schedules…" : "Sync Schedules"}</span>

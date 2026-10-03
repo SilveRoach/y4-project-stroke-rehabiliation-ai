@@ -284,6 +284,8 @@ export interface SyncSchedulesResult {
   today: string;
   updatedDaysCount: number;
   updatedExercisesCount: number;
+  /** Plans flipped active → completed because today is past their end date. */
+  updatedPlansCount: number;
   summary: {
     daysSkipped: number;
     daysCompleted: number;
@@ -292,6 +294,7 @@ export interface SyncSchedulesResult {
     exercisesSkipped: number;
     exercisesPending: number;
     exercisesCompleted: number;
+    plansCompleted: number;
   };
 }
 
@@ -312,6 +315,25 @@ export async function syncScheduleStatuses(actorId?: string, clientToday?: strin
       }
     }
   });
+
+  // Plan-level rule: a plan whose endDate has PASSED (strictly before the
+  // reference date) is over — every still-"active" plan flips to "completed",
+  // the same active → completed transition PATCH /plans/:id/status allows.
+  // Draft plans are never touched (they never started) and completed/cancelled
+  // are terminal; plans without an endDate have nothing to compare and are
+  // skipped. endDate is a @db.Date column (UTC midnight), so the ISO date
+  // slice compares correctly against todayStr — the same convention the day
+  // loop below already uses for scheduledDate.
+  const activePlans = await prisma.patientRehabilitationPlan.findMany({
+    where: { status: "active", endDate: { not: null } },
+    select: { id: true, endDate: true }
+  });
+  const plansToComplete: string[] = [];
+  for (const plan of activePlans) {
+    if (plan.endDate && plan.endDate.toISOString().slice(0, 10) < todayStr) {
+      plansToComplete.push(plan.id);
+    }
+  }
 
   const now = new Date();
 
@@ -446,19 +468,34 @@ export async function syncScheduleStatuses(actorId?: string, clientToday?: strin
         data: { status: "in_progress", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
       });
     }
+
+    if (plansToComplete.length > 0) {
+      // status: "active" guard so a plan a therapist cancelled/completed while
+      // this sync was running is never flipped back.
+      await tx.patientRehabilitationPlan.updateMany({
+        where: { id: { in: plansToComplete }, status: "active" },
+        data: { status: "completed", updatedAt: now, ...(actorId ? { updatedBy: actorId } : {}) }
+      });
+    }
   });
 
   const updatedDaysCount =
     daysToSkipped.length + daysToCompleted.length + daysToPending.length + daysToInProgress.length;
   const updatedExercisesCount =
     exercisesToSkipped.length + exercisesToPending.length + exercisesToCompleted.length;
+  const updatedPlansCount = plansToComplete.length;
 
   return {
     success: true,
-    message: `Synchronized ${updatedDaysCount} schedule day(s) and ${updatedExercisesCount} scheduled exercise(s) for reference date ${todayStr}.`,
+    message:
+      `Synchronized ${updatedDaysCount} schedule day(s) and ${updatedExercisesCount} scheduled exercise(s) for reference date ${todayStr}.` +
+      (updatedPlansCount > 0
+        ? ` Completed ${updatedPlansCount} plan(s) past their end date.`
+        : ""),
     today: todayStr,
     updatedDaysCount,
     updatedExercisesCount,
+    updatedPlansCount,
     summary: {
       daysSkipped: daysToSkipped.length,
       daysCompleted: daysToCompleted.length,
@@ -466,7 +503,8 @@ export async function syncScheduleStatuses(actorId?: string, clientToday?: strin
       daysInProgress: daysToInProgress.length,
       exercisesSkipped: exercisesToSkipped.length,
       exercisesPending: exercisesToPending.length,
-      exercisesCompleted: exercisesToCompleted.length
+      exercisesCompleted: exercisesToCompleted.length,
+      plansCompleted: updatedPlansCount
     }
   };
 }
