@@ -9,13 +9,14 @@
 // Layout mirrors the import's two-column workspace; styling stays on this
 // project's color scheme (creation-section-card / CSS variables).
 
-import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Hand, Loader2, Play, Save, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Hand, History, Loader2, Play, Save, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
 import { useAuth } from "../store/authStore";
+import { describeCriteria } from "../utils/exerciseCriteria";
 import { initialsFromName } from "../utils/displayName";
 import { drawSkeleton } from "../ai/poseDetection";
 import {
@@ -46,6 +47,14 @@ interface ExerciseAiPageProps {
   // therapists and AdminSidebar for admins (same section, same label), so App
   // passes one role-dispatching handler (handleExerciseLibraryNavigate).
   onNavigate: (label: TherapistNavLabel | AdminNavLabel) => void;
+  // True only when this workspace was opened from the Exercise Library's Version
+  // History panel (App's openExerciseVersion): the row in hand is ONE link of the
+  // family's version chain rather than "the exercise the library card points at",
+  // so the page orients the therapist with a version banner and a back-link that
+  // names the library instead of the creation flow. Read-only-ness needs no flag:
+  // POST /exercises/:id/versions archives the superseded rows, so the existing
+  // `isArchived` gate already turns every history row into an audit view.
+  isVersionView?: boolean;
 }
 
 type Difficulty = Extract<ExerciseLibraryDifficulty, "easy" | "medium" | "hard">;
@@ -130,7 +139,8 @@ export function ExerciseAiPage({
   onBack,
   onSaved,
   onLogout,
-  onNavigate
+  onNavigate,
+  isVersionView = false
 }: ExerciseAiPageProps) {
   const { token, user } = useAuth();
   const displayName = user?.displayName || user?.username || "Therapist";
@@ -864,7 +874,7 @@ export function ExerciseAiPage({
 
         <main className="therapist-main exercise-creation-main ai-workspace-main">
           <button type="button" className="text-action pd-back-link" onClick={onBack}>
-            <ArrowLeft size={14} /> Back to exercise creation
+            <ArrowLeft size={14} /> {isVersionView ? "Back to the Exercise Library" : "Back to exercise creation"}
           </button>
 
           {/* Page heading */}
@@ -912,6 +922,28 @@ export function ExerciseAiPage({
             </div>
           )}
 
+          {/* Version-history drill-in (App's openExerciseVersion): the row in hand
+              is ONE link in the family's version chain, so state which one it is,
+              when it was created and the criteria it carries before the workspace
+              below. Superseded rows are archived by POST /exercises/:id/versions,
+              so the existing read-only gate + the lifecycle bar's own status line
+              already make this an audit view — nothing new to lock down here. */}
+          {isVersionView && targetExercise && (
+            <div className="ai-version-view-banner">
+              <History size={16} />
+              <div>
+                <strong>
+                  Version history · v{targetExercise.versionNumber}
+                  {targetExercise.versions.length > 1 ? ` of ${targetExercise.versions.length}` : ""} · {targetExercise.name}
+                </strong>
+                <div>
+                  Created {targetExercise.createdAtLabel} by {targetExercise.createdByName || "Therapist"} ·{" "}
+                  {describeCriteria(targetExercise.baseCriteria)}
+                </div>
+              </div>
+            </div>
+          )}
+
           {targetExercise && (
             <div className={`ai-lifecycle-bar ${targetExercise.status}`}>
               <div>
@@ -924,6 +956,25 @@ export function ExerciseAiPage({
                   <button type="button" className="text-action danger" disabled={lifecycleBusy !== null} onClick={() => void handleLifecycleAction("archive")}>{lifecycleBusy === "archive" ? "Archiving…" : <><Archive size={14} /> Archive</>}</button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* A non-pose row never reaches Step 2 — manual mode hides every
+              pose-authoring card above the criteria card — so a history view of
+              one plays that version's saved demo clip here instead. Same source
+              as Step 2's player (the effect above resolves
+              targetExercise.demoVideoFileId through GET /files/:id/content), and
+              it sits OUTSIDE the read-only stack, so the transport controls stay
+              usable. */}
+          {isVersionView && !isPoseExercise && targetExercise?.demoVideoFileId && (
+            <div className="ai-version-view-clip">
+              {savedDemoUrl ? (
+                <video className="ai-demo-video" src={savedDemoUrl} controls playsInline preload="metadata" />
+              ) : savedDemoState === "loading" ? (
+                <p className="ai-progress">Loading saved demo video… · กำลังโหลดวิดีโอสาธิต…</p>
+              ) : savedDemoState === "error" ? (
+                <p className="ai-error">Couldn't load the saved demo video. · โหลดวิดีโอสาธิตไม่สำเร็จ</p>
+              ) : null}
             </div>
           )}
 

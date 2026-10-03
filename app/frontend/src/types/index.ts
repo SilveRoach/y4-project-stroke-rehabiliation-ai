@@ -237,11 +237,18 @@ export interface ExerciseBaseCriteria {
 
 // One row in an exercise family's version history (newdb.txt's exercise_library,
 // grouped by parent_exercise_id). Lighter-weight than ExerciseLibraryItem — just
-// enough to render the History panel's version list.
+// enough to render the History panel's version list AND, on click, that old
+// version's own read-only detail view (name/description/tracking/demo video can
+// differ per version, so they come from the row itself).
 export interface ExerciseVersionSummary {
   id: string;
   versionNumber: number;
   status: ExerciseLibraryStatus;
+  name: string;
+  description: string;
+  movementTracking: ExerciseTrackingType;
+  difficultyLevel: ExerciseLibraryDifficulty;
+  demoVideoFileId: string | null;
   baseCriteria: ExerciseBaseCriteria;
   createdAtLabel: string;
 }

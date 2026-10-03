@@ -38,6 +38,7 @@ import {
 import type {
   ExerciseLibraryItem,
   ExerciseTrackingType,
+  ExerciseVersionSummary,
   PatientExercise,
   PatientRehabPlan,
   PendingSessionAttempt,
@@ -109,6 +110,11 @@ function AppShell() {
   // when opened from there, or the patient's detail page when the therapist
   // used the "View" button in PatientDetailPage's exercise-picker popup.
   const [exerciseCreationReturn, setExerciseCreationReturn] = useState<"therapist-library" | "patient-detail">("therapist-library");
+  // True while the AI workspace above was opened from the library's Version
+  // History panel (openExerciseVersion) rather than from a library card or the
+  // creation flow — the page then shows its version banner and names the library
+  // in its back-link. Reset by every other path into that view.
+  const [exerciseVersionView, setExerciseVersionView] = useState(false);
 
   // CAMERA_TRACKING_MOCKUP_PLAN.md §6.6 — lifted from a plain module-level import
   // into state so a confirmed upload (see handleConfirmUpload below) can actually
@@ -304,12 +310,44 @@ function AppShell() {
         return;
       }
       setSelectedExercise(exercise);
+      setExerciseVersionView(false);
       setCreationName(exercise.name);
       setCreationTracking(exercise.movementTracking);
       setView("exercise-ai");
     } catch {
       window.alert("Could not load exercise details.");
     }
+  };
+
+  // Version-history drill-in: ExerciseLibraryPage's History panel → the full
+  // ExerciseAiPage workspace (the same destination a library CARD click uses).
+  // The AI workspace renders exactly ONE exercise_library row, so the clicked
+  // version's own fields have to win: a version bump can change any of them
+  // (name, description, tracking, difficulty, demo video, base criteria), and
+  // the family's latest row only ever carries ITS values. Fields a version
+  // summary doesn't carry (creator, thumbnail descriptor, the family id and the
+  // whole history list) are inherited from the row the panel was opened for.
+  const openExerciseVersion = (exercise: ExerciseLibraryItem, version: ExerciseVersionSummary) => {
+    setSelectedExercise({
+      ...exercise,
+      id: version.id,
+      versionNumber: version.versionNumber,
+      status: version.status,
+      name: version.name || exercise.name,
+      description: version.description,
+      movementTracking: version.movementTracking,
+      difficultyLevel: version.difficultyLevel,
+      demoVideoFileId: version.demoVideoFileId,
+      hasDemoVideo: version.demoVideoFileId !== null,
+      demoVideoFile: null,
+      baseCriteria: version.baseCriteria,
+      createdAtLabel: version.createdAtLabel
+    });
+    setExerciseVersionView(true);
+    setCreationName(version.name || exercise.name);
+    setCreationTracking(version.movementTracking);
+    setExerciseCreationReturn("therapist-library");
+    setView("exercise-ai");
   };
 
   // Same idea as handleTherapistNavigate above, for the patient-role sidebar/
@@ -456,17 +494,20 @@ function AppShell() {
           onNavigate={handleExerciseLibraryNavigate}
           onCreateNew={(name, tracking) => {
             setSelectedExercise(null);
+            setExerciseVersionView(false);
             setCreationName(name);
             setCreationTracking(tracking);
             setView("exercise-ai");
           }}
           onSelectExercise={(exercise) => {
             setSelectedExercise(exercise);
+            setExerciseVersionView(false);
             setCreationName(exercise.name);
             setCreationTracking(exercise.movementTracking);
             setExerciseCreationReturn("therapist-library");
             setView("exercise-ai");
           }}
+          onViewVersion={openExerciseVersion}
         />
       )}
       {view === "exercise-ai" && (
@@ -474,6 +515,7 @@ function AppShell() {
           exercise={selectedExercise}
           initialName={creationName}
           initialTracking={creationTracking}
+          isVersionView={exerciseVersionView}
           onBack={() => {
             setSelectedExercise(null);
             setView(exerciseCreationReturn);
@@ -523,6 +565,7 @@ function AppShell() {
           pendingPlanUpdate={pendingPlanUpdate}
           onViewExercise={(exercise) => {
             setSelectedExercise(exercise);
+            setExerciseVersionView(false);
             setCreationName(exercise.name);
             setCreationTracking(exercise.movementTracking);
             setExerciseCreationReturn("patient-detail");

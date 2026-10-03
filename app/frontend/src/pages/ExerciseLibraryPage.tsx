@@ -1,4 +1,4 @@
-import { AlertTriangle, Ban, CheckCircle2, Dumbbell, Hand, Plus, Search, X } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Dumbbell, Eye, Hand, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { FilePicker } from "../components/FilePicker";
@@ -19,6 +19,7 @@ import {
 } from "../services/api";
 import { useAuth } from "../store/authStore";
 import { useOwnProfilePicture } from "../hooks/useProfilePicture";
+import { describeCriteria } from "../utils/exerciseCriteria";
 import { initialsFromName } from "../utils/displayName";
 import type {
   ExerciseBaseCriteria,
@@ -26,6 +27,7 @@ import type {
   ExerciseLibraryItem,
   ExerciseLibraryStatus,
   ExerciseTrackingType,
+  ExerciseVersionSummary,
   PickedFile
 } from "../types";
 
@@ -64,6 +66,12 @@ interface ExerciseLibraryPageProps {
   // Called when the user clicks on an exercise card or clicks View/Edit.
   // Navigates to the comprehensive ExerciseCreationPage for that exercise.
   onSelectExercise?: (exercise: ExerciseLibraryItem) => void;
+  // Called when a version card is clicked in the "History" panel: opens THAT
+  // version's own details on the full ExerciseAiPage workspace (App rebuilds a
+  // single-row ExerciseLibraryItem from the version summary, since the AI
+  // workspace renders exactly one exercise_library row), rather than the
+  // cramped in-sidebar sub-view this panel used to open.
+  onViewVersion?: (exercise: ExerciseLibraryItem, version: ExerciseVersionSummary) => void;
 }
 
 type StatusFilter = "all" | ExerciseLibraryStatus;
@@ -86,7 +94,13 @@ function statusLabel(status: ExerciseLibraryStatus): string {
   return "Archived";
 }
 
-export function ExerciseLibraryPage({ onLogout, onNavigate, onCreateNew, onSelectExercise }: ExerciseLibraryPageProps) {
+export function ExerciseLibraryPage({
+  onLogout,
+  onNavigate,
+  onCreateNew,
+  onSelectExercise,
+  onViewVersion
+}: ExerciseLibraryPageProps) {
   const { token, user } = useAuth();
 
   const [exercises, setExercises] = useState<ExerciseLibraryItem[]>([]);
@@ -342,7 +356,13 @@ export function ExerciseLibraryPage({ onLogout, onNavigate, onCreateNew, onSelec
       )}
 
       {historyExercise && (
-        <ExerciseHistoryPanel exercise={historyExercise} onClose={() => setHistoryExercise(null)} />
+        <ExerciseHistoryPanel
+          exercise={historyExercise}
+          onClose={() => setHistoryExercise(null)}
+          onViewVersion={
+            onViewVersion ? (version) => onViewVersion(historyExercise, version) : undefined
+          }
+        />
       )}
 
       {viewingExercise && (
@@ -376,7 +396,26 @@ export function ExerciseLibraryPage({ onLogout, onNavigate, onCreateNew, onSelec
   );
 }
 
-function ExerciseHistoryPanel({ exercise, onClose }: { exercise: ExerciseLibraryItem; onClose: () => void }) {
+// Version History panel (UI_MOCKUP_PLAN_NEWDB.md §2.5). Its one job: list the
+// family's versions and hand the clicked row up to onViewVersion, which opens
+// THAT version's own details on the full ExerciseAiPage workspace (App rebuilds
+// a single-row ExerciseLibraryItem from the version summary). The panel
+// deliberately holds no second copy of those details any more — the in-sidebar
+// sub-view it used to render was too cramped to read a demo clip in. Nothing
+// here can mutate anything: no Edit form (ExerciseFormModal owns that, behind
+// the grid's Edit button) and no path to a version bump — version history is the
+// audit trail of the rows patients were actually scored against.
+function ExerciseHistoryPanel({
+  exercise,
+  onClose,
+  onViewVersion
+}: {
+  exercise: ExerciseLibraryItem;
+  onClose: () => void;
+  // Undefined only for a caller with nowhere to navigate to; a clicked version
+  // then simply does nothing (this page always passes App's handler).
+  onViewVersion?: (version: ExerciseVersionSummary) => void;
+}) {
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
@@ -388,17 +427,51 @@ function ExerciseHistoryPanel({ exercise, onClose }: { exercise: ExerciseLibrary
           </button>
         </div>
 
+        <p style={{ margin: "0 0 10px", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+          Select any version below to open it in the exercise workspace.
+        </p>
+
         <div className="library-history-list">
-          {exercise.versions.map((version) => (
-            <div key={version.id} className="library-history-row">
-              <div className="library-history-row-top">
-                <strong>v{version.versionNumber}</strong>
-                <span className={`library-status-badge ${version.status}`}>{statusLabel(version.status)}</span>
+          {exercise.versions.map((version) => {
+            const isCurrent = version.id === exercise.id || version.versionNumber === exercise.versionNumber;
+            return (
+              <div
+                key={version.id}
+                className={`library-history-row library-history-row-clickable${isCurrent ? " is-current" : ""}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => onViewVersion?.(version)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onViewVersion?.(version);
+                  }
+                }}
+                title={`Open version ${version.versionNumber} in the exercise workspace`}
+              >
+                <div className="library-history-row-top">
+                  <strong>
+                    v{version.versionNumber}
+                    {isCurrent && <span className="library-history-current-tag">current</span>}
+                  </strong>
+                  <span className={`library-status-badge ${version.status}`}>{statusLabel(version.status)}</span>
+                </div>
+                {version.name && version.name !== exercise.name && (
+                  <p className="library-history-criteria" style={{ fontWeight: 500, color: "var(--text-primary)" }}>
+                    {version.name}
+                  </p>
+                )}
+                <p className="library-history-criteria">{describeCriteria(version.baseCriteria)}</p>
+                <div className="library-history-row-bottom">
+                  <p className="pd-record-meta">{version.createdAtLabel}</p>
+                  <span className="library-history-view-hint">
+                    <Eye size={13} />
+                    View version
+                  </span>
+                </div>
               </div>
-              <p className="library-history-criteria">{describeCriteria(version.baseCriteria)}</p>
-              <p className="pd-record-meta">{version.createdAtLabel}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </>
@@ -487,15 +560,6 @@ function ExerciseDetailPanel({ exercise, onClose, onEdit, onViewHistory }: Exerc
       </div>
     </>
   );
-}
-
-function describeCriteria(criteria: ExerciseBaseCriteria): string {
-  const parts: string[] = [];
-  if (criteria.targetAngleDeg !== undefined) parts.push(`target angle ${criteria.targetAngleDeg}\u00b0`);
-  if (criteria.targetGripStrength !== undefined) parts.push(`grip strength ${criteria.targetGripStrength}`);
-  if (criteria.repetitions !== undefined) parts.push(`${criteria.repetitions} reps`);
-  if (criteria.holdSeconds !== undefined) parts.push(`${criteria.holdSeconds}s hold`);
-  return parts.length > 0 ? parts.join(", ") : "No criteria set";
 }
 
 interface ExerciseFormModalProps {
