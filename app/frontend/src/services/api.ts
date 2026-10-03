@@ -707,6 +707,34 @@ export function scorePoseRep(
   });
 }
 
+// POST /exercises/test-pose-rep-score — therapist/admin AI exercise TEST
+// scoring (ExerciseAiPage's "Test exercise" button → PatientSessionPage's
+// testConfig). Same scoring pipeline as scorePoseRep, but with no patient
+// scheduled-exercise context: the reference comes from the request body (the
+// therapist's on-screen criteria, possibly unsaved — including the
+// masterSamples DTW/K-NN compare against) or, when that copy carries no
+// master samples / is omitted, from the exercise_library row named by
+// exerciseId. Responds with the same { rep } payload, so a test rep counts
+// and scores exactly like a patient's.
+export function scoreExerciseTestRep(
+  token: string,
+  payload: {
+    exerciseId?: string;
+    poseReference?: PoseReferencePublic | null;
+    repNumber: number;
+    frames: FrameFeature[];
+    peakRom: number;
+    baseTrunkPoint: { x: number; y: number } | null;
+    baseShoulderWidthNorm?: number | null;
+  }
+): Promise<{ rep: PoseRepScoringResult }> {
+  return apiRequest<{ rep: PoseRepScoringResult }>("/exercises/test-pose-rep-score", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
 
 // §2.7 — real review data for one schedule day (assigned therapist or admin).
 // Attempts come newest-first per exercise; referenceVideoFileId is the server

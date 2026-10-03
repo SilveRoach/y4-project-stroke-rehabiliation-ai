@@ -9,7 +9,7 @@
 // Layout mirrors the import's two-column workspace; styling stays on this
 // project's color scheme (creation-section-card / CSS variables).
 
-import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Hand, Loader2, Save, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Hand, Loader2, Play, Save, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
@@ -27,9 +27,11 @@ import {
 } from "../ai/poseScoring/exerciseAutoCalibrator";
 import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
 import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
-import type { ExerciseFSMConfig, FrameFeature, AngleDefinition } from "../ai/poseScoring/poseScoringTypes";
+import type { ExerciseFSMConfig, FrameFeature, AngleDefinition, PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
 import { ApiError, archiveExercise, createExercise, createExerciseVersion, getExerciseLibrary, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
-import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType } from "../types";
+import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType, PatientExercise } from "../types";
+import { PatientSessionPage } from "./PatientSessionPage";
+import type { SessionTestConfig } from "./PatientSessionPage";
 
 interface ExerciseAiPageProps {
   exercise?: ExerciseLibraryItem | null;
@@ -197,6 +199,16 @@ export function ExerciseAiPage({
   // to attach this reference to (draft → update in place, active → new version).
   const [targetExerciseId, setTargetExerciseId] = useState<string>("new");
   const [libraryExercises, setLibraryExercises] = useState<ExerciseLibraryItem[]>([]);
+
+  // "Test exercise" run — mounts PatientSessionPage with the criteria
+  // currently on screen while THIS component stays mounted (so scanned clips,
+  // checkpoints and calibration all survive the round-trip). null = the
+  // authoring workspace is showing. Unlike a patient's session there is no
+  // upload/confirmation step: finishing (or exiting) comes straight back here
+  // and the take is discarded.
+  const [testSession, setTestSession] = useState<{ exercise: PatientExercise; testConfig: SessionTestConfig } | null>(null);
+  const [testPaused, setTestPaused] = useState(false);
+  const [testNote, setTestNote] = useState<string | null>(null);
 
   const rankedCandidates = calibration?.rankedCandidates ?? [];
   const sensitivityLevels = DIFFICULTY_REP_SENSITIVITY[difficulty];
@@ -678,6 +690,103 @@ export function ExerciseAiPage({
       (!needsBaseClip || baseClip)
   );
 
+  // --- "Test exercise" run ------------------------------------------------
+  // A pose test needs runnable AI criteria: either a fresh calibration (plus
+  // the angle/FSM config derived from it) from this page, or a poseReference
+  // already stored on the exercise being edited. Virtual-grip tests need
+  // nothing extra; "none" has no AI tracking to exercise at all.
+  const storedPoseReference = targetExercise?.baseCriteria.poseReference as unknown as PoseReferencePublic | undefined;
+  const hasTestablePoseReference = Boolean(
+    (calibration && fsmConfig && primaryDef && secondaryDef && baseFrames.length >= 10) || storedPoseReference
+  );
+  const testDisabledReason =
+    !isOwner || isArchived
+      ? "This exercise is read-only, so it can't be tested."
+      : scanBusy
+        ? "Wait for the current clip scan to finish before testing."
+        : movementTracking === "none"
+          ? "This exercise has no AI tracking to test."
+          : isPoseExercise && !hasTestablePoseReference
+            ? "Scan a base demo clip first — the test runs against the authored AI criteria."
+            : null;
+  const canTest = testDisabledReason === null;
+
+  // Starts a test run: shims the current form into PatientSessionPage's
+  // PatientExercise shape (the same approach App.tsx's Start Session uses) and
+  // hands the just-authored criteria along as a SessionTestConfig. The session
+  // itself is the patient flow (preroll → camera → tracking → STOP), with each
+  // completed rep scored FOR REAL through POST /exercises/test-pose-rep-score
+  // against the criteria passed here — saved or not. When it ends, its
+  // onFinishRecording/onBack simply land back on this workspace — no upload,
+  // no confirmation page, and the recording itself is discarded.
+  const handleStartTest = () => {
+    if (!canTest) return;
+    // buildPoseReference() carries extra authoring fields (masterSamples etc.);
+    // narrow it to the wire shape PatientSessionPage consumes. A stored
+    // reference is used when the clip hasn't (re)been scanned this session —
+    // or when the fresh calibration couldn't produce one.
+    const poseReference = (
+      isPoseExercise
+        ? (calibration ? buildPoseReference() : null) ?? storedPoseReference ?? null
+        : null
+    ) as unknown as PoseReferencePublic | null;
+    const demoVideoUrl = baseClip ? URL.createObjectURL(baseClip) : null;
+    setTestSession({
+      exercise: {
+        // Library id when editing an existing row (harmless in a test — no
+        // backend call uses it), a synthetic id for a brand-new exercise.
+        id: targetExercise?.id ?? "ai-authoring-test",
+        name: exerciseName.trim() || "AI test exercise",
+        trackingType: movementTracking === "virtual_grip" ? "virtual_grip" : "pose",
+        targetLabel: `${Number(repetitions) || 0} reps`,
+        progressLabel: `${Number(repetitions) || 0} reps`,
+        status: "not_started",
+        feedback: exerciseDescription.trim() || "Follow the movement instructions you authored.",
+        durationMinutes: 0,
+        sets: 0,
+        reps: Number(repetitions) || 0,
+        difficulty: difficulty === "easy" ? "Easy" : difficulty === "medium" ? "Moderate" : "Hard"
+      },
+      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl }
+    });
+    setTestPaused(false);
+    setTestNote(null);
+  };
+
+  // Ends the test run — whether it finished (STOP / all prescribed reps done)
+  // or was abandoned (Exit / Discard & exit). Releases the local demo-clip
+  // object URL and returns to the authoring workspace; the RecordingResult and
+  // pose summary are deliberately dropped, since a test never uploads anything.
+  const closeTest = (note: string | null) => {
+    const demoVideoUrl = testSession?.testConfig.demoVideoUrl;
+    if (demoVideoUrl) URL.revokeObjectURL(demoVideoUrl);
+    setTestSession(null);
+    setTestPaused(false);
+    setTestNote(note);
+  };
+
+  // Test run in progress — the same immersive PatientSessionPage patients get,
+  // rendered INSTEAD of the authoring workspace (this component stays mounted,
+  // so no authored state is lost). It comes straight back here on finish/exit.
+  if (testSession) {
+    return (
+      <PatientSessionPage
+        exercise={testSession.exercise}
+        paused={testPaused}
+        lowConfidence={false}
+        testConfig={testSession.testConfig}
+        onBack={() => closeTest("Test session ended — nothing was uploaded · จบการทดสอบ — ไม่มีการอัปโหลด")}
+        onRestart={() => setTestPaused(false)}
+        onTogglePause={() => setTestPaused((value) => !value)}
+        onFinishRecording={() =>
+          closeTest(
+            "Test session finished — the take was discarded, nothing was uploaded · จบการทดสอบ — บันทึกนี้ถูกยกเลิก ไม่มีการอัปโหลด"
+          )
+        }
+      />
+    );
+  }
+
   return (
     <section className="therapist-shell exercise-creation-page">
       <TherapistSidebar activeLabel="Exercise Library" onNavigate={onNavigate} onLogout={onLogout} />
@@ -706,7 +815,34 @@ export function ExerciseAiPage({
             <div>
               <h1>{exerciseName.trim() || "AI Reference Authoring"}</h1>
             </div>
+            {/* Test the exercise live against the camera with the criteria on
+                screen right now — the patient session flow, minus the upload /
+                confirmation step: it lands back on this page when finished. */}
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleStartTest}
+              disabled={!canTest}
+              title={
+                testDisabledReason ??
+                "Run this exercise against the live camera using the criteria you've authored. Nothing is uploaded — you return here when the test ends."
+              }
+            >
+              <Play size={16} /> Test exercise · ทดสอบท่า
+            </button>
           </div>
+
+          {/* Result of the last test run — a test always discards its take, so
+              there is never an upload/confirmation step to walk through. */}
+          {testNote && (
+            <div className="ai-banner ai-banner-success">
+              <CheckCircle2 size={20} />
+              <div>
+                <strong>Test run complete</strong>
+                <div>{testNote}</div>
+              </div>
+            </div>
+          )}
 
           {/* Success banner */}
           {savedExerciseName && (

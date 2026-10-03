@@ -22,14 +22,43 @@ import { useAuth } from "../store/authStore";
 import {
   getPatientScheduledExerciseDemoVideo,
   getPatientScheduledExercisePoseReference,
+  scoreExerciseTestRep,
   scorePoseRep
 } from "../services/api";
 import type { PatientExercise, TrackingType } from "../types";
+
+/** Authoring-test session config — passed by ExerciseAiPage's "Test exercise"
+ * button. A test runs the exact same PatientSessionPage flow a patient gets,
+ * but against criteria that may not be saved (nor scheduled) yet, so both
+ * network-backed pieces are redirected: the pose criteria come from here
+ * instead of GET /scheduled-exercises/:id/pose-reference, and each completed
+ * rep is scored through POST /exercises/test-pose-rep-score (therapist/admin
+ * scoped — the patient endpoint requires a scheduled exercise), so a test run
+ * gets REAL scores from the same scoring engine. The caller owns the
+ * lifecycle: finishing hands the recording to onFinishRecording as usual, and
+ * the caller discards it (there is no upload/confirmation step) and returns to
+ * the authoring page. */
+export interface SessionTestConfig {
+  /** Just-authored criteria (fresh calibration/checkpoints, or the stored copy
+   * of the exercise being edited) — used BOTH to build the client-side FSM and
+   * (masterSamples included) as the scoring reference. Null falls back to the
+   * shared defaults, same as a normal session with no stored reference. */
+  poseReference: PoseReferencePublic | null;
+  /** exercise_library row id when editing an already-saved exercise — lets
+   * the test-scoring endpoint fall back to the stored reference if the body
+   * copy carries no master samples. Null/undefined for a brand-new exercise. */
+  exerciseLibraryId?: string | null;
+  /** Object URL of the therapist's base demo clip, shown as the reference media. */
+  demoVideoUrl?: string | null;
+}
 
 interface PatientSessionPageProps {
   exercise: PatientExercise;
   paused: boolean;
   lowConfidence: boolean;
+  /** Non-null = authoring test run (see SessionTestConfig); null/omitted = a
+   * normal patient session with server-backed reference + scoring. */
+  testConfig?: SessionTestConfig | null;
   onBack: () => void;
   onRestart: () => void;
   onTogglePause: () => void;
@@ -107,12 +136,14 @@ const DEFAULT_POSE_REFERENCE = {
 // movement is visible while the patient records. Returns null while loading or
 // when the exercise has no video / the fetch fails; callers fall back to the
 // static ReferenceThumb.
-function useDemoVideoUrl(scheduledExerciseId: string): string | null {
+function useDemoVideoUrl(scheduledExerciseId: string | null): string | null {
   const { token } = useAuth();
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    // null id = the caller supplies its own demo media (a test run's local
+    // base clip) — there is no scheduled exercise to fetch from.
+    if (!token || !scheduledExerciseId) return;
     let cancelled = false;
     let objectUrl: string | null = null;
     setUrl(null);
@@ -155,8 +186,11 @@ function ReferenceThumb({ trackingType }: { trackingType: TrackingType }) {
 // Wrapper that swaps the static reference thumb for the actual demo video once
 // it resolves — used by both the floating reference panel and the desktop
 // sidebar's "Exercise demo" section.
-function ExerciseDemoMedia({ exercise }: { exercise: PatientExercise }) {
-  const demoUrl = useDemoVideoUrl(exercise.id);
+function ExerciseDemoMedia({ exercise, overrideUrl }: { exercise: PatientExercise; overrideUrl?: string | null }) {
+  // A test run plays the therapist's own (possibly still unsaved) base clip —
+  // there is no scheduled exercise whose demo video could be fetched.
+  const fetchedUrl = useDemoVideoUrl(overrideUrl ? null : exercise.id);
+  const demoUrl = overrideUrl ?? fetchedUrl;
   if (demoUrl) {
     return (
       <video
@@ -189,6 +223,7 @@ export function PatientSessionPage({
   exercise,
   paused,
   lowConfidence,
+  testConfig = null,
   onBack,
   onRestart,
   onTogglePause,
@@ -511,7 +546,17 @@ export function PatientSessionPage({
   // Fetch the exercise's stored pose criteria and (re)build the FSM. Skipped
   // for non-pose exercises (their demo-timer flow above stays unchanged).
   useEffect(() => {
-    if (!poseTrackingEnabled || !token) return;
+    if (!poseTrackingEnabled) return;
+    // Test run (ExerciseAiPage's "Test exercise"): use the just-authored
+    // criteria directly — there is no scheduled exercise to fetch them from.
+    // testConfig's identity is stable for the whole run (it's held in the
+    // caller's state), so this builds the FSM once, not on every render.
+    if (testConfig) {
+      poseReferenceRef.current = testConfig.poseReference;
+      fsmRef.current = new ExerciseFSM((testConfig.poseReference ?? DEFAULT_POSE_REFERENCE).fsmConfig);
+      return;
+    }
+    if (!token) return;
     let cancelled = false;
     getPatientScheduledExercisePoseReference(token, exercise.id)
       .then((response) => {
@@ -529,59 +574,97 @@ export function PatientSessionPage({
     return () => {
       cancelled = true;
     };
-  }, [poseTrackingEnabled, token, exercise.id]);
+  }, [poseTrackingEnabled, token, exercise.id, testConfig]);
+
+  // Shared "rep accepted" continuation: advances the "X of Y" counter (demoDone
+  // drives the camera HUD + sidebar progress bar), then either auto-finishes
+  // the session (all prescribed reps done → the normal STOP completion flow) or
+  // runs the short next-rep countdown back into starting-position detection.
+  // Runs for every backend-scored rep, patient session or therapist test alike.
+  function advanceAfterRep(
+    cycle: number,
+    repNumber: number,
+    score: number | null,
+    feedback: string | null,
+    countedStatus: string
+  ) {
+    demoDoneRef.current = Math.min(repNumber, total > 0 ? total : repNumber);
+    setDemoDone(demoDoneRef.current);
+    if (score !== null) {
+      setDemoScore(score);
+      poseRepScoresRef.current.push(score);
+    }
+    setRepFeedback(feedback);
+    setPoseStatusText(countedStatus);
+
+    if (total > 0 && demoDoneRef.current >= total) {
+      // All prescribed reps done → transition into the existing
+      // session-completion flow (STOP → SessionUploadConfirmPage for a real
+      // session; straight back to the authoring page for a test run).
+      setPoseStatusText("All reps completed — finishing… · ทำครบทุกรอบแล้ว กำลังจบเซสชัน");
+      window.setTimeout(() => {
+        if (cycle === repCycleRef.current) stopRef.current();
+      }, 2000);
+      return;
+    }
+
+    // Short countdown before allowing the next repetition, then return to
+    // starting-position detection (FSM reset).
+    let remaining = 3;
+    const tick = () => {
+      if (cycle !== repCycleRef.current) return;
+      if (remaining <= 0) {
+        scoringHoldRef.current = false;
+        fsmRef.current?.reset();
+        setPoseStatusText("Move into the starting position · กลับสู่ท่าเริ่มต้น");
+        return;
+      }
+      setPoseStatusText(`Next rep in ${remaining}… · รอบถัดไปในอีก ${remaining}…`);
+      remaining -= 1;
+      window.setTimeout(tick, 1000);
+    };
+    window.setTimeout(tick, 1000);
+  }
 
   // Submits one captured repetition to the backend and updates the session UI.
-  // Invoked from the rAF loop when the FSM reports repCompleted.
+  // Invoked from the rAF loop when the FSM reports repCompleted. A test run
+  // scores through the therapist-scoped test endpoint (same engine, no patient
+  // scheduled exercise involved); a normal session uses the patient endpoint.
+  // Either way the rep only counts after the backend responds successfully.
   async function submitCompletedRep(completed: CompletedRep) {
     const cycle = repCycleRef.current;
     const repNumber = demoDoneRef.current + 1;
     setPoseStatusText(`Scoring rep ${repNumber}… · กำลังให้คะแนนรอบที่ ${repNumber}`);
     try {
       if (!token) throw new Error("Not signed in.");
-      const { rep } = await scorePoseRep(token, exercise.id, {
+      const repRequest = {
         repNumber,
         frames: completed.sequence,
         peakRom: completed.peakRom,
         baseTrunkPoint: completed.baseTrunkPoint,
         baseShoulderWidthNorm: completed.baseShoulderWidthNorm
-      });
+      };
+      const { rep } = testConfig
+        ? await scoreExerciseTestRep(token, {
+            ...repRequest,
+            exerciseId: testConfig.exerciseLibraryId ?? undefined,
+            // The full on-screen reference (masterSamples included) — the
+            // therapist tests exactly what they're looking at, even before
+            // saving. The server falls back to the stored library reference
+            // when this copy carries no master samples.
+            poseReference: testConfig.poseReference ?? undefined
+          })
+        : await scorePoseRep(token, exercise.id, repRequest);
       if (cycle !== repCycleRef.current) return; // session restarted meanwhile
 
       // Success — NOW the rep counts (demoDone drives "X of Y" + progress %).
-      demoDoneRef.current = Math.min(repNumber, total > 0 ? total : repNumber);
-      setDemoDone(demoDoneRef.current);
-      setDemoScore(rep.score);
-      poseRepScoresRef.current.push(rep.score);
-      setRepFeedback(rep.feedback);
-      setPoseStatusText(`Rep ${repNumber}: ${rep.score} pts · รอบที่ ${repNumber}: ${rep.score} คะแนน`);
-
-      if (total > 0 && demoDoneRef.current >= total) {
-        // All prescribed reps done → transition into the existing
-        // session-completion flow (STOP → SessionUploadConfirmPage).
-        setPoseStatusText("All reps completed — finishing… · ทำครบทุกรอบแล้ว กำลังจบเซสชัน");
-        window.setTimeout(() => {
-          if (cycle === repCycleRef.current) stopRef.current();
-        }, 2000);
-        return;
-      }
-
-      // Short countdown before allowing the next repetition, then return to
-      // starting-position detection (FSM reset).
-      let remaining = 3;
-      const tick = () => {
-        if (cycle !== repCycleRef.current) return;
-        if (remaining <= 0) {
-          scoringHoldRef.current = false;
-          fsmRef.current?.reset();
-          setPoseStatusText("Move into the starting position · กลับสู่ท่าเริ่มต้น");
-          return;
-        }
-        setPoseStatusText(`Next rep in ${remaining}… · รอบถัดไปในอีก ${remaining}…`);
-        remaining -= 1;
-        window.setTimeout(tick, 1000);
-      };
-      window.setTimeout(tick, 1000);
+      advanceAfterRep(
+        cycle,
+        repNumber,
+        rep.score,
+        rep.feedback,
+        `Rep ${repNumber}: ${rep.score} pts · รอบที่ ${repNumber}: ${rep.score} คะแนน`
+      );
     } catch (err) {
       if (cycle !== repCycleRef.current) return;
       // Failed scoring (network/backend error) — the rep is NOT counted; the
@@ -882,7 +965,7 @@ export function PatientSessionPage({
                   desktop side panel has its own target section). */}
 
               <div className={`reference-panel${referenceOpen ? " open" : ""}`}>
-                <ExerciseDemoMedia exercise={exercise} />
+                <ExerciseDemoMedia exercise={exercise} overrideUrl={testConfig?.demoVideoUrl} />
                 <span>Reference · ท่าอ้างอิง</span>
               </div>
               {/* Compact floating toggle: the reference thumb stays hidden behind
@@ -1017,7 +1100,7 @@ export function PatientSessionPage({
               sidebar width via CSS. */}
           <div className="side-section side-reference">
             <p className="side-label">Exercise demo · ท่าอ้างอิง</p>
-            <ExerciseDemoMedia exercise={exercise} />
+            <ExerciseDemoMedia exercise={exercise} overrideUrl={testConfig?.demoVideoUrl} />
           </div>
 
           {/* Therapist instruction (exercise.feedback carries the scheduled
