@@ -28,7 +28,7 @@ import {
 import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
 import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
 import type { ExerciseFSMConfig, FrameFeature, AngleDefinition, PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
-import { ApiError, archiveExercise, createExercise, createExerciseVersion, getExerciseLibrary, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
+import { ApiError, archiveExercise, createExercise, createExerciseVersion, getFileContent, getExerciseLibrary, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
 import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType, PatientExercise } from "../types";
 import { PatientSessionPage } from "./PatientSessionPage";
 import type { SessionTestConfig } from "./PatientSessionPage";
@@ -146,6 +146,17 @@ export function ExerciseAiPage({
   const [scanProgressText, setScanProgressText] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
 
+  // Replayable demo-video playback for Step 2:
+  //   baseClipUrl — object URL of the locally selected file, so the clip can be
+  //                 replayed any time in this session (including after the
+  //                 scan has consumed it for calibration);
+  //   savedDemo*  — the exercise's STORED demo video, streamed back through the
+  //                 auth'd files endpoint, so a therapist revisiting this page
+  //                 later can replay it without re-uploading anything.
+  const [baseClipUrl, setBaseClipUrl] = useState<string | null>(null);
+  const [savedDemoUrl, setSavedDemoUrl] = useState<string | null>(null);
+  const [savedDemoState, setSavedDemoState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+
   // Calibration results (null until the base clip has been scanned).
   const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
   const [baseFrames, setBaseFrames] = useState<FrameSample[]>([]);
@@ -219,6 +230,54 @@ export function ExerciseAiPage({
   const isOwner = !targetExercise || (user ? targetExercise.createdById === user.id || user.role === "admin" : false);
   const isArchived = targetExercise?.status === "archived";
   const isPoseExercise = movementTracking === "pose";
+
+  // One object URL per selected file — created on selection and revoked when
+  // it's replaced or removed, so the Step 2 player can replay the clip freely
+  // (the scan never consumes the file itself).
+  useEffect(() => {
+    if (!baseClip) {
+      setBaseClipUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(baseClip);
+    setBaseClipUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [baseClip]);
+
+  // Stored demo video — resolved whenever the edited exercise already has one
+  // attached (same pattern as ExerciseCreationPage): the blob comes through
+  // GET /files/:id/content and lives in an object URL revoked on change or
+  // unmount. This is what makes the demo replayable on LATER visits to this
+  // page — the file id comes back with the exercise row, so reopening the
+  // exercise fetches it again instead of showing an empty upload box.
+  useEffect(() => {
+    const fileId = targetExercise?.demoVideoFileId ?? null;
+    setSavedDemoUrl(null);
+    if (!token || !fileId) {
+      setSavedDemoState("idle");
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setSavedDemoState("loading");
+    getFileContent(token, fileId)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setSavedDemoUrl(objectUrl);
+        setSavedDemoState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setSavedDemoState("error");
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [token, targetExercise?.demoVideoFileId]);
 
   useEffect(() => {
     setExerciseName(exercise?.name ?? initialName);
@@ -950,10 +1009,50 @@ export function ExerciseAiPage({
                   />
                 </label>
 
+                {/* Replayable demo player — the freshly selected clip wins (it's
+                    the one that was just scanned/will be uploaded); otherwise the
+                    exercise's SAVED demo video streams back in, so the demo can be
+                    replayed whenever this page is reopened later. Hidden while a
+                    scan is running: the canvas below is the live scan preview and
+                    the card should only ever show ONE video-like surface. */}
+                {!scanBusy &&
+                  (baseClipUrl || savedDemoUrl ? (
+                    <>
+                      <video
+                        className="ai-demo-video"
+                        src={baseClipUrl ?? savedDemoUrl ?? undefined}
+                        controls
+                        playsInline
+                        preload="metadata"
+                      />
+                      <p className="library-card-sub" style={{ marginTop: 4 }}>
+                        {baseClipUrl
+                          ? "Selected clip — replay it any time · คลิปที่เลือก — ดูซ้ำได้ตลอด"
+                          : "Saved demo video — replay it any time · วิดีโอสาธิตที่บันทึกไว้ — ดูซ้ำได้ตลอด"}
+                      </p>
+                    </>
+                  ) : savedDemoState === "loading" ? (
+                    <p className="ai-progress">Loading saved demo video… · กำลังโหลดวิดีโอสาธิต…</p>
+                  ) : savedDemoState === "error" ? (
+                    <p className="ai-error">Couldn't load the saved demo video. · โหลดวิดีโอสาธิตไม่สำเร็จ</p>
+                  ) : null)}
+
                 {/* Live scan preview — the video frame plus the tracked skeleton,
                     drawn for every scanned frame (reference CreateExerciseView
-                    behavior). Doubles as the "no pose detected" warning surface. */}
-                <canvas ref={scanPreviewCanvasRef} className="ai-frame-preview" width={480} height={270} />
+                    behavior). Doubles as the "no pose detected" warning surface.
+                    Kept ALWAYS MOUNTED (handleScanBaseClip reads this ref
+                    synchronously the moment Scan is pressed, before React can
+                    re-render) but hidden via display whenever no scan is running —
+                    the scanner only draws into the attribute-sized canvas, so it
+                    doesn't need to be visible to work, and the demo player above
+                    becomes the card's single video surface when idle. */}
+                <canvas
+                  ref={scanPreviewCanvasRef}
+                  className="ai-frame-preview"
+                  width={480}
+                  height={270}
+                  style={{ display: scanBusy ? "block" : "none" }}
+                />
 
                 <button
                   type="button"

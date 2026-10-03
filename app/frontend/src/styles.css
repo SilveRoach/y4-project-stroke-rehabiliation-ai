@@ -10205,6 +10205,20 @@ tr.admin-user-row:hover .admin-row-open-hint {
   display: block;
 }
 
+/* Replayable demo video in Step 2 (ExerciseAiPage) — the locally selected clip
+   or the exercise's saved demo video (fetched back via GET /files/:id/content),
+   framed like the scan/preview canvas so the card doesn't jump between states. */
+.ai-demo-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-top: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0f172a;
+  display: block;
+  object-fit: contain;
+}
+
 /* Checkpoint marking (ExerciseAiPage) — reuses the existing checkpoint card /
    grid classes above; these fill in the selected-role and list affordances. */
 .ai-checkpoint-card {
