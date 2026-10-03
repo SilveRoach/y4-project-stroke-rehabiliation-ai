@@ -14,6 +14,7 @@ import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import {
   ApiError,
   getPatientProgressTrend,
+  getPatientPlans,
   getTherapistDashboard,
   type TherapistDashboardData
 } from "../services/api";
@@ -21,6 +22,7 @@ import { useAuth } from "../store/authStore";
 import { useProfilePicture, useOwnProfilePicture } from "../hooks/useProfilePicture";
 import type { PatientProgressTrend, TherapistPatientSummary } from "../types";
 import { initialsFromName } from "../utils/displayName";
+import { ISO_DATE_RE } from "../utils/rehabPlan";
 
 interface TherapistDashboardPageProps {
   onLogout: () => void;
@@ -30,6 +32,210 @@ interface TherapistDashboardPageProps {
 
 const WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", { weekday: "long" });
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "long", year: "numeric" });
+// Plan-period labels: chart subtitle ("1 Sep 2026 – 14 Sep 2026"), x-axis
+// ticks ("5 Sep") and tooltip headers ("5 September 2026").
+const PERIOD_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const AXIS_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
+const FULL_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+// ---------------------------------------------------------------------------
+// Plan-scoped recovery chart — the plan selector next to the patient selector
+// scopes "Avg. Recovery Progress" to ONE of that patient's rehabilitation
+// plans (GET /patients/:id/plans; therapists may read any patient's plans).
+// Only the slice of the payload this chart reads is kept — the full plan row
+// (attachments, notes, exercise labels…) is far larger than the graph needs.
+// ---------------------------------------------------------------------------
+
+interface ChartPlanExercise {
+  // Raw exercise_performance_result rows: attemptNumber + finalScore/ptScore/aiScore.
+  performanceResults: any[];
+}
+
+interface ChartPlanDay {
+  /** "YYYY-MM-DD" of this scheduled day — null only for undated rows. */
+  dateLabel: string | null;
+  exercises: ChartPlanExercise[];
+}
+
+interface ChartPlan {
+  id: string;
+  name: string;
+  status: string;
+  startDateLabel: string;
+  endDateLabel: string;
+  days: ChartPlanDay[];
+}
+
+/** Prisma Date → "YYYY-MM-DD" (rows arrive as ISO strings over the wire). */
+function isoSliceDate(value: any): string {
+  if (!value) return "";
+  return typeof value === "string" ? value.slice(0, 10) : new Date(value).toISOString().slice(0, 10);
+}
+
+/** Parse "YYYY-MM-DD" as a LOCAL date (day-stepping must not cross timezones). */
+function parseIsoDate(iso: string): Date {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+// Slim sibling of PatientProgressPage's mapServerPlans — same date-derivation
+// rules (plan start falls back to the first scheduled day), fewer fields.
+function mapPlansForChart(serverPlans: any[]): ChartPlan[] {
+  return serverPlans.map((sp: any) => {
+    const firstScheduleDate = sp.scheduleDays?.[0]?.scheduledDate ? isoSliceDate(sp.scheduleDays[0].scheduledDate) : "";
+    const start = sp.startDate ? isoSliceDate(sp.startDate) : firstScheduleDate;
+    const end = sp.endDate ? isoSliceDate(sp.endDate) : "";
+    return {
+      id: sp.id,
+      name: sp.name,
+      status: sp.status,
+      startDateLabel: start,
+      endDateLabel: end,
+      days: (sp.scheduleDays ?? []).map((sd: any) => ({
+        dateLabel: sd.scheduledDate ? isoSliceDate(sd.scheduledDate) : null,
+        exercises: (sd.scheduledExercises ?? []).map((ex: any) => ({
+          performanceResults: ex.performanceResults ?? []
+        }))
+      }))
+    };
+  });
+}
+
+interface PlanDayPoint {
+  /** "YYYY-MM-DD" (or synthetic "day-N") key for this x-axis slot. */
+  key: string;
+  /** Short axis label ("5 Sep"); "Day N" for plans with no date anchor. */
+  label: string;
+  /** Long tooltip label ("5 September 2026"). */
+  longLabel: string;
+  /** Mean of the day's exercises' latest scores — null = nothing scored yet. */
+  score: number | null;
+  /** How many exercises fed the average (tooltip context). */
+  scoredExercises: number;
+}
+
+// One exercise's score = its LATEST attempt's effective score — the same
+// finalScore ?? ptScore ?? aiScore precedence PatientProgressPage,
+// PatientHistoryPage and therapist.service's own report already use.
+function latestExerciseScore(results: any[]): number | null {
+  if (!results || results.length === 0) return null;
+  const latest = results.reduce(
+    (best: any, candidate: any) => (!best || (candidate?.attemptNumber ?? 0) > (best?.attemptNumber ?? 0) ? candidate : best),
+    null
+  );
+  const raw = latest?.finalScore ?? latest?.ptScore ?? latest?.aiScore;
+  if (raw === null || raw === undefined) return null;
+  const num = typeof raw === "number" ? raw : Number(raw);
+  return Number.isNaN(num) ? null : num;
+}
+
+function planDayPoint(day: ChartPlanDay | null, key: string, label: string, longLabel: string): PlanDayPoint {
+  const scores: number[] = [];
+  for (const exercise of day?.exercises ?? []) {
+    const score = latestExerciseScore(exercise.performanceResults);
+    if (score !== null) scores.push(score);
+  }
+  return {
+    key,
+    label,
+    longLabel,
+    // Average across the exercises that HAVE a score — an unscored exercise
+    // never drags the day down as a phantom 0, and a day with no scores at all
+    // stays null (a gap in the line, never a fabricated number).
+    score: scores.length > 0 ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length) : null,
+    scoredExercises: scores.length
+  };
+}
+
+// One point per calendar day from the plan's earliest to latest scheduled date
+// — a 14-day plan produces exactly 14 points, whatever dates the therapist
+// actually scheduled exercises on. Falls back to "Day 1…N" slots when the
+// plan's days carry no dates, and to the dated days themselves when the span
+// is unreasonably long (> 180 days) so the axis can't explode.
+function buildPlanDayPoints(plan: ChartPlan | null): PlanDayPoint[] {
+  if (!plan) return [];
+
+  const dayByDate = new Map<string, ChartPlanDay>();
+  for (const day of plan.days) {
+    if (day.dateLabel && ISO_DATE_RE.test(day.dateLabel)) dayByDate.set(day.dateLabel, day);
+  }
+  if (dayByDate.size === 0) {
+    return plan.days.map((day, index) => planDayPoint(day, `day-${index + 1}`, `Day ${index + 1}`, `Day ${index + 1}`));
+  }
+
+  const sortedDates = Array.from(dayByDate.keys()).sort();
+
+  // Bounds = the plan's OWN start/end dates when present (the user-visible plan
+  // period — a 14-day plan charts 14 days even if one schedule row is missing),
+  // widened by the scheduled days themselves whenever they fall outside.
+  // ISO dates compare correctly as strings; sortedDates guarantees min ≤ max.
+  const minIso = ISO_DATE_RE.test(plan.startDateLabel) && plan.startDateLabel < sortedDates[0] ? plan.startDateLabel : sortedDates[0];
+  const lastScheduled = sortedDates[sortedDates.length - 1];
+  const maxIso = ISO_DATE_RE.test(plan.endDateLabel) && plan.endDateLabel > lastScheduled ? plan.endDateLabel : lastScheduled;
+
+  const first = parseIsoDate(minIso);
+  const last = parseIsoDate(maxIso);
+  const spanDays = Math.round((last.getTime() - first.getTime()) / 86_400_000) + 1;
+
+  const dates: string[] = [];
+  if (spanDays <= 180) {
+    const cursor = new Date(first);
+    while (cursor.getTime() <= last.getTime()) {
+      dates.push(
+        `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`
+      );
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  } else {
+    dates.push(...sortedDates);
+  }
+
+  return dates.map((iso) => {
+    const date = parseIsoDate(iso);
+    return planDayPoint(dayByDate.get(iso) ?? null, iso, AXIS_DATE_FORMATTER.format(date), FULL_DATE_FORMATTER.format(date));
+  });
+}
+
+// "1 Sep 2026 – 14 Sep 2026" (or a scheduled-day count when undated) for the
+// chart subtitle — the same min/max the x-axis is sized to.
+function planPeriodLabel(plan: ChartPlan): string {
+  const count = plan.days.length;
+  if (ISO_DATE_RE.test(plan.startDateLabel) && ISO_DATE_RE.test(plan.endDateLabel)) {
+    return `${PERIOD_DATE_FORMATTER.format(parseIsoDate(plan.startDateLabel))} – ${PERIOD_DATE_FORMATTER.format(
+      parseIsoDate(plan.endDateLabel)
+    )}`;
+  }
+  if (ISO_DATE_RE.test(plan.startDateLabel)) {
+    return `from ${PERIOD_DATE_FORMATTER.format(parseIsoDate(plan.startDateLabel))} · ${count} day${count === 1 ? "" : "s"}`;
+  }
+  return `${count} scheduled day${count === 1 ? "" : "s"}`;
+}
+
+// Tooltip for the plan-day chart — recharts' default tooltip prints raw nulls
+// for unscored days, so this renders "No score yet" instead and shows how many
+// exercises fed the average.
+function PlanDayTooltip({ active, payload }: { active?: boolean; payload?: readonly any[] }) {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0].payload as PlanDayPoint;
+  return (
+    <div
+      style={{
+        background: "var(--bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        padding: "8px 10px",
+        fontSize: 13
+      }}
+    >
+      <strong style={{ display: "block", marginBottom: 2 }}>{point.longLabel}</strong>
+      <span>
+        {point.score === null
+          ? "No score yet · ยังไม่มีคะแนน"
+          : `Avg. score ${point.score}/100 · ${point.scoredExercises} exercise${point.scoredExercises === 1 ? "" : "s"}`}
+      </span>
+    </div>
+  );
+}
 
 // One patient-table avatar: resolves the row's profilePictureFileId to a blob
 // object URL via the shared useProfilePicture hook (the file lives behind the
@@ -95,6 +301,17 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
   const [trend, setTrend] = useState<PatientProgressTrend | null>(null);
   const [trendLoading, setTrendLoading] = useState(false);
 
+  // Plan selector (next to the patient selector) — holds EVERY plan the
+  // selected patient has (GET /patients/:id/plans; the backend lets any
+  // therapist read any patient's plans). Choosing one scopes the chart to that
+  // plan's min→max date with one point per day. On patient switch the list is
+  // re-fetched and the active plan auto-selected (falling back to the most
+  // recent plan) so the chart is immediately plan-sized; picking
+  // "Select plan…" drops back to the pre-existing weekly trend.
+  const [planOptions, setPlanOptions] = useState<ChartPlan[]>([]);
+  const [planOptionsLoading, setPlanOptionsLoading] = useState(false);
+  const [trendPlanId, setTrendPlanId] = useState<string | null>(null);
+
   useEffect(() => {
     if (!token || !trendPatientId) {
       setTrend(null);
@@ -119,6 +336,42 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
     };
   }, [token, trendPatientId]);
 
+  // Load all of the selected patient's plans and auto-select one (see the
+  // state declaration above for the auto-select rules). Selection is reset
+  // synchronously so a fast patient switch can never keep the previous
+  // patient's plan (or worse, chart THEIR days under the new patient).
+  useEffect(() => {
+    if (!token || !trendPatientId) {
+      setPlanOptions([]);
+      setTrendPlanId(null);
+      return;
+    }
+    let cancelled = false;
+    setPlanOptionsLoading(true);
+    setTrendPlanId(null);
+
+    getPatientPlans(token, trendPatientId)
+      .then(({ plans }) => {
+        if (cancelled) return;
+        const mapped = mapPlansForChart(plans);
+        setPlanOptions(mapped);
+        const preferred = mapped.find((plan) => plan.status === "active") ?? mapped[0] ?? null;
+        setTrendPlanId(preferred?.id ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPlanOptions([]);
+        setTrendPlanId(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPlanOptionsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, trendPatientId]);
+
   const filteredPatients = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return patients;
@@ -131,8 +384,20 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
   const weeklySessions = dashboard?.weeklySessions ?? [];
 
   const trendPatient = trendPatientId ? (patients.find((p) => p.id === trendPatientId) ?? null) : null;
-  const trendDelta =
-    trend && trend.points.length > 1 ? trend.points[trend.points.length - 1].score - trend.points[0].score : null;
+  const selectedPlan = planOptions.find((plan) => plan.id === trendPlanId) ?? null;
+  const planPoints = useMemo(() => buildPlanDayPoints(selectedPlan), [selectedPlan]);
+  // Delta badge — plan mode: first vs last SCORED day of the selected plan;
+  // weekly mode: first vs last point of the existing report trend (unchanged).
+  const scoredPlanPoints = planPoints.filter(
+    (point): point is PlanDayPoint & { score: number } => point.score !== null
+  );
+  const trendDelta = selectedPlan
+    ? scoredPlanPoints.length > 1
+      ? scoredPlanPoints[scoredPlanPoints.length - 1].score - scoredPlanPoints[0].score
+      : null
+    : trend && trend.points.length > 1
+      ? trend.points[trend.points.length - 1].score - trend.points[0].score
+      : null;
 
   const displayName = user?.displayName || user?.username || "Therapist";
   const ownAvatarUrl = useOwnProfilePicture();
@@ -201,7 +466,13 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
               <div className="therapist-chart-heading">
                 <div>
                   <strong>Avg. Recovery Progress</strong>
-                  <p>{trendPatient ? trend?.planName : "Select a patient to view their recovery trend"}</p>
+                  <p>
+                    {trendPatient
+                      ? selectedPlan
+                        ? `${selectedPlan.name} · ${planPeriodLabel(selectedPlan)}`
+                        : (trend?.planName ?? "Select a plan to view its day-by-day scores")
+                      : "Select a patient to view their recovery trend"}
+                  </p>
                 </div>
                 <div className="therapist-chart-heading-actions">
                   <select
@@ -217,6 +488,32 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                       </option>
                     ))}
                   </select>
+                  {/* Plan selector — populated with EVERY plan the selected
+                      patient has; choosing one sizes the chart to that plan's
+                      min→max date (one point per day, each day = the average
+                      of that day's exercise scores). */}
+                  <select
+                    className="admin-role-select"
+                    value={trendPlanId ?? ""}
+                    onChange={(event) => setTrendPlanId(event.target.value || null)}
+                    disabled={!trendPatientId || planOptionsLoading}
+                    aria-label="Select plan for recovery progress chart"
+                  >
+                    <option value="">
+                      {!trendPatientId
+                        ? "Select a patient first…"
+                        : planOptionsLoading
+                          ? "Loading plans…"
+                          : planOptions.length > 0
+                            ? "Select plan…"
+                            : "No plans yet"}
+                    </option>
+                    {planOptions.map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {plan.name} ({plan.status})
+                      </option>
+                    ))}
+                  </select>
                   {trendDelta !== null && (
                     <span className={`badge-pill ${trendDelta >= 0 ? "good" : "poor"}`}>
                       {trendDelta >= 0 ? "+" : ""}
@@ -225,11 +522,55 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                   )}
                 </div>
               </div>
-              {trendLoading ? (
+              {trendLoading || planOptionsLoading ? (
                 <div className="therapist-chart-empty">
                   <TrendingUp size={22} />
                   <p>Loading trend…</p>
                 </div>
+              ) : trendPatient && selectedPlan ? (
+                // Plan-scoped chart: one point per calendar day across the
+                // plan's min→max date (a 14-day plan → 14 days). Each day's
+                // score is the AVERAGE of that day's exercises' latest scores;
+                // unscored days stay null → a gap in the line (connectNulls
+                // off), never a fabricated 0.
+                planPoints.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={planPoints} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 11, fill: "var(--text-secondary)" }}
+                        axisLine={false}
+                        tickLine={false}
+                        // One tick per day so every day of the plan is visible;
+                        // longer plans thin the labels out instead of colliding.
+                        interval={planPoints.length > 14 ? "preserveStartEnd" : 0}
+                        minTickGap={8}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 12, fill: "var(--text-secondary)" }}
+                        axisLine={false}
+                        tickLine={false}
+                        domain={[0, 100]}
+                      />
+                      <Tooltip content={PlanDayTooltip} />
+                      <Line
+                        type="monotone"
+                        dataKey="score"
+                        stroke="var(--primary)"
+                        strokeWidth={2.5}
+                        dot={{ fill: "var(--primary)", r: 4, strokeWidth: 0 }}
+                        activeDot={{ r: 6 }}
+                        connectNulls={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="therapist-chart-empty">
+                    <TrendingUp size={22} />
+                    <p>This plan has no scheduled days yet.</p>
+                  </div>
+                )
               ) : trend && trend.points.length > 0 ? (
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={trend.points}>
@@ -255,7 +596,11 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
               ) : trendPatient ? (
                 <div className="therapist-chart-empty">
                   <TrendingUp size={22} />
-                  <p>No scored sessions yet for this patient's plan.</p>
+                  <p>
+                    {planOptions.length > 0
+                      ? "Select a plan above to plot its day-by-day scores."
+                      : "This patient has no rehabilitation plans yet."}
+                  </p>
                 </div>
               ) : (
                 <div className="therapist-chart-empty">

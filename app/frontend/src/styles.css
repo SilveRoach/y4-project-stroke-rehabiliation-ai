@@ -3027,6 +3027,9 @@ div.exercise-card:hover {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  /* Two selectors (patient + plan) plus the delta badge — let them wrap to a
+     second row on narrow cards instead of squeezing the chart heading. */
+  flex-wrap: wrap;
 }
 
 .therapist-chart-heading-actions .admin-role-select {
@@ -5695,6 +5698,7 @@ div.exercise-card:hover {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .pd-program-status {
