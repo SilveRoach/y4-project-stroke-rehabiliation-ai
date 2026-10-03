@@ -187,9 +187,6 @@ export function ExerciseAiPage({
   const [checkpointLabelDraft, setCheckpointLabelDraft] = useState("");
   const [checkpointDescDraft, setCheckpointDescDraft] = useState("");
 
-  // Advanced panel (raw numbers + comparator dropdowns).
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
   // Save state.
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -210,7 +207,6 @@ export function ExerciseAiPage({
   const [testPaused, setTestPaused] = useState(false);
   const [testNote, setTestNote] = useState<string | null>(null);
 
-  const rankedCandidates = calibration?.rankedCandidates ?? [];
   const sensitivityLevels = DIFFICULTY_REP_SENSITIVITY[difficulty];
   const allCheckpointsSet = Boolean(checkpoints.ready && checkpoints.active && checkpoints.return);
 
@@ -390,17 +386,6 @@ export function ExerciseAiPage({
           }
         : derived
     );
-  };
-
-  // Therapist switches the primary tracking angle — re-derive the FSM from
-  // the base clip's series with the current strictness level.
-  const handlePrimaryChange = (id: string) => {
-    setSelectedPrimaryId(id);
-    applyDerivedThresholds(deriveWithScale(sensitivityLevels[repSensitivityIndex].scale));
-  };
-
-  const handleSecondaryChange = (id: string) => {
-    setSelectedSecondaryId(id);
   };
 
   // Strictness slider — re-derives ready/activation/return thresholds from the
@@ -1104,234 +1089,9 @@ export function ExerciseAiPage({
                 )}
               </section>
 
-              {/* Step 5 — Auto-Calibration Result */}
-              <section className="creation-section-card ai-card-full">
-                <div className="ai-card-step-tag">Step 5 · Calibration Results</div>
-                <div className="creation-section-header">
-                  <Dumbbell size={20} />
-                  <div>
-                    <strong>Auto-calibration result</strong>
-                    <p className="library-card-sub">Best tracking angle candidates discovered by frame analysis.</p>
-                  </div>
-                </div>
-
-                {!calibration ? (
-                  <div className="ai-empty-state">
-                    <Film size={36} className="ai-empty-icon" />
-                    <p className="ai-empty">Upload and scan a demo clip on the left to see auto-calibrated angles.</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="ai-candidate-table">
-                      <div className="ai-candidate-row ai-candidate-head">
-                        <span>Candidate angle</span>
-                        <span>Range</span>
-                        <span>Score</span>
-                        <span>Assign as</span>
-                      </div>
-                      {rankedCandidates.map((candidate) => (
-                        <div className="ai-candidate-row" key={candidate.id}>
-                          <strong>{candidate.label}</strong>
-                          <span>{candidate.range.toFixed(1)}°</span>
-                          <span>{candidate.score.toFixed(2)}</span>
-                          <span className="ai-candidate-actions">
-                            <button
-                              type="button"
-                              className={`ai-choice small ${selectedPrimaryId === candidate.id ? "active" : ""}`}
-                              onClick={() => handlePrimaryChange(candidate.id)}
-                            >
-                              Primary
-                            </button>
-                            <button
-                              type="button"
-                              className={`ai-choice small ${selectedSecondaryId === candidate.id ? "active" : ""}`}
-                              onClick={() => handleSecondaryChange(candidate.id)}
-                            >
-                              Secondary
-                            </button>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="ai-derived-summary">
-                      <span>Direction: <strong>{calibration.derived.direction}</strong></span>
-                      <span>Baseline: <strong>{calibration.derived.baseline}°</strong></span>
-                      <span>Extreme: <strong>{calibration.derived.extreme}°</strong></span>
-                      <span>Range: <strong>{calibration.derived.range}°</strong></span>
-                      <span className={`ai-confidence ai-confidence-${calibration.derived.confidence}`}>
-                        Confidence: {calibration.derived.confidence}
-                      </span>
-                    </div>
-                  </>
-                )}
-              </section>
-
-              {/* Step 6 — Rep-Counting Criteria FSM */}
-              <section className="creation-section-card ai-card-full">
-                <div className="ai-card-step-tag">Step 6 · Rep-Counting Criteria</div>
-                <div className="creation-section-header">
-                  <Dumbbell size={20} />
-                  <div>
-                    <strong>Rep-counting criteria (FSM)</strong>
-                    <p className="library-card-sub">Thresholds for starting position, movement activation, and rep return.</p>
-                  </div>
-                </div>
-
-                {!fsmConfig ? (
-                  <div className="ai-empty-state">
-                    <p className="ai-empty">Criteria will be auto-generated once calibration completes.</p>
-                  </div>
-                ) : (
-                  <div className="ai-fsm-grid">
-                    <div className="ai-field">
-                      <label>Ready threshold (°) — {fsmConfig.readyComparator === "greaterThan" ? "above" : "below"}</label>
-                      <input
-                        className="ai-input"
-                        type="number"
-                        value={fsmConfig.readyAngleThreshold}
-                        onChange={(e) => setFsmConfig({ ...fsmConfig, readyAngleThreshold: Number(e.target.value) || 0 })}
-                      />
-                    </div>
-                    <div className="ai-field">
-                      <label>Activation threshold (°) — {fsmConfig.activationComparator === "greaterThan" ? "above" : "below"}</label>
-                      <input
-                        className="ai-input"
-                        type="number"
-                        value={fsmConfig.activationThreshold}
-                        onChange={(e) => setFsmConfig({ ...fsmConfig, activationThreshold: Number(e.target.value) || 0 })}
-                      />
-                    </div>
-                    <div className="ai-field">
-                      <label>Return threshold (°) — {fsmConfig.returnComparator === "greaterThan" ? "above" : "below"}</label>
-                      <input
-                        className="ai-input"
-                        type="number"
-                        value={fsmConfig.returnThreshold}
-                        onChange={(e) => setFsmConfig({ ...fsmConfig, returnThreshold: Number(e.target.value) || 0 })}
-                      />
-                    </div>
-                    <div className="ai-field">
-                      <label>Ready hold (seconds)</label>
-                      <input
-                        className="ai-input"
-                        type="number"
-                        step={0.5}
-                        min={0}
-                        value={fsmConfig.readyHoldSeconds}
-                        onChange={(e) => setFsmConfig({ ...fsmConfig, readyHoldSeconds: Number(e.target.value) || 0 })}
-                      />
-                    </div>
-                    <div className="ai-field">
-                      <label>Min frames per repetition</label>
-                      <input
-                        className="ai-input"
-                        type="number"
-                        min={1}
-                        value={fsmConfig.minRepFrames}
-                        onChange={(e) => setFsmConfig({ ...fsmConfig, minRepFrames: Math.max(1, Math.round(Number(e.target.value) || 1)) })}
-                      />
-                    </div>
-                    <div className="ai-field">
-                      <label>ROM reference angle (°)</label>
-                      <input
-                        className="ai-input"
-                        type="number"
-                        min={0}
-                        max={180}
-                        value={fsmConfig.romReferenceAngle ?? 180}
-                        onChange={(e) => setFsmConfig({ ...fsmConfig, romReferenceAngle: Number(e.target.value) || 0 })}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Hold time before rep counting starts (reference slider). */}
-                {fsmConfig && (
-                  <div className="ai-field" style={{ marginTop: 10 }}>
-                    <label>Starting-position hold before counting: {fsmConfig.readyHoldSeconds.toFixed(1)}s</label>
-                    <input
-                      type="range"
-                      min={0.5}
-                      max={3}
-                      step={0.1}
-                      value={fsmConfig.readyHoldSeconds}
-                      onChange={(e) => setFsmConfig({ ...fsmConfig, readyHoldSeconds: Number(e.target.value) })}
-                      style={{ width: "100%", accentColor: "var(--primary)" }}
-                    />
-                  </div>
-                )}
-
-                {/* Advanced panel — raw numbers + editable comparators (reference
-                    "advanced" panel): editing here desyncs the strictness slider. */}
-                {fsmConfig && (
-                  <>
-                    <button type="button" className="text-action" onClick={() => setShowAdvanced((v) => !v)}>
-                      {showAdvanced ? "▾" : "▸"} Advanced — edit the raw thresholds and comparators
-                    </button>
-                    {showAdvanced && (
-                      <div className="ai-advanced-panel">
-                        <p className="ai-advanced-warning">
-                          ⚠️ Editing these values directly means the rep-counting strictness selector no longer matches
-                          the actual thresholds until it is changed again.
-                        </p>
-                        {(
-                          [
-                            ["ready", "Ready threshold", fsmConfig.readyAngleThreshold, fsmConfig.readyComparator],
-                            ["activation", "Activation threshold", fsmConfig.activationThreshold, fsmConfig.activationComparator],
-                            ["return", "Return threshold", fsmConfig.returnThreshold, fsmConfig.returnComparator]
-                          ] as const
-                        ).map(([key, label, value, comparator]) => (
-                          <div className="ai-field" key={key}>
-                            <label>{label} — comparator</label>
-                            <div className="ai-comparator-row">
-                              <input
-                                className="ai-input"
-                                type="number"
-                                value={value}
-                                onChange={(e) =>
-                                  setFsmConfig({
-                                    ...fsmConfig,
-                                    [`${key}Threshold`]: Number(e.target.value) || 0
-                                  } as ExerciseFSMConfig)
-                                }
-                              />
-                              <select
-                                className="ai-input"
-                                value={comparator}
-                                onChange={(e) =>
-                                  setFsmConfig({
-                                    ...fsmConfig,
-                                    [`${key}Comparator`]: e.target.value === "greaterThan" ? "greaterThan" : "lessThan"
-                                  } as ExerciseFSMConfig)
-                                }
-                              >
-                                <option value="greaterThan">greater than</option>
-                                <option value="lessThan">less than</option>
-                              </select>
-                            </div>
-                          </div>
-                        ))}
-                        <div className="ai-field">
-                          <label>Raw BVE threshold</label>
-                          <input
-                            className="ai-input"
-                            type="number"
-                            step={0.01}
-                            min={0}
-                            value={bveThreshold}
-                            onChange={(e) => setBveThreshold(Number(e.target.value) || 0)}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </section>
-
-              {/* Step 7 — Scanned Frame Preview */}
+              {/* Step 5 — Scanned Frame Preview */}
               <section className="creation-section-card">
-                <div className="ai-card-step-tag">Step 7 · Verify Tracked Frames</div>
+                <div className="ai-card-step-tag">Step 5 · Verify Tracked Frames</div>
                 <div className="creation-section-header">
                   <Film size={20} />
                   <div>
@@ -1361,11 +1121,11 @@ export function ExerciseAiPage({
                 </div>
               </section>
 
-              {/* Step 4 — Checkpoint marking (reference CreateExerciseView):
+              {/* Step 6 — Checkpoint marking (reference CreateExerciseView):
                   mark the starting position / peak / return frames on the base
                   clip; all three angles re-derive the FSM criteria directly. */}
               <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
-                <div className="ai-card-step-tag">Step 8 · Movement Checkpoints (optional)</div>
+                <div className="ai-card-step-tag">Step 6 · Movement Checkpoints (optional)</div>
                 <div className="creation-section-header">
                   <Flag size={20} />
                   <div>
@@ -1464,9 +1224,9 @@ export function ExerciseAiPage({
                 )}
               </section>
 
-              {/* Step 9 — Save to Library */}
+              {/* Step 7 — Save to Library */}
               <section className="creation-section-card ai-card-full">
-                <div className="ai-card-step-tag">Step 9 · Save to Library</div>
+                <div className="ai-card-step-tag">Step 7 · Save to Library</div>
                 <div className="creation-section-header">
                   <Save size={20} />
                   <div>
@@ -1593,7 +1353,7 @@ export function ExerciseAiPage({
                   </div>
                   <p className="library-card-sub" style={{ marginTop: 4 }}>
                     {BVE_SENSITIVITY_LEVELS.find((l) => Math.abs(l.value - bveThreshold) < 1e-6)?.desc ??
-                      `Custom value from the advanced panel: ${bveThreshold}`}
+                      `Custom trunk-sway sensitivity: ${bveThreshold}`}
                   </p>
                 </div>
 

@@ -9968,8 +9968,8 @@ tr.admin-user-row:hover .admin-row-open-hint {
    shared CSS variables, so no new palette is introduced. --- */
 
 /* Mixed step flow: a two-column grid where lighter cards pair up row by row
-   (Step 1 | Step 2, Step 3 | Step 4, Step 7 | Step 8) and the dense steps
-   (5, 6, 9) opt into a full-width row via .ai-card-full. Fills main's full
+   (Step 1 | Step 2, Step 3 | Step 4, Step 5 | Step 6) and the dense step
+   (7) opts into a full-width row via .ai-card-full. Fills main's full
    content width so the rows line up with the heading/banners above (no empty
    strip on the right). */
 .ai-author-stack {
@@ -9990,8 +9990,8 @@ tr.admin-user-row:hover .admin-row-open-hint {
   margin-bottom: 0;
 }
 
-/* Step 8 sits in a half-width column — stack its checkpoint cards instead of
-   squeezing 3 across ~450px. */
+/* Step 6 (movement checkpoints) sits in a half-width column — stack its
+   checkpoint cards instead of squeezing 3 across ~450px. */
 .ai-author-stack > section:not(.ai-card-full) .ai-checkpoint-grid {
   grid-template-columns: 1fr;
 }
