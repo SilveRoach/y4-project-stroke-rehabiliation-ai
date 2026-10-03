@@ -16,6 +16,11 @@
 // to local state immediately after `POST /users` succeeds (rather than
 // re-fetching the whole list) for a snappier create flow.
 //
+// Every row's display name goes through fallbackDisplayName() below (the same
+// `displayName -> first+last -> username -> email/phone -> role label` chain
+// AdminSidebar/TherapistSidebar/AdminSettingsPage use for their profile chrome),
+// so a partly-filled account never renders a blank Name cell or "?" avatar.
+//
 // "Edit" is now REAL for the Patient row — `PATCH /users/:id` accepts an
 // Admin caller editing a Patient target (user-management module's
 // `updateUserProfile()`), saving firstName/lastName/phone/gender/dateOfBirth/
@@ -34,7 +39,7 @@ import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
 import { ApiError, assignPatient, createUser, getUsers, unassignPatient, updateUserProfile, type AdminUserListItem } from "../services/api";
 import { useAuth } from "../store/authStore";
-import { useProfilePicture } from "../hooks/useProfilePicture";
+import { useProfilePicture, useOwnProfilePicture } from "../hooks/useProfilePicture";
 import { initialsFromName } from "../utils/displayName";
 import type { AdminManagedRole, AdminUserSummary, StaffRole } from "../types";
 
@@ -83,15 +88,48 @@ function lastLoginSortKey(label: string): number {
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
 }
 
+// Display-name fallback for a row, mirroring the chrome's own fallback style
+// (AdminSidebar/TherapistSidebar: `displayName || username || "Admin"`;
+// AdminSettingsPage: `displayName || [firstName, lastName].join(" ") ||
+// authDisplayName`). The account table must never render a blank Name cell or a
+// bare "?" avatar for a partly-filled profile — patients register with just a
+// phone number and Therapist/Admin rows can be created with no name parts at
+// all. Chain: displayName -> composed first+last -> username -> email/phone ->
+// the role's generic label.
+function fallbackDisplayName(profile: {
+  displayName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  username?: string | null;
+  email?: string | null;
+  phoneNumber?: string | null;
+  role: AdminUserSummary["role"];
+}): string {
+  const composed = [profile.firstName, profile.lastName]
+    .filter((part): part is string => Boolean(part && part.trim()))
+    .join(" ")
+    .trim();
+  const roleFallback = profile.role === "admin" ? "Admin" : profile.role === "therapist" ? "Therapist" : "Patient";
+  return (
+    profile.displayName?.trim() ||
+    composed ||
+    profile.username?.trim() ||
+    profile.email?.trim() ||
+    profile.phoneNumber?.trim() ||
+    roleFallback
+  );
+}
+
 // AdminUserListItem (services/api.ts, mirrors user.service.ts's UserListItem)
 // -> AdminUserSummary (types/index.ts, this page's local row shape). Mostly a
 // rename (displayName -> name) plus normalizing `null` to `undefined` for the
 // optional fields, same nullability gap CreateAccountModal's onCreated already
-// works around.
+// works around. `name` goes through fallbackDisplayName() rather than copying
+// `displayName` verbatim, so a row can never render blank.
 function toAdminUserSummary(item: AdminUserListItem): AdminUserSummary {
   return {
     id: item.id,
-    name: item.displayName,
+    name: fallbackDisplayName(item),
     role: item.role,
     username: item.username,
     status: item.status,
@@ -177,6 +215,12 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
   // data/adminMock.ts "Admin Suda" placeholder.
   const adminDisplayName = user?.displayName || user?.username || "Admin";
   const adminInitials = initialsFromName(adminDisplayName);
+  // Real profile picture for the topbar chrome, same idiom as the therapist
+  // pages (TherapistPatientsPage/TherapistSessionsPage) and AdminSettingsPage:
+  // resolve the logged-in admin's own picture via useOwnProfilePicture, falling
+  // back to the initials badge while it loads / when none is uploaded / if the
+  // fetch fails. Previously this page's topbar was hardcoded to initials only.
+  const adminAvatarUrl = useOwnProfilePicture();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
@@ -312,7 +356,9 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                 <strong>{adminDisplayName}</strong>
                 <small>System Administrator</small>
               </div>
-              <span className="avatar-badge admin-avatar">{adminInitials}</span>
+              <span className={`avatar-badge admin-avatar${adminAvatarUrl ? " with-photo" : ""}`}>
+                {adminAvatarUrl ? <img src={adminAvatarUrl} alt={`${adminDisplayName}'s profile picture`} /> : adminInitials}
+              </span>
             </div>
           </div>
         </header>
@@ -480,7 +526,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
             setUsers((prev) => [
               {
                 id: created.id,
-                name: created.displayName,
+                name: fallbackDisplayName({ ...created, role: created.role }),
                 role: created.role,
                 username: created.username,
                 status: "active",

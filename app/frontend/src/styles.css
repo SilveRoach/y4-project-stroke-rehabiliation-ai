@@ -3500,6 +3500,11 @@ div.exercise-card:hover {
 .admin-sidebar .therapist-brand-mark,
 .admin-avatar {
   background: linear-gradient(135deg, #7c3aed, var(--primary));
+  /* White initials over the saturated purple→blue gradient — without this the
+     account-table avatars (therapist-avatar admin-avatar) inherited
+     .therapist-avatar's `color: var(--primary)`, i.e. blue text blending into
+     the blue half of this gradient. */
+  color: #ffffff;
 }
 
 .admin-sidebar .therapist-nav-link.active {

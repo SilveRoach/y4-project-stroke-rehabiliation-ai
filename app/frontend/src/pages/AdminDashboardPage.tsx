@@ -21,6 +21,7 @@ import type { AdminNavLabel } from "../components/AdminSidebar";
 import { checkHealth, getAdminDashboard, syncScheduleStatuses } from "../services/api";
 import type { AdminDashboardData, HealthStatus } from "../services/api";
 import { useAuth } from "../store/authStore";
+import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import type { RoleDistributionSlice } from "../types";
 import { initialsFromName } from "../utils/displayName";
 
@@ -36,6 +37,11 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
   const { token, user } = useAuth();
   const adminDisplayName = user?.displayName || user?.username || "Admin";
   const adminInitials = initialsFromName(adminDisplayName);
+  // Real profile picture for the topbar chrome — same idiom as
+  // AdminSettingsPage/adminUserManagementPage: resolve the logged-in admin's own
+  // picture via useOwnProfilePicture, falling back to the initials badge while it
+  // loads / when none is uploaded / if the fetch fails.
+  const adminAvatarUrl = useOwnProfilePicture();
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<AdminDashboardData | null>(null);
@@ -224,7 +230,9 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
                 <strong>{adminDisplayName}</strong>
                 <small>System Administrator</small>
               </div>
-              <span className="avatar-badge admin-avatar">{adminInitials}</span>
+              <span className={`avatar-badge admin-avatar${adminAvatarUrl ? " with-photo" : ""}`}>
+                {adminAvatarUrl ? <img src={adminAvatarUrl} alt={`${adminDisplayName}'s profile picture`} /> : adminInitials}
+              </span>
             </div>
           </div>
         </header>

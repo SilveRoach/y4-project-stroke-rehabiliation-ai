@@ -1,6 +1,7 @@
 import { Dumbbell, Settings, Shield, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../store/authStore";
+import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import { initialsFromName } from "../utils/displayName";
 
 // Shared sidebar for every admin-role page (Dashboard, Users, Exercise Library,
@@ -45,6 +46,13 @@ export function AdminSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: A
   const { user } = useAuth();
   const displayName = user?.displayName || user?.username || "Admin";
   const initials = initialsFromName(displayName);
+  // Resolve the logged-in admin's own picture from the auth store, mirroring
+  // TherapistSidebar.tsx — so every admin page sharing this sidebar shows the
+  // photo without the page having to pass `avatarUrl`. Pages that resolve it
+  // themselves (AdminSettingsPage, ExerciseLibraryPage) still win via the prop.
+  // Initials remain the fallback (no file / still loading / fetch failed).
+  const ownAvatarUrl = useOwnProfilePicture();
+  const resolvedAvatarUrl = avatarUrl ?? ownAvatarUrl;
 
   return (
     <aside className="therapist-sidebar admin-sidebar">
@@ -71,8 +79,8 @@ export function AdminSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: A
       </nav>
 
       <div className="therapist-sidebar-profile">
-        <span className={`avatar-badge admin-avatar${avatarUrl ? " with-photo" : ""}`}>
-          {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : initials}
+        <span className={`avatar-badge admin-avatar${resolvedAvatarUrl ? " with-photo" : ""}`}>
+          {resolvedAvatarUrl ? <img src={resolvedAvatarUrl} alt={`${displayName}'s profile picture`} /> : initials}
         </span>
         <div>
           <strong>{displayName}</strong>
