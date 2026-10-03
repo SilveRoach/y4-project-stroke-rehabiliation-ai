@@ -1834,6 +1834,9 @@ export function PatientDetailPage({
         <PlanModal
           selectedPlan={planModalIntent === "create" || plans.length === 0 ? null : selectedPlan}
           mode={planModalIntent === "create" || plans.length === 0 ? "create" : "edit"}
+          // A therapist who is not assigned to this patient may open the popup
+          // to READ the plan, but every control inside stays disabled.
+          readOnly={!canEditPlan}
           availableAttachments={availableAttachments}
           availableFiles={availableFiles}
           token={token ?? null}
@@ -2522,6 +2525,7 @@ function fileTypeBadge(file: AvailableFileItem): string {
 function PlanModal({
   selectedPlan,
   mode,
+  readOnly = false,
   availableAttachments,
   availableFiles,
   token,
@@ -2533,6 +2537,12 @@ function PlanModal({
   // Fixed mode: the "+" button opens this modal in "create", the bottom
   // "Edit plan" button in "edit" — there is no in-modal switcher anymore.
   mode: "edit" | "create";
+  // True when the opener may VIEW but not edit this plan — the signed-in
+  // therapist is not assigned to the patient (PatientDetailPage's canEditPlan
+  // === false). Every field, the attachment tools and the submit button are
+  // then disabled so the popup can never look editable while being un-saveable;
+  // Close and file preview remain available.
+  readOnly?: boolean;
   availableAttachments: PlanAttachment[];
   availableFiles: PlanAttachmentFile[];
   // Auth token for the real POST /files upload behind "Attach medical file".
@@ -2613,7 +2623,6 @@ function PlanModal({
   const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [filterTab, setFilterTab] = useState<"all" | "selected">("all");
   const [previewFile, setPreviewFile] = useState<{ file: AvailableFileItem; url: string; mime: string } | null>(null);
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
   const [previewingFileId, setPreviewingFileId] = useState<string | null>(null);
@@ -2711,6 +2720,7 @@ function PlanModal({
   }, [previewFile]);
 
   const toggleAttachment = (fileId: string, defaultDesc = "") => {
+    if (readOnly) return;
     setSelectedAttachmentsMap((current) => {
       const next = { ...current };
       if (fileId in next) {
@@ -2723,6 +2733,7 @@ function PlanModal({
   };
 
   const updateAttachmentDescription = (fileId: string, desc: string) => {
+    if (readOnly) return;
     setSelectedAttachmentsMap((current) => ({
       ...current,
       [fileId]: desc
@@ -2730,12 +2741,13 @@ function PlanModal({
   };
 
   const selectedCount = Object.keys(selectedAttachmentsMap).length;
-  const displayedFiles = useMemo(() => {
-    if (filterTab === "selected") {
-      return uniqueAvailableFiles.filter((f) => f.fileId in selectedAttachmentsMap);
-    }
-    return uniqueAvailableFiles;
-  }, [uniqueAvailableFiles, filterTab, selectedAttachmentsMap]);
+  // The "All" tab was removed — this list ALWAYS shows only the files attached
+  // to this plan (a fresh upload auto-attaches, and each card's checkbox/×
+  // still unlinks it).
+  const displayedFiles = useMemo(
+    () => uniqueAvailableFiles.filter((f) => f.fileId in selectedAttachmentsMap),
+    [uniqueAvailableFiles, selectedAttachmentsMap]
+  );
 
   // The modal is mounted fresh each open with a fixed mode (create via the
   // column's "+" button, edit via the bottom "Edit plan" button) — no
@@ -2743,6 +2755,9 @@ function PlanModal({
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
+    // Read-only popup (therapist not assigned) — never saves, even if a key
+    // press somehow re-enables the form.
+    if (readOnly) return;
     if (!name.trim() || !startDateLabel || !endDateLabel) return;
 
     const attachmentPayload = Object.entries(selectedAttachmentsMap).map(([fileId, desc]) => ({
@@ -2789,7 +2804,13 @@ function PlanModal({
       <div className="therapist-panel-scrim" onClick={onClose} />
       <div className="pd-modal" role="dialog" aria-label="Manage rehabilitation plan" style={{ width: "min(100%, 580px)" }}>
         <div className="therapist-detail-header">
-          <strong>{mode === "create" ? "New rehabilitation plan" : "Edit rehabilitation plan"}</strong>
+          <strong>
+            {readOnly
+              ? "Rehabilitation plan (read-only)"
+              : mode === "create"
+                ? "New rehabilitation plan"
+                : "Edit rehabilitation plan"}
+          </strong>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
             <X size={16} />
           </button>
@@ -2802,13 +2823,14 @@ function PlanModal({
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="e.g. Initial Stroke Recovery Plan"
+              disabled={readOnly}
               required
             />
           </label>
 
           <label>
             Description (optional)
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} disabled={readOnly} />
           </label>
 
           <label>
@@ -2817,6 +2839,7 @@ function PlanModal({
               className="admin-role-select"
               value={status}
               onChange={(event) => setStatus(event.target.value as RehabPlanStatus)}
+              disabled={readOnly}
             >
               {(["draft", "active", "completed", "cancelled"] as RehabPlanStatus[]).map((value) => (
                 <option key={value} value={value}>
@@ -2830,7 +2853,7 @@ function PlanModal({
             <label>
               Start date
               <div className="date-input-with-calendar">
-                <input type="text" inputMode="numeric" placeholder="dd/mm/yyyy" value={startDateInput} onChange={(event) => {
+                <input type="text" inputMode="numeric" placeholder="dd/mm/yyyy" disabled={readOnly} value={startDateInput} onChange={(event) => {
                   const value = isoDateFromDisplay(event.target.value);
                   setStartDateInput(event.target.value);
                   if (value) {
@@ -2842,7 +2865,7 @@ function PlanModal({
                   }
                 }} required />
                 <span className="date-calendar-icon" aria-hidden="true"><Calendar size={16} /></span>
-                <input className="native-calendar-trigger" type="date" value={startDateLabel} min={mode === "create" ? todayDateLabel : undefined} aria-label="Choose start date" onChange={(event) => {
+                <input className="native-calendar-trigger" type="date" disabled={readOnly} value={startDateLabel} min={mode === "create" ? todayDateLabel : undefined} aria-label="Choose start date" onChange={(event) => {
                   const value = event.target.value;
                   setStartDateLabel(value);
                   setStartDateInput(displayDateLabel(value));
@@ -2856,13 +2879,13 @@ function PlanModal({
             <label>
               End date
               <div className="date-input-with-calendar">
-                <input type="text" inputMode="numeric" placeholder="dd/mm/yyyy" value={endDateInput} onChange={(event) => {
+                <input type="text" inputMode="numeric" placeholder="dd/mm/yyyy" disabled={readOnly} value={endDateInput} onChange={(event) => {
                   const value = isoDateFromDisplay(event.target.value);
                   setEndDateInput(event.target.value);
                   if (value) setEndDateLabel(value);
                 }} required />
                 <span className="date-calendar-icon" aria-hidden="true"><Calendar size={16} /></span>
-                <input className="native-calendar-trigger" type="date" value={endDateLabel} min={startDateLabel || todayDateLabel} aria-label="Choose end date" onChange={(event) => {
+                <input className="native-calendar-trigger" type="date" disabled={readOnly} value={endDateLabel} min={startDateLabel || todayDateLabel} aria-label="Choose end date" onChange={(event) => {
                   const value = event.target.value;
                   setEndDateLabel(value);
                   setEndDateInput(displayDateLabel(value));
@@ -2882,25 +2905,6 @@ function PlanModal({
                   </span>
                 )}
               </label>
-
-              {uniqueAvailableFiles.length > 0 && (
-                <div className="pd-attachments-tabs">
-                  <button
-                    type="button"
-                    className={`pd-attachments-tab-btn ${filterTab === "all" ? "active" : ""}`}
-                    onClick={() => setFilterTab("all")}
-                  >
-                    All ({uniqueAvailableFiles.length})
-                  </button>
-                  <button
-                    type="button"
-                    className={`pd-attachments-tab-btn ${filterTab === "selected" ? "active" : ""}`}
-                    onClick={() => setFilterTab("selected")}
-                  >
-                    Attached ({selectedCount})
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Hidden file input */}
@@ -2912,30 +2916,38 @@ function PlanModal({
               aria-label="Choose medical file to upload"
             />
 
-            {/* Dropzone & Upload trigger */}
+            {/* Dropzone & Upload trigger — inert in read-only mode (no click,
+                no drag-and-drop) so a non-assigned therapist can't upload. */}
             <div
-              className={`pd-attachments-dropzone ${isDragOver ? "drag-over" : ""}`}
-              onClick={() => medicalFileInputRef.current?.click()}
+              className={`pd-attachments-dropzone ${isDragOver ? "drag-over" : ""}${readOnly ? " read-only" : ""}`}
+              onClick={() => {
+                if (!readOnly) medicalFileInputRef.current?.click();
+              }}
               onDragOver={(e) => {
+                if (readOnly) return;
                 e.preventDefault();
                 setIsDragOver(true);
               }}
               onDragLeave={() => setIsDragOver(false)}
-              onDrop={handleDrop}
+              onDrop={readOnly ? undefined : handleDrop}
             >
               <div className="pd-attachments-dropzone-left">
                 <span className="pd-attachments-dropzone-icon">
                   <UploadCloud size={18} />
                 </span>
                 <div className="pd-attachments-dropzone-text">
-                  <strong>{uploadingFile ? "Uploading medical file…" : "Attach medical file"}</strong>
-                  <small>Drag & drop or click to attach MRI scans, reports, or history</small>
+                  <strong>{uploadingFile ? "Uploading medical file…" : readOnly ? "Medical file uploads are disabled" : "Attach medical file"}</strong>
+                  <small>
+                    {readOnly
+                      ? "Only the therapist assigned to this patient can attach files."
+                      : "Drag & drop or click to attach MRI scans, reports, or history"}
+                  </small>
                 </div>
               </div>
               <button
                 type="button"
                 className="pd-attachments-browse-btn"
-                disabled={uploadingFile || !token}
+                disabled={uploadingFile || !token || readOnly}
                 onClick={(e) => {
                   e.stopPropagation();
                   medicalFileInputRef.current?.click();
@@ -2976,7 +2988,7 @@ function PlanModal({
               </p>
             ) : displayedFiles.length === 0 ? (
               <p className="pd-empty-note" style={{ margin: 0, padding: "12px 0", fontSize: "0.82rem" }}>
-                No files are currently attached to this plan. Switch to &ldquo;All&rdquo; to select available records.
+                No files are currently attached to this plan yet — use the button above to upload and attach one.
               </p>
             ) : (
               <div className="pd-attachments-list">
@@ -2998,6 +3010,7 @@ function PlanModal({
                             type="checkbox"
                             className="pd-attachment-checkbox"
                             checked={isChecked}
+                            disabled={readOnly}
                             onChange={() => toggleAttachment(file.fileId, file.defaultDescription ?? "")}
                           />
                           <span className="pd-attachment-custom-check" aria-hidden="true">
@@ -3055,6 +3068,7 @@ function PlanModal({
                               type="button"
                               className="pd-attachment-action-btn remove-btn"
                               title="Deselect this attachment"
+                              disabled={readOnly}
                               onClick={() => toggleAttachment(file.fileId)}
                             >
                               <X size={14} />
@@ -3075,6 +3089,7 @@ function PlanModal({
                               className="pd-attachment-note-input"
                               placeholder="e.g. Baseline MRI scan, discharge summary, CT findings..."
                               value={selectedAttachmentsMap[file.fileId] ?? ""}
+                              disabled={readOnly}
                               onChange={(e) => updateAttachmentDescription(file.fileId, e.target.value)}
                             />
                             {selectedAttachmentsMap[file.fileId] && (
@@ -3082,6 +3097,7 @@ function PlanModal({
                                 type="button"
                                 className="pd-attachment-note-clear"
                                 title="Clear note"
+                                disabled={readOnly}
                                 onClick={() => updateAttachmentDescription(file.fileId, "")}
                               >
                                 <X size={12} />
@@ -3099,14 +3115,24 @@ function PlanModal({
 
           <p className="pd-modal-hint">
             <Calendar size={12} />{" "}
-            {mode === "create"
-              ? "Creates a fresh day-by-day schedule matching patient_rehabilitation_plans and links any selected medical attachments."
-              : "Editing updates plan metadata and synchronizes associated medical attachments."}
+            {readOnly
+              ? "Read-only — only the therapist assigned to this patient can edit this plan."
+              : mode === "create"
+                ? "Creates a fresh day-by-day schedule matching patient_rehabilitation_plans and links any selected medical attachments."
+                : "Editing updates plan metadata and synchronizes associated medical attachments."}
           </p>
 
-          <button type="submit" className="primary-button full-width">
-            {mode === "create" ? "Create plan" : "Save changes"}
-          </button>
+          {/* Read-only viewers get Close instead of a submit button — there is
+              nothing they can change, and handleSavePlan would reject it anyway. */}
+          {readOnly ? (
+            <button type="button" className="primary-button full-width" onClick={onClose}>
+              Close
+            </button>
+          ) : (
+            <button type="submit" className="primary-button full-width">
+              {mode === "create" ? "Create plan" : "Save changes"}
+            </button>
+          )}
         </form>
       </div>
 
