@@ -5971,6 +5971,12 @@ div.exercise-card:hover {
   color: #ffffff;
 }
 
+.pd-calendar-cell.needs_review,
+.pd-legend-dot.needs_review {
+  background: var(--warning);
+  color: #ffffff;
+}
+
 .pd-calendar-cell.in_progress {
   background: var(--warning);
   color: #ffffff;
@@ -6862,10 +6868,12 @@ div.exercise-card:hover {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .ts-session-patient > div {
   display: grid;
+  min-width: 0;
 }
 
 .ts-session-patient span {
@@ -6875,8 +6883,32 @@ div.exercise-card:hover {
 }
 
 .ts-session-patient small {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  margin-left: 0;
   color: var(--text-secondary);
   font-size: 0.76rem;
+}
+
+.ts-session-patient .ts-session-exercise-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(240px, 35vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 400;
+}
+
+.ts-session-patient .ts-session-time {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 400;
+  white-space: nowrap;
 }
 
 .settings-main {
@@ -7687,7 +7719,7 @@ div.exercise-card:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .srr-exercise-tab {
@@ -7695,7 +7727,7 @@ div.exercise-card:hover {
   border-radius: 999px;
   background: var(--card);
   color: var(--text-secondary);
-  padding: 7px 14px;
+  padding: 6px 12px;
   font-size: 0.8rem;
   font-weight: 700;
 }
@@ -7709,7 +7741,7 @@ div.exercise-card:hover {
 .srr-attempt-chips {
   display: flex;
   gap: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .srr-attempt-chip {
@@ -7717,7 +7749,7 @@ div.exercise-card:hover {
   border-radius: 999px;
   background: var(--card);
   color: var(--text-secondary);
-  padding: 6px 14px;
+  padding: 5px 12px;
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -7731,44 +7763,102 @@ div.exercise-card:hover {
 .srr-layout {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.srr-page-main {
+  width: 100%;
+  max-width: 1480px;
+  align-self: center;
+  gap: 10px;
+  padding: 12px 20px 20px;
+}
+
+.srr-page-main > .pd-back-link {
+  align-self: flex-start;
+  margin: 0;
+}
+
+.srr-main-column,
+.srr-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.srr-sidebar {
+  padding: 0;
 }
 
 .srr-video-col {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   align-content: start;
+  justify-items: stretch;
+  min-width: 0;
 }
 
 .srr-video-col p {
   margin: 0;
   color: var(--text-secondary);
   font-size: 0.78rem;
-  text-align: center;
+}
+
+.srr-video-col .pd-record-attachments-label {
+  font-weight: 700;
 }
 
 .srr-video-placeholder {
   display: grid;
   place-items: center;
-  aspect-ratio: 3 / 4;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #2c2c2a, #565650);
+  width: 100%;
+  height: min(38vh, 360px);
+  min-height: 220px;
+  border-radius: 12px;
+  background: #000000;
   color: #ffffff;
+}
+
+.srr-video-col .pose-video-player {
+  width: 100%;
+  height: min(38vh, 360px);
+  min-height: 220px;
+  aspect-ratio: auto;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #000000;
+}
+
+.srr-video-col .pose-video-player .srr-review-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: inherit;
+  background: #000000;
+  object-fit: contain;
+}
+
+.srr-video-col .pose-video-overlay {
+  object-fit: contain;
 }
 
 .srr-score-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 12px;
+  gap: 10px;
 }
 
 .srr-score-panel {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--card);
-  padding: 14px 16px;
+  padding: 12px 14px;
 }
 
 .srr-score-panel-top {
@@ -7778,7 +7868,7 @@ div.exercise-card:hover {
 }
 
 .srr-score-panel-top strong {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
 }
 
 .srr-score-value {
@@ -7787,8 +7877,8 @@ div.exercise-card:hover {
 }
 
 .srr-score-input {
-  width: 64px;
-  min-height: 36px;
+  width: 72px;
+  min-height: 34px;
   text-align: center;
   font-size: 1.1rem;
   font-weight: 800;
@@ -7816,7 +7906,7 @@ div.exercise-card:hover {
 }
 
 .srr-score-panel textarea {
-  min-height: 64px;
+  min-height: 58px;
   border: 1.5px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
@@ -7828,20 +7918,166 @@ div.exercise-card:hover {
 }
 
 .srr-decision-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg);
-  padding: 10px 14px;
-  margin-top: 4px;
+  padding: 10px 12px;
 }
 
 .srr-decision-bar span {
   color: var(--text-secondary);
   font-size: 0.82rem;
+}
+
+.srr-score-source-options {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  width: 100%;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  isolation: isolate;
+}
+
+.srr-score-source-options::before {
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  border-radius: 7px;
+  background: var(--primary);
+  content: "";
+  transition: transform 180ms ease;
+}
+
+.srr-score-source-options[data-selected="pt"]::before {
+  transform: translateX(100%);
+}
+
+.srr-score-source-options label {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+  transition: color 180ms ease;
+}
+
+.srr-score-source-options[data-selected="ai"] label:first-of-type,
+.srr-score-source-options[data-selected="pt"] label:last-of-type {
+  color: #ffffff;
+}
+
+.srr-score-source-options[data-selected="ai"] label:first-of-type span,
+.srr-score-source-options[data-selected="pt"] label:last-of-type span {
+  color: #ffffff;
+}
+
+.srr-score-source-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.srr-score-source-options input:focus-visible + span {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+.srr-score-source-options input:disabled + span {
+  opacity: 0.55;
+}
+
+.srr-session-details,
+.srr-exercise-info {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 0.82rem;
+}
+
+.srr-session-details > span,
+.srr-exercise-info p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.srr-session-details {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.srr-session-details > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.srr-session-details > div strong {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+
+.srr-session-details > div span {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.srr-session-details > span:nth-child(2) {
+  grid-column: 1;
+}
+
+.srr-session-details > .badge-pill {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.srr-exercise-info-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+}
+
+.srr-exercise-info-heading span {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.srr-exercise-info-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.srr-exercise-info-fields strong {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .srr-decision-actions {
@@ -7872,19 +8108,118 @@ div.exercise-card:hover {
   color: var(--success);
 }
 
+.srr-current-score {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.srr-current-score > span:first-child {
+  margin-right: auto;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.srr-current-score > strong {
+  color: var(--text-primary);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.srr-save-review {
+  justify-content: center;
+}
+
 .srr-empty-note {
-  padding: 40px 0;
+  padding: 24px 0;
   text-align: center;
   color: var(--text-secondary);
 }
 
 @media (min-width: 900px) {
   .srr-layout {
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: minmax(0, 1.6fr) minmax(340px, 0.9fr);
+    gap: 18px;
   }
 
+  .srr-sidebar {
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding: 0 2px 2px 0;
+  }
+}
+
+@media (max-width: 899px) {
+  .srr-sidebar,
+  .srr-main-column,
   .srr-score-grid {
-    grid-template-columns: 1fr 1fr;
+    display: contents;
+  }
+
+  .srr-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .srr-video-col {
+    grid-row: 1;
+  }
+
+  .srr-current-score {
+    grid-row: 2;
+  }
+
+  .srr-ai-panel {
+    grid-row: 3;
+  }
+
+  .srr-exercise-info {
+    grid-row: 4;
+  }
+
+  .srr-therapist-panel {
+    grid-row: 5;
+  }
+
+  .srr-decision-bar {
+    grid-row: 6;
+  }
+
+  .srr-save-review {
+    grid-row: 7;
+  }
+}
+
+@media (max-width: 600px) {
+  .srr-page-main {
+    padding: 8px 12px 16px;
+  }
+
+  .srr-session-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .srr-session-details > .badge-pill {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+
+  .srr-session-details > span:nth-child(2) {
+    grid-column: 1;
+  }
+
+  .srr-exercise-info-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .srr-video-placeholder,
+  .srr-video-col .pose-video-player {
+    height: min(42vh, 300px);
+    min-height: 180px;
   }
 }
 
@@ -9361,6 +9696,116 @@ tr.admin-user-row:hover .admin-row-open-hint {
   background: var(--border-light);
 }
 
+.pd-session-source.ai {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.therapist-session-list-heading {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pd-session-row.ts-session-row-clickable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+}
+
+.ts-session-list-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.ph-result-modal {
+  width: min(100% - 32px, 540px);
+}
+
+.ph-result-modal .therapist-detail-header {
+  align-items: flex-start;
+}
+
+.ph-result-modal .therapist-detail-header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.ph-result-modal .therapist-detail-header small {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.ph-current-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 12px 14px;
+}
+
+.ph-current-result > span:first-child {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.ph-current-result strong {
+  font-size: 1.25rem;
+}
+
+.ph-result-section {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--border-light);
+  padding-top: 12px;
+}
+
+.ph-result-section h3,
+.ph-result-section p {
+  margin: 0;
+}
+
+.ph-result-section h3 {
+  font-size: 0.9rem;
+}
+
+.ph-result-section p {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.ph-result-section .ph-result-score {
+  color: var(--text-primary);
+}
+
+@media (max-width: 700px) {
+  .pd-session-row.ts-session-row-clickable {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .pd-session-row.ts-session-row-clickable > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .ts-session-list-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ts-session-list-header span:not(:first-child) {
+    display: none;
+  }
+}
+
 /* --- Patient Settings page (frontend-design.md's Patient Settings, revised per
    the "picture / Profile+assigned PT / Contact" wireframe). Phone keeps a
    simple single-column card (same footprint as the old .settings-card, just
@@ -9903,6 +10348,10 @@ tr.admin-user-row:hover .admin-row-open-hint {
   height: 100%;
   object-fit: cover;
   pointer-events: none;
+}
+
+.srr-video-col .pose-video-player .pose-video-overlay {
+  object-fit: contain;
 }
 
 .sud-ai-title {
@@ -10656,4 +11105,3 @@ tr.admin-user-row:hover .admin-row-open-hint {
   align-items: center;
   gap: 8px;
 }
-

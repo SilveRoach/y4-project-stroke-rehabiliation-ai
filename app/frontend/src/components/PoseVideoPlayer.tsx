@@ -1,13 +1,20 @@
 import { useEffect, useRef } from "react";
+import { HandTracker, drawHandSkeleton } from "../ai/handDetection";
 import { PoseTracker, drawSkeleton } from "../ai/poseDetection";
+import type { ExerciseTrackingType, TrackingType } from "../types";
 
 interface PoseVideoPlayerProps {
   src: string;
   className?: string;
+  trackingType?: ExerciseTrackingType | TrackingType;
 }
 
-/** Replays a recorded camera video with a locally re-derived pose overlay. */
-export function PoseVideoPlayer({ src, className = "sud-video" }: PoseVideoPlayerProps) {
+/** Replays a recorded camera video with the exercise's locally re-derived tracking overlay. */
+export function PoseVideoPlayer({
+  src,
+  className = "sud-video",
+  trackingType = "pose"
+}: PoseVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -16,7 +23,13 @@ export function PoseVideoPlayer({ src, className = "sud-video" }: PoseVideoPlaye
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    const tracker = new PoseTracker();
+    const poseTracker = trackingType === "pose" || trackingType === "both" ? new PoseTracker() : null;
+    const handTracker = trackingType === "virtual_grip" || trackingType === "both" ? new HandTracker() : null;
+    if (!poseTracker && !handTracker) {
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
     let ready = false;
     let disposed = false;
     let frameId: number | null = null;
@@ -41,11 +54,16 @@ export function PoseVideoPlayer({ src, className = "sud-video" }: PoseVideoPlaye
         clear();
         // MediaPipe requires monotonic timestamps. Playback can seek backwards,
         // so use the animation clock rather than the video's timeline.
-        const landmarks = tracker.detect(video, performance.now());
-        if (landmarks) {
+        const timestamp = performance.now();
+        const poseLandmarks = poseTracker?.detect(video, timestamp);
+        if (poseLandmarks) {
           // Camera recordings are unmirrored; unlike the live selfie preview,
           // their overlay must use the landmarks' original left-right position.
-          drawSkeleton(context, landmarks, canvas.width, canvas.height, { mirror: false });
+          drawSkeleton(context, poseLandmarks, canvas.width, canvas.height, { mirror: false });
+        }
+        const handLandmarks = handTracker?.detect(video, timestamp);
+        if (handLandmarks) {
+          drawHandSkeleton(context, handLandmarks, canvas.width, canvas.height, false);
         }
       }
       frameId = requestAnimationFrame(drawFrame);
@@ -65,25 +83,29 @@ export function PoseVideoPlayer({ src, className = "sud-video" }: PoseVideoPlaye
     video.addEventListener("pause", onPause);
     video.addEventListener("ended", onPause);
     video.addEventListener("loadedmetadata", onLoadedMetadata);
-    tracker.init()
+    Promise.all([
+      poseTracker?.init(),
+      handTracker?.init()
+    ].filter((initialization): initialization is Promise<void> => initialization !== undefined))
       .then(() => {
         if (disposed) return;
         ready = true;
         start();
       })
-      .catch((error) => console.error("Recorded pose overlay could not be loaded", error));
+      .catch((error) => console.error("Recorded session tracking model could not be loaded", error));
 
     return () => {
       disposed = true;
       stop();
-      tracker.dispose();
+      poseTracker?.dispose();
+      handTracker?.dispose();
       video.removeEventListener("playing", start);
       video.removeEventListener("seeked", start);
       video.removeEventListener("pause", onPause);
       video.removeEventListener("ended", onPause);
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
     };
-  }, [src]);
+  }, [src, trackingType]);
 
   return (
     <div className="pose-video-player">

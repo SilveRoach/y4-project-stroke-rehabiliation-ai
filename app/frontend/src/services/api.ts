@@ -11,6 +11,7 @@ import type {
   PatientProgressTrend,
   TherapistPatientSummary,
   TherapistSessionLogEntry,
+  TherapistExerciseSessionEntry,
   WeeklySessionPoint
 } from "../types";
 import type { FrameFeature, PoseReferencePublic, PoseRepScoringResult } from "../ai/poseScoring/poseScoringTypes";
@@ -367,16 +368,14 @@ export function uploadFile(token: string, file: File): Promise<{ file: UploadedF
   });
 }
 
-// PATCH /performance-results/:id/scoring — therapist PT score/feedback and the
-// AI-vs-PT final-score decision for one recorded attempt. Returns the updated
-// attempt in the same shape as getScheduleDayReview's attempts.
+// PATCH /performance-results/:id/scoring — save therapist evaluation fields or
+// independently select the AI/therapist grading score for one recorded attempt.
 export function updateAttemptScoring(
   token: string,
   resultId: string,
   payload: {
     ptScore?: number | null;
     ptFeedback?: string | null;
-    finalScore?: number | null;
     evaluationSource?: "ai" | "pt" | "manual";
   }
 ): Promise<{ attempt: {
@@ -388,8 +387,13 @@ export function updateAttemptScoring(
     ptFeedback: string | null;
     finalScore: number | null;
     evaluationSource: "ai" | "pt" | "manual" | null;
+    currentScore: number | null;
+    currentScoreSource: "ai" | "pt" | "manual" | null;
+    therapistReviewed: boolean;
     referenceVideoFileId: string | null;
     completedAtIso: string | null;
+    aiEvaluatedAtIso: string | null;
+    aiMetrics: Array<{ label: string; value: string }> | null;
   } }> {
   return apiRequest(`/performance-results/${resultId}/scoring`, {
     method: "PATCH",
@@ -590,6 +594,16 @@ export function getTherapistSessions(
   );
 }
 
+export function getTherapistExerciseSessions(
+  token: string,
+  therapistId: string
+): Promise<{ sessions: TherapistExerciseSessionEntry[] }> {
+  return apiRequest<{ sessions: TherapistExerciseSessionEntry[] }>(
+    `/therapists/${therapistId}/sessions?exerciseSessions=1`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+}
+
 // --- Patient today ----------------------------------------------------------
 
 export interface PatientTodayExercise {
@@ -739,38 +753,51 @@ export function scoreExerciseTestRep(
 // §2.7 — real review data for one schedule day (assigned therapist or admin).
 // Attempts come newest-first per exercise; referenceVideoFileId is the server
 // files-row id of the patient's recorded video (streamed via getFileContent).
+export interface ScheduleDayReviewData {
+  sessionId: string;
+  patientName: string;
+  dateLabel: string;
+  dayLabel: string;
+  planName: string;
+  scheduledDateIso: string;
+  exercises: Array<{
+    id: string;
+    scheduledExerciseId: string;
+    exerciseName: string;
+    exerciseVersionLabel: string;
+    description: string | null;
+    difficultyLevel: string;
+    movementTracking: ExerciseTrackingType;
+    baseCriteria: Array<{ label: string; value: string }> | null;
+    targetValueLabel: string;
+    therapistInstruction: string | null;
+    attempts: Array<{
+      id: string;
+      attemptNumber: number;
+      aiScore: number | null;
+      aiFeedback: string | null;
+      ptScore: number | null;
+      ptFeedback: string | null;
+      finalScore: number | null;
+      evaluationSource: "ai" | "pt" | "manual" | null;
+      referenceVideoFileId: string | null;
+      completedAtIso: string | null;
+      aiEvaluatedAtIso: string | null;
+      aiMetrics: Array<{ label: string; value: string }> | null;
+      currentScore: number | null;
+      currentScoreSource: "ai" | "pt" | "manual" | null;
+      therapistReviewed: boolean;
+    }>;
+  }>;
+}
+
 export function getScheduleDayReview(
   token: string,
   dayId: string
-): Promise<{
-  review: {
-    sessionId: string;
-    patientName: string;
-    dateLabel: string;
-    dayLabel: string;
-    exercises: Array<{
-      id: string;
-      scheduledExerciseId: string;
-      exerciseName: string;
-      exerciseVersionLabel: string;
-      attempts: Array<{
-        id: string;
-        attemptNumber: number;
-        aiScore: number | null;
-        aiFeedback: string | null;
-        ptScore: number | null;
-        ptFeedback: string | null;
-        finalScore: number | null;
-        evaluationSource: "ai" | "pt" | "manual" | null;
-        referenceVideoFileId: string | null;
-        completedAtIso: string | null;
-      }>;
-    }>;
-  };
-}> {
-  return apiRequest<{ review: any }>(`/schedule-days/${dayId}/results`, {
+): Promise<{ review: ScheduleDayReviewData }> {
+  return apiRequest<{ review: ScheduleDayReviewData }>(`/schedule-days/${dayId}/results`, {
     headers: { Authorization: `Bearer ${token}` }
-  }) as any;
+  });
 }
 
 // §6.7 — real attempt submission: uploads the recorded video (multipart) and

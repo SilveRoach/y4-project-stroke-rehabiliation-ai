@@ -68,7 +68,7 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
         <div className="srr-layout">
           <div className="srr-video-col">
             <p className="pd-record-attachments-label">Your recording &middot; attempt {attemptNumber} if confirmed</p>
-            <PoseVideoPlayer src={attempt.videoBlobUrl} />
+            <PoseVideoPlayer src={attempt.videoBlobUrl} trackingType={attempt.trackingType} />
             <p>
               {attempt.videoFileName} &middot; {attempt.videoSizeLabel}
             </p>

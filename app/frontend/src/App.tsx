@@ -5,7 +5,6 @@ import type { TherapistNavLabel } from "./components/TherapistSidebar";
 import { Toast } from "./components/Toast";
 import { patientProgram } from "./data/patientMock";
 import { patientRehabPlans } from "./data/patientRehabPlanMock";
-import { getSessionReview } from "./data/sessionReviewMock";
 import type { RecordingResult } from "./hooks/useSessionRecording";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
@@ -196,6 +195,7 @@ function AppShell() {
       scheduledExerciseId: activeExercise.id,
       exerciseName: activeExercise.name,
       exerciseNameTh: activeExercise.nameTh,
+      trackingType: activeExercise.trackingType,
       videoBlobUrl: URL.createObjectURL(result.blob),
       videoBlob: result.blob,
       videoFileName: `${fileSlug}-attempt.${extension}`,
@@ -538,7 +538,9 @@ function AppShell() {
             setView("login");
           }}
           onNavigate={handleTherapistNavigate}
-          onReviewSession={(session) => openSessionReview(session, session.patientName)}
+          onReviewSession={(session) =>
+            openSessionReview(session, session.patientName, session.scheduledExerciseId)
+          }
         />
       )}
       {view === "therapist-settings" && (
@@ -590,7 +592,13 @@ function AppShell() {
       )}
       {view === "session-result-review" && reviewSession && (
         <SessionResultReviewPage
-          review={getSessionReview(reviewSession, detailPatient?.name ?? reviewPatientName ?? "Patient")}
+          review={{
+            sessionId: reviewSession.id,
+            patientName: detailPatient?.name ?? reviewPatientName ?? "Patient",
+            dateLabel: reviewSession.dateLabel,
+            dayLabel: reviewSession.dayLabel,
+            exercises: []
+          }}
           focusExerciseId={reviewFocusExerciseId ?? undefined}
           onBack={() => setView(detailPatient ? "patient-detail" : "therapist-sessions")}
           onLogout={() => {
