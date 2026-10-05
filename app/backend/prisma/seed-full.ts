@@ -35,10 +35,11 @@ const DEMO_PASSWORD = "changeme123";
 const BCRYPT_ROUNDS = 10;
 
 function dayOffset(offset: number): Date {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() + offset);
-  return date;
+  // คอลัมน์ scheduled_date เป็น @db.Date — Prisma เขียน/อ่านเป็นวันที่ตาม UTC เสมอ ถ้าส่ง "เที่ยงคืนตามเวลาท้องถิ่น"
+  // (เช่น 00:00 เวลาไทย = 17:00 UTC ของเมื่อวาน) วันที่ที่บันทึกจะถูกเลื่อนไปเมื่อวาน และเทียบกับวันที่ท้องถิ่นไม่ตรงกัน
+  // จึงสร้างเป็น 00:00 UTC ของ "วันที่ตามปฏิทินท้องถิ่น" แทน
+  const now = new Date();
+  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + offset));
 }
 
 // =====================================================================
@@ -607,29 +608,43 @@ async function backfillUpcomingExerciseDays(
   for (const plan of plans) {
     for (const offset of [0, 1, 2]) {
       const scheduledDate = dayOffset(offset);
+      // เทียบเป็นวันที่แบบ UTC (YYYY-MM-DD) ทั้งสองฝั่ง เพราะ scheduled_date เป็น @db.Date — เดิมใช้ toDateString()
+      // (เวลาท้องถิ่น) เทียบกับค่าที่อ่านกลับจาก DB (UTC) ทำให้เลื่อนไปหนึ่งวันในเขตเวลาไทย จึงหาแถวเดิมไม่เจอ
+      // แล้วสั่ง create ซ้ำจนชน unique (rehabilitation_plan_id, scheduled_date)
+      const toDateKey = (d: Date): string => d.toISOString().slice(0, 10);
       const existingDay = plan.scheduleDays.find(
-        (day) => day.scheduledDate.toDateString() === scheduledDate.toDateString()
+        (day) => toDateKey(day.scheduledDate) === toDateKey(scheduledDate)
       );
 
-      if (!existingDay) {
-        await prisma.rehabilitationScheduleDay.create({
-          data: {
+      // upsert กันชน unique ซ้ำในทุกกรณี (รันซ้ำกี่รอบก็ไม่พัง)
+      const scheduleDay =
+        existingDay ??
+        (await prisma.rehabilitationScheduleDay.upsert({
+          where: {
+            rehabilitationPlanId_scheduledDate: { rehabilitationPlanId: plan.id, scheduledDate }
+          },
+          update: {},
+          create: {
             rehabilitationPlanId: plan.id,
             scheduledDate,
             status: "pending",
             createdBy: plan.therapistId
           }
-        });
-        daysCreated += 1;
-      }
+        }));
+      if (!existingDay) daysCreated += 1;
 
+      // วันที่มีท่าอยู่แล้ว (ไม่ว่าจะเพิ่งเจอหรือเพิ่งสร้างจาก upsert ที่ชนแถวเดิม) ไม่ต้องเพิ่มซ้ำ
       if (existingDay && existingDay.scheduledExercises.length > 0) continue;
+      if (!existingDay) {
+        const existingCount = await prisma.scheduledExercise.count({ where: { scheduleDayId: scheduleDay.id } });
+        if (existingCount > 0) continue;
+      }
 
       for (let order = 1; order <= 2; order += 1) {
         const exercise = exercises[(offset + order) % exercises.length];
         await prisma.scheduledExercise.create({
           data: {
-            scheduleDayId: existingDay?.id ?? (await prisma.rehabilitationScheduleDay.findFirstOrThrow({ where: { rehabilitationPlanId: plan.id, scheduledDate } })).id,
+            scheduleDayId: scheduleDay.id,
             exerciseLibraryId: exercise.id,
             orderNumber: order,
             targetType: order === 1 ? "repetitions" : "duration",
@@ -638,7 +653,7 @@ async function backfillUpcomingExerciseDays(
               order === 1
                 ? "เคลื่อนไหวช้า ๆ อย่างมีการควบคุม"
                 : "หยุดพักทันทีหากปวดเกิน 4/10",
-            status: existingDay?.status === "completed" || existingDay?.status === "in_progress" ? existingDay.status : "pending",
+            status: scheduleDay.status === "completed" || scheduleDay.status === "in_progress" ? scheduleDay.status : "pending",
             createdBy: plan.therapistId
           }
         });
