@@ -423,20 +423,19 @@ export class GripMinigame {
     const holdLeft = Math.max(0, Math.ceil(this.holdSeconds - this.holdElapsedMs / 1000));
     switch (this.state) {
       case "hover":
-        return "Close your hand to grab the ball · กำมือเพื่อจับลูกบอล";
+        return "กำมือเพื่อจับลูกบอล";
       case "grabbed":
-        return "Drag the ball into the circle · ลากลูกบอลไปที่วงกลม";
+        return "ลากลูกบอลไปที่วงกลม";
       case "released":
         return holdProgress > 0
-          ? `Hold it there — ${holdLeft}s · ค้างไว้ — ${holdLeft}s`
-          : "Drop it inside the circle · วางไว้ในวงกลม";
+          ? `ค้างไว้ — ${holdLeft} วินาที`
+          : "วางลูกบอลไว้ในวงกลม";
       case "success":
-        return "Good! · ทำได้ดี!";
+        return "ทำได้ดี!";
       default:
         return this.handPresent
-          ? "Move your open hand over the ball · แบมือไปที่ลูกบอล"
-          : "Show your hand to the camera · ยกมือขึ้นให้เห็นในกล้อง";
+          ? "แบมือไว้เหนือลูกบอล"
+          : "ยกมือให้กล้องมองเห็น";
     }
   }
 }
-

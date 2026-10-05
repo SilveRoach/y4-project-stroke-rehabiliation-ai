@@ -88,6 +88,19 @@ function lastLoginSortKey(label: string): number {
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
 }
 
+function lastLoginDisplayLabel(label: string): string {
+  if (label === "Today") return "วันนี้";
+  if (label === "Yesterday") return "เมื่อวาน";
+  if (label === "Never") return "ไม่เคยเข้าสู่ระบบ";
+  const daysAgo = label.match(/^(\d+) days? ago$/);
+  if (daysAgo) return `${daysAgo[1]} วันที่แล้ว`;
+  const date = new Date(label);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+  }
+  return label;
+}
+
 // Display-name fallback for a row, mirroring the chrome's own fallback style
 // (AdminSidebar/TherapistSidebar: `displayName || username || "Admin"`;
 // AdminSettingsPage: `displayName || [firstName, lastName].join(" ") ||
@@ -109,7 +122,7 @@ function fallbackDisplayName(profile: {
     .filter((part): part is string => Boolean(part && part.trim()))
     .join(" ")
     .trim();
-  const roleFallback = profile.role === "admin" ? "Admin" : profile.role === "therapist" ? "Therapist" : "Patient";
+  const roleFallback = profile.role === "admin" ? "ผู้ดูแลระบบ" : profile.role === "therapist" ? "นักกายภาพบำบัด" : "ผู้ป่วย";
   return (
     profile.displayName?.trim() ||
     composed ||
@@ -213,7 +226,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
   // Real logged-in admin for the sidebar/topbar profile chrome, same idiom as
   // the patient pages (PatientTodayPage.tsx) — replaces the static
   // data/adminMock.ts "Admin Suda" placeholder.
-  const adminDisplayName = user?.displayName || user?.username || "Admin";
+  const adminDisplayName = user?.displayName || user?.username || "ผู้ดูแลระบบ";
   const adminInitials = initialsFromName(adminDisplayName);
   // Real profile picture for the topbar chrome, same idiom as the therapist
   // pages (TherapistPatientsPage/TherapistSessionsPage) and AdminSettingsPage:
@@ -253,7 +266,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
       })
       .catch((err) => {
         if (!cancelled) {
-          setUsersError(err instanceof ApiError ? err.message : "Couldn't load accounts. Please try again.");
+          setUsersError(err instanceof ApiError ? err.message : "โหลดบัญชีผู้ใช้ไม่สำเร็จ กรุณาลองอีกครั้ง");
         }
       })
       .finally(() => {
@@ -319,9 +332,9 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
   const activePatientCount = users.filter((u) => u.role === "patient" && u.status === "active").length;
 
   function roleLabel(role: AdminUserSummary["role"]): string {
-    if (role === "admin") return "Admin";
-    if (role === "therapist") return "Therapist";
-    return "Patient";
+    if (role === "admin") return "ผู้ดูแลระบบ";
+    if (role === "therapist") return "นักกายภาพบำบัด";
+    return "ผู้ป่วย";
   }
 
   function roleTone(role: AdminUserSummary["role"]): "good" | "fair" | "poor" {
@@ -347,17 +360,17 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>User Management</h1>
-            <p>Create Therapist/Admin/Patient accounts and manage existing ones</p>
+            <h1>จัดการผู้ใช้</h1>
+            <p>สร้างบัญชีนักกายภาพบำบัด ผู้ดูแลระบบ และผู้ป่วย รวมถึงจัดการบัญชีที่มีอยู่</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{adminDisplayName}</strong>
-                <small>System Administrator</small>
+                <small>ผู้ดูแลระบบ</small>
               </div>
               <span className={`avatar-badge admin-avatar${adminAvatarUrl ? " with-photo" : ""}`}>
-                {adminAvatarUrl ? <img src={adminAvatarUrl} alt={`${adminDisplayName}'s profile picture`} /> : adminInitials}
+                {adminAvatarUrl ? <img src={adminAvatarUrl} alt={`รูปโปรไฟล์ของ ${adminDisplayName}`} /> : adminInitials}
               </span>
             </div>
           </div>
@@ -367,24 +380,24 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
           <div className="therapist-stat-grid admin-stat-grid">
             <StatCard
               icon={<Users size={20} />}
-              label="Therapist accounts"
+              label="บัญชีนักกายภาพบำบัด"
               value={therapistCount}
-              change={`${activeTherapistCount} active`}
+              change={`${activeTherapistCount} บัญชีใช้งานอยู่`}
               positive
             />
             <StatCard
               icon={<Shield size={20} />}
-              label="Admin accounts"
+              label="บัญชีผู้ดูแลระบบ"
               value={adminCount}
-              change={`${activeAdminCount} active`}
+              change={`${activeAdminCount} บัญชีใช้งานอยู่`}
               positive
               accent="teal"
             />
             <StatCard
               icon={<User size={20} />}
-              label="Patient accounts"
+              label="บัญชีผู้ป่วย"
               value={patientCount}
-              change={`${activePatientCount} active`}
+              change={`${activePatientCount} บัญชีใช้งานอยู่`}
               positive
               accent="success"
             />
@@ -405,15 +418,15 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
 
           <div className="summary-card therapist-patient-card">
             <div className="therapist-patient-toolbar">
-              <strong>Accounts</strong>
+              <strong>บัญชีผู้ใช้</strong>
               <div className="therapist-patient-toolbar-actions">
                 <div className="therapist-search">
                   <Search size={16} />
                   <input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search accounts…"
-                    aria-label="Search accounts"
+                    placeholder="ค้นหาบัญชีผู้ใช้…"
+                    aria-label="ค้นหาบัญชีผู้ใช้"
                   />
                 </div>
                 <button
@@ -424,7 +437,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                     setShowCreateForm(true);
                   }}
                 >
-                  <Plus size={14} /> Create account
+                  <Plus size={14} /> สร้างบัญชี
                 </button>
               </div>
             </div>
@@ -433,11 +446,11 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
               <table className="therapist-table">
                 <thead>
                   <tr>
-                    <SortHeader label="Name" sortKey="name" sort={sort} onSort={toggleSort} />
-                    <SortHeader label="Role" sortKey="role" sort={sort} onSort={toggleSort} />
-                    <SortHeader label="Username / Phone" sortKey="username" sort={sort} onSort={toggleSort} />
-                    <SortHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
-                    <SortHeader label="Last login" sortKey="lastLogin" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="ชื่อ" sortKey="name" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="บทบาท" sortKey="role" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="ชื่อผู้ใช้ / โทรศัพท์" sortKey="username" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="สถานะ" sortKey="status" sort={sort} onSort={toggleSort} />
+                    <SortHeader label="เข้าสู่ระบบล่าสุด" sortKey="lastLogin" sort={sort} onSort={toggleSort} />
                     <th aria-label="Actions" />
                   </tr>
                 </thead>
@@ -445,7 +458,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                   {usersLoading && (
                     <tr>
                       <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
-                        Loading accounts…
+                        กำลังโหลดบัญชี…
                       </td>
                     </tr>
                   )}
@@ -460,7 +473,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                       className="admin-user-row"
                       tabIndex={0}
                       role="button"
-                      aria-label={`Open account information for ${user.name}`}
+                      aria-label={`เปิดข้อมูลบัญชีของ ${user.name}`}
                       onClick={() => {
                         setSuccessMessage(null);
                         setInfoUser(user);
@@ -478,12 +491,12 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                           <UserAvatar token={token} fileId={user.profilePictureFileId} name={user.name} />
                           <div>
                             <strong>{user.name}</strong>
-                            {typeof user.patientCount === "number" && <small>{user.patientCount} patients</small>}
+                            {typeof user.patientCount === "number" && <small>ผู้ป่วย {user.patientCount} ราย</small>}
                             {user.role === "patient" && (
                               <small className={user.assignedTherapist ? "admin-assigned-therapist" : "admin-unassigned-therapist"}>
                                 {user.assignedTherapist
-                                  ? `Assigned to ${user.assignedTherapist.displayName}`
-                                  : "No therapist assigned"}
+                                  ? `นักกายภาพบำบัด: ${user.assignedTherapist.displayName}`
+                                  : "ยังไม่ได้มอบหมายนักกายภาพบำบัด"}
                               </small>
                             )}
                           </div>
@@ -495,10 +508,10 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                       <td>{user.username}</td>
                       <td>
                         <span className={`badge-pill ${user.status === "active" ? "good" : "fair"}`}>
-                          {user.status === "active" ? "Active" : "Disabled"}
+                          {user.status === "active" ? "ใช้งานอยู่" : "ปิดใช้งาน"}
                         </span>
                       </td>
-                      <td>{user.lastLoginLabel}</td>
+                      <td>{lastLoginDisplayLabel(user.lastLoginLabel)}</td>
                       <td className="admin-row-open-hint" aria-hidden="true">
                         <ChevronRight size={16} />
                       </td>
@@ -507,7 +520,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                   {!usersLoading && filteredUsers.length === 0 && (
                     <tr className="admin-table-empty">
                       <td colSpan={6}>
-                        {users.length === 0 ? "No accounts yet." : "No accounts match your search."}
+                        {users.length === 0 ? "ยังไม่มีบัญชีผู้ใช้" : "ไม่พบบัญชีผู้ใช้ที่ตรงกับคำค้นหา"}
                       </td>
                     </tr>
                   )}
@@ -530,7 +543,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                 role: created.role,
                 username: created.username,
                 status: "active",
-                lastLoginLabel: "Never",
+                lastLoginLabel: "ไม่เคยเข้าสู่ระบบ",
                 patientCount: created.role === "therapist" ? 0 : undefined,
                 licenseNumber: created.licenseNumber,
                 licenseIssuedLabel: created.licenseIssuedLabel,
@@ -552,7 +565,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
               ...prev
             ]);
             setShowCreateForm(false);
-            setSuccessMessage(`${roleLabel(created.role)} account "${created.username}" created.`);
+            setSuccessMessage(`สร้างบัญชี${roleLabel(created.role)} "${created.username}" แล้ว`);
           }}
         />
       )}
@@ -567,8 +580,8 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
             setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
             setSuccessMessage(
               persisted
-                ? `Account "${updated.username}" updated.`
-                : `Account "${updated.username}" updated (local only — PATCH /users/:id doesn't accept an Admin editing a ${updated.role} target yet).`
+                ? `อัปเดตบัญชี "${updated.username}" แล้ว`
+                : `อัปเดตบัญชี "${updated.username}" แล้ว (เฉพาะข้อมูลในหน้านี้ — ขณะนี้ระบบยังไม่รองรับให้ผู้ดูแลระบบแก้ไขบัญชี${roleLabel(updated.role)}ผ่าน API)`
             );
           }}
           onAssignmentChanged={(message) => {
@@ -653,7 +666,7 @@ function AssignTherapistModal({
       await onAssign(therapist);
       onAssigned(patient.name, therapist.name);
     } catch (err) {
-      setAssignError(err instanceof Error ? err.message : "Couldn't assign the therapist. Please try again.");
+      setAssignError(err instanceof Error ? err.message : "มอบหมายนักกายภาพบำบัดไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setAssigningId(null);
     }
@@ -662,18 +675,18 @@ function AssignTherapistModal({
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="admin-modal assign-patient-modal" role="dialog" aria-label="Assign therapist to patient">
+      <div className="admin-modal assign-patient-modal" role="dialog" aria-label="มอบหมายนักกายภาพบำบัดให้ผู้ป่วย">
         <div className="therapist-detail-header">
-          <strong>Assign therapist — {patient.name}</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <strong>มอบหมายนักกายภาพบำบัด — {patient.name}</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </div>
 
         <p className="assign-patient-subtitle">
           {patient.assignedTherapist
-            ? `Currently assigned to ${patient.assignedTherapist.displayName}. Pick another therapist to reassign (the current assignment is ended first).`
-            : "Pick an active therapist account to assign to this patient."}
+            ? `ปัจจุบันมอบหมายให้ ${patient.assignedTherapist.displayName} เลือกนักกายภาพบำบัดคนอื่นเพื่อเปลี่ยนผู้รับผิดชอบ (ระบบจะสิ้นสุดการมอบหมายปัจจุบันก่อน)`
+            : "เลือกบัญชีนักกายภาพบำบัดที่ใช้งานอยู่เพื่อมอบหมายให้ผู้ป่วยรายนี้"}
         </p>
 
         <div className="therapist-search assign-patient-search">
@@ -681,8 +694,8 @@ function AssignTherapistModal({
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or username…"
-            aria-label="Search therapists"
+            placeholder="ค้นหาด้วยชื่อหรือชื่อผู้ใช้…"
+            aria-label="ค้นหานักกายภาพบำบัด"
             autoFocus
           />
         </div>
@@ -694,9 +707,9 @@ function AssignTherapistModal({
         )}
 
         <div className="assign-patient-list">
-          {therapists.length === 0 && <p className="assign-patient-empty">No therapist accounts exist yet.</p>}
+          {therapists.length === 0 && <p className="assign-patient-empty">ยังไม่มีบัญชีนักกายภาพบำบัด</p>}
           {therapists.length > 0 && filtered.length === 0 && (
-            <p className="assign-patient-empty">No therapists match your search.</p>
+            <p className="assign-patient-empty">ไม่พบนักกายภาพบำบัดที่ตรงกับคำค้นหา</p>
           )}
 
           {filtered.map((therapist) => {
@@ -713,15 +726,15 @@ function AssignTherapistModal({
                   <div>
                     <strong>{therapist.name}</strong>
                     <small>
-                      {therapist.licenseNumber ? `License ${therapist.licenseNumber}` : therapist.username}
-                      {typeof therapist.patientCount === "number" ? ` Â· ${therapist.patientCount} patients` : ""}
+                      {therapist.licenseNumber ? `เลขที่ใบอนุญาต ${therapist.licenseNumber}` : therapist.username}
+                      {typeof therapist.patientCount === "number" ? ` · ผู้ป่วย ${therapist.patientCount} ราย` : ""}
                     </small>
                   </div>
                 </div>
 
                 <div className="assign-patient-row-actions">
                   {isCurrent ? (
-                    <span className="badge-pill good">Current</span>
+                    <span className="badge-pill good">ปัจจุบัน</span>
                   ) : (
                     <button
                       type="button"
@@ -729,7 +742,7 @@ function AssignTherapistModal({
                       disabled={busy || assigningId !== null}
                       onClick={() => handleAssign(therapist)}
                     >
-                      <UserPlus size={13} /> {assigningId === therapist.id ? "Assigning…" : "Assign"}
+                      <UserPlus size={13} /> {assigningId === therapist.id ? "กำลังมอบหมาย…" : "มอบหมาย"}
                     </button>
                   )}
                 </div>
@@ -848,14 +861,14 @@ function CreateAccountModal({
     setError(null);
 
     if (!token) {
-      setError("Your session has expired. Please log in again.");
+      setError("เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบอีกครั้ง");
       return;
     }
     if (!firstName.trim() || !lastName.trim() || !username.trim() || password.length === 0) {
       setError(
         isPatient
-          ? "Fill in first name, last name, phone number, and password."
-          : "Fill in first name, last name, username, and password."
+          ? "กรุณากรอกชื่อ นามสกุล หมายเลขโทรศัพท์ และรหัสผ่าน"
+          : "กรุณากรอกชื่อ นามสกุล ชื่อผู้ใช้ และรหัสผ่าน"
       );
       return;
     }
@@ -895,7 +908,7 @@ function CreateAccountModal({
         dateOfBirthLabel: user.dateOfBirth ?? undefined
       });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
+      setError(err instanceof ApiError ? err.message : "เกิดข้อผิดพลาด กรุณาลองอีกครั้ง");
     } finally {
       setSubmitting(false);
     }
@@ -904,10 +917,10 @@ function CreateAccountModal({
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="admin-modal" role="dialog" aria-label="Create account">
+      <div className="admin-modal" role="dialog" aria-label="สร้างบัญชี">
         <div className="therapist-detail-header">
-          <strong>Create account</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <strong>สร้างบัญชี</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </div>
@@ -921,35 +934,35 @@ function CreateAccountModal({
           )}
 
           <label>
-            Role
+            บทบาท
             <div className="admin-role-toggle">
               <button
                 type="button"
                 className={`secondary-button ${role === "therapist" ? "active" : ""}`}
                 onClick={() => setRole("therapist")}
               >
-                Therapist
+                นักกายภาพบำบัด
               </button>
               <button
                 type="button"
                 className={`secondary-button ${role === "admin" ? "active" : ""}`}
                 onClick={() => setRole("admin")}
               >
-                Admin
+                ผู้ดูแลระบบ
               </button>
               <button
                 type="button"
                 className={`secondary-button ${role === "patient" ? "active" : ""}`}
                 onClick={() => setRole("patient")}
               >
-                Patient
+                ผู้ป่วย
               </button>
             </div>
           </label>
 
           <div className="library-toggle-row">
             <label>
-              First name
+              ชื่อ
               <input
                 value={firstName}
                 onChange={(event) => setFirstName(event.target.value)}
@@ -958,7 +971,7 @@ function CreateAccountModal({
               />
             </label>
             <label>
-              Last name
+              นามสกุล
               <input
                 value={lastName}
                 onChange={(event) => setLastName(event.target.value)}
@@ -969,7 +982,7 @@ function CreateAccountModal({
           </div>
 
           <label>
-            {isPatient ? "Phone number" : "Username"}
+            {isPatient ? "หมายเลขโทรศัพท์" : "ชื่อผู้ใช้"}
             <input
               value={username}
               onChange={(event) => setUsername(event.target.value)}
@@ -979,17 +992,17 @@ function CreateAccountModal({
           </label>
 
           <label>
-            Temporary password
+            รหัสผ่านชั่วคราว
             <span className="password-field">
               <input
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 type={showPassword ? "text" : "password"}
-                placeholder="At least 8 characters"
+                placeholder="อย่างน้อย 8 ตัวอักษร"
                 autoComplete="new-password"
               />
               <button type="button" className="icon-button" onClick={() => setShowPassword((v) => !v)}>
-                {showPassword ? "Hide" : "Show"}
+                {showPassword ? "ซ่อน" : "แสดง"}
               </button>
             </span>
           </label>
@@ -997,21 +1010,21 @@ function CreateAccountModal({
           {!isPatient && (
             <div className="library-toggle-row">
               <label>
-                Email <span className="pd-empty-note" style={{ fontWeight: 400 }}>(optional)</span>
+                อีเมล <span className="pd-empty-note" style={{ fontWeight: 400 }}>(ไม่บังคับ)</span>
                 <input
                   type="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  placeholder="e.g. somsri@clinic.example"
+                  placeholder="ตัวอย่าง: somsri@clinic.example"
                   autoComplete="email"
                 />
               </label>
               <label>
-                Phone number <span className="pd-empty-note" style={{ fontWeight: 400 }}>(optional)</span>
+                หมายเลขโทรศัพท์ <span className="pd-empty-note" style={{ fontWeight: 400 }}>(ไม่บังคับ)</span>
                 <input
                   value={contactPhone}
                   onChange={(event) => setContactPhone(event.target.value)}
-                  placeholder="e.g. 0891234567"
+                  placeholder="ตัวอย่าง: 0891234567"
                   autoComplete="tel"
                 />
               </label>
@@ -1021,17 +1034,17 @@ function CreateAccountModal({
           {role === "therapist" && (
             <>
               <label>
-                License number
+                เลขที่ใบอนุญาต
                 <input
                   value={licenseNumber}
                   onChange={(event) => setLicenseNumber(event.target.value)}
-                  placeholder="e.g. PT-2024-00123"
+                  placeholder="ตัวอย่าง: PT-2024-00123"
                   autoComplete="off"
                 />
               </label>
               <div className="library-toggle-row">
                 <label>
-                  License issued
+                  วันที่ออกใบอนุญาต
                   <input
                     type="date"
                     value={licenseIssued}
@@ -1039,7 +1052,7 @@ function CreateAccountModal({
                   />
                 </label>
                 <label>
-                  License expiry
+                  วันหมดอายุใบอนุญาต
                   <input
                     type="date"
                     value={licenseExpiry}
@@ -1052,11 +1065,11 @@ function CreateAccountModal({
 
           {role === "admin" && (
             <label>
-              Employee ID
+              รหัสพนักงาน
               <input
                 value={employeeId}
                 onChange={(event) => setEmployeeId(event.target.value)}
-                placeholder="e.g. EMP-0042"
+                placeholder="ตัวอย่าง: EMP-0042"
                 autoComplete="off"
               />
             </label>
@@ -1066,42 +1079,42 @@ function CreateAccountModal({
             <>
               <div className="library-toggle-row">
                 <label>
-                  Gender
+                  เพศ
                   <select
                     className="admin-role-select"
                     value={gender}
                     onChange={(event) => setGender(event.target.value as "male" | "female" | "other" | "unknown")}
                   >
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
-                    <option value="unknown">Unknown</option>
+                    <option value="male">ชาย</option>
+                    <option value="female">หญิง</option>
+                    <option value="other">อื่น ๆ</option>
+                    <option value="unknown">ไม่ระบุ</option>
                   </select>
                 </label>
                 <label>
-                  Date of birth
+                  วันเกิด
                   <input type="date" value={dateOfBirth} onChange={(event) => setDateOfBirth(event.target.value)} />
                 </label>
               </div>
               <div className="library-toggle-row">
                 <label>
-                  Height (cm)
+                  ส่วนสูง (ซม.)
                   <input
                     type="number"
                     step="0.1"
                     value={heightCm}
                     onChange={(event) => setHeightCm(event.target.value)}
-                    placeholder="e.g. 160"
+                    placeholder="ตัวอย่าง: 160"
                   />
                 </label>
                 <label>
-                  Weight (kg)
+                  น้ำหนัก (กก.)
                   <input
                     type="number"
                     step="0.1"
                     value={weightKg}
                     onChange={(event) => setWeightKg(event.target.value)}
-                    placeholder="e.g. 58"
+                    placeholder="ตัวอย่าง: 58"
                   />
                 </label>
               </div>
@@ -1109,7 +1122,7 @@ function CreateAccountModal({
           )}
 
           <button className="primary-button full-width" type="submit" disabled={submitting}>
-            {submitting ? "Creating…" : `Create ${role === "therapist" ? "Therapist" : role === "admin" ? "Admin" : "Patient"} account`}
+            {submitting ? "กำลังสร้าง…" : `สร้างบัญชี${role === "therapist" ? "นักกายภาพบำบัด" : role === "admin" ? "ผู้ดูแลระบบ" : "ผู้ป่วย"}`}
           </button>
         </form>
       </div>
@@ -1168,7 +1181,7 @@ function EditAccountModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const roleLabel = user.role === "admin" ? "Admin" : user.role === "therapist" ? "Therapist" : "Patient";
+  const roleLabel = user.role === "admin" ? "ผู้ดูแลระบบ" : user.role === "therapist" ? "นักกายภาพบำบัด" : "ผู้ป่วย";
   const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "good" : "fair";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1177,17 +1190,17 @@ function EditAccountModal({
 
     if (isPatient) {
       if (!firstName.trim() || !lastName.trim() || !username.trim()) {
-        setError("Fill in first name, last name, and phone number.");
+        setError("กรุณากรอกชื่อ นามสกุล และหมายเลขโทรศัพท์");
         return;
       }
     } else if (!displayName.trim() || !username.trim()) {
-      setError("Fill in display name and username.");
+      setError("กรุณากรอกชื่อที่แสดงและชื่อผู้ใช้");
       return;
     }
 
     if (isPatient) {
       if (!token) {
-        setError("Your session has expired. Please log in again.");
+        setError("เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบอีกครั้ง");
         return;
       }
       setSubmitting(true);
@@ -1216,7 +1229,7 @@ function EditAccountModal({
           true
         );
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Couldn't save changes. Please try again.");
+        setError(err instanceof ApiError ? err.message : "บันทึกการเปลี่ยนแปลงไม่สำเร็จ กรุณาลองอีกครั้ง");
       } finally {
         setSubmitting(false);
       }
@@ -1241,10 +1254,10 @@ function EditAccountModal({
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="admin-modal" role="dialog" aria-label="Edit account">
+      <div className="admin-modal" role="dialog" aria-label="แก้ไขบัญชี">
         <div className="therapist-detail-header">
-          <strong>Edit account</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <strong>แก้ไขบัญชี</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </div>
@@ -1258,7 +1271,7 @@ function EditAccountModal({
           )}
 
           <label>
-            Role
+            บทบาท
             <span className={`badge-pill ${roleTone}`} style={{ width: "fit-content" }}>
               {roleLabel}
             </span>
@@ -1267,40 +1280,40 @@ function EditAccountModal({
           {isPatient ? (
             <div className="library-toggle-row">
               <label>
-                First name
+                ชื่อ
                 <input value={firstName} onChange={(event) => setFirstName(event.target.value)} autoComplete="given-name" />
               </label>
               <label>
-                Last name
+                นามสกุล
                 <input value={lastName} onChange={(event) => setLastName(event.target.value)} autoComplete="family-name" />
               </label>
             </div>
           ) : (
             <label>
-              Display name
+              ชื่อที่แสดง
               <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" />
             </label>
           )}
 
           <label>
-            {isPatient ? "Phone number" : "Username"}
+            {isPatient ? "หมายเลขโทรศัพท์" : "ชื่อผู้ใช้"}
             <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="off" />
           </label>
 
           {user.role === "therapist" && (
             <>
               <label>
-                License number
+                เลขที่ใบอนุญาต
                 <input
                   value={licenseNumber}
                   onChange={(event) => setLicenseNumber(event.target.value)}
-                  placeholder="e.g. PT-2024-00123"
+                  placeholder="ตัวอย่าง: PT-2024-00123"
                   autoComplete="off"
                 />
               </label>
               <div className="library-toggle-row">
                 <label>
-                  License issued
+                  วันที่ออกใบอนุญาต
                   <input
                     type="date"
                     value={licenseIssued}
@@ -1308,7 +1321,7 @@ function EditAccountModal({
                   />
                 </label>
                 <label>
-                  License expiry
+                  วันหมดอายุใบอนุญาต
                   <input
                     type="date"
                     value={licenseExpiry}
@@ -1321,11 +1334,11 @@ function EditAccountModal({
 
           {user.role === "admin" && (
             <label>
-              Employee ID
+              รหัสพนักงาน
               <input
                 value={employeeId}
                 onChange={(event) => setEmployeeId(event.target.value)}
-                placeholder="e.g. EMP-0042"
+                placeholder="ตัวอย่าง: EMP-0042"
                 autoComplete="off"
               />
             </label>
@@ -1335,42 +1348,42 @@ function EditAccountModal({
             <>
               <div className="library-toggle-row">
                 <label>
-                  Gender
+                  เพศ
                   <select
                     className="admin-role-select"
                     value={gender}
                     onChange={(event) => setGender(event.target.value as "male" | "female" | "other" | "unknown")}
                   >
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
-                    <option value="unknown">Unknown</option>
+                    <option value="male">ชาย</option>
+                    <option value="female">หญิง</option>
+                    <option value="other">อื่น ๆ</option>
+                    <option value="unknown">ไม่ระบุ</option>
                   </select>
                 </label>
                 <label>
-                  Date of birth
+                  วันเกิด
                   <input type="date" value={dateOfBirth} onChange={(event) => setDateOfBirth(event.target.value)} />
                 </label>
               </div>
               <div className="library-toggle-row">
                 <label>
-                  Height (cm)
+                  ส่วนสูง (ซม.)
                   <input
                     type="number"
                     step="0.1"
                     value={heightCm}
                     onChange={(event) => setHeightCm(event.target.value)}
-                    placeholder="e.g. 160"
+                    placeholder="ตัวอย่าง: 160"
                   />
                 </label>
                 <label>
-                  Weight (kg)
+                  น้ำหนัก (กก.)
                   <input
                     type="number"
                     step="0.1"
                     value={weightKg}
                     onChange={(event) => setWeightKg(event.target.value)}
-                    placeholder="e.g. 58"
+                    placeholder="ตัวอย่าง: 58"
                   />
                 </label>
               </div>
@@ -1378,7 +1391,7 @@ function EditAccountModal({
           )}
 
           <button className="primary-button full-width" type="submit" disabled={submitting}>
-            {submitting ? "Saving…" : "Save changes"}
+            {submitting ? "กำลังบันทึก…" : "บันทึกการเปลี่ยนแปลง"}
           </button>
         </form>
       </div>
@@ -1446,7 +1459,7 @@ const [assignmentBusy, setAssignmentBusy] = useState(false);
  // save-changes dialog) instead of the browser's unstyled window.confirm().
  const [unassignConfirmOpen, setUnassignConfirmOpen] = useState(false);
 
- const roleText = user.role === "admin" ? "Admin" : user.role === "therapist" ? "Therapist" : "Patient";
+ const roleText = user.role === "admin" ? "ผู้ดูแลระบบ" : user.role === "therapist" ? "นักกายภาพบำบัด" : "ผู้ป่วย";
 const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "good" : "fair";
 
  const startEdit = () => {
@@ -1482,16 +1495,16 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
     setError(null);
     if (isPatient) {
       if (!firstName.trim() || !lastName.trim() || !username.trim()) {
-        setError("Fill in first name, last name, and phone number.");
+        setError("กรุณากรอกชื่อ นามสกุล และหมายเลขโทรศัพท์");
         return;
       }
     } else if (!displayName.trim() || !username.trim()) {
-      setError("Fill in display name and username.");
+      setError("กรุณากรอกชื่อที่แสดงและชื่อผู้ใช้");
       return;
     }
 
     if (!token) {
-      setError("Your session has expired. Please log in again.");
+      setError("เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบอีกครั้ง");
       return;
     }
 
@@ -1538,7 +1551,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
       setConfirmOpen(false);
       setMode("view");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't save changes. Please try again.");
+      setError(err instanceof ApiError ? err.message : "บันทึกการเปลี่ยนแปลงไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setSubmitting(false);
     }
@@ -1553,9 +1566,9 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
     setAssignmentError(null);
     try {
       await unassignPatient(token, user.assignedTherapist.id, user.id);
-      onAssignmentChanged(`${user.assignedTherapist.displayName} was unassigned from "${user.name}".`);
+      onAssignmentChanged(`ยกเลิกการมอบหมาย ${user.assignedTherapist.displayName} จาก "${user.name}" แล้ว`);
     } catch (err) {
-      setAssignmentError(err instanceof ApiError ? err.message : "Couldn't unassign the therapist. Please try again.");
+      setAssignmentError(err instanceof ApiError ? err.message : "ยกเลิกการมอบหมายนักกายภาพบำบัดไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setAssignmentBusy(false);
     }
@@ -1564,20 +1577,20 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="admin-modal admin-info-modal" role="dialog" aria-label="Account information">
+      <div className="admin-modal admin-info-modal" role="dialog" aria-label="ข้อมูลบัญชี">
         <div className="therapist-detail-header">
-          <strong>Account information</strong>
+          <strong>ข้อมูลบัญชี</strong>
           <div className="admin-info-header-actions">
             {mode === "view" ? (
               <button type="button" className="secondary-button admin-info-header-btn" onClick={startEdit}>
-                <Pencil size={12} /> Edit
+                <Pencil size={12} /> แก้ไข
               </button>
             ) : (
               <button type="button" className="secondary-button admin-info-header-btn" onClick={cancelEdit}>
-                <X size={12} /> Cancel
+                <X size={12} /> ยกเลิก
               </button>
             )}
-            <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
               <X size={16} />
             </button>
           </div>
@@ -1594,7 +1607,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
             <div className="admin-info-badges">
               <span className={`badge-pill ${roleTone}`}>{roleText}</span>
               <span className={`badge-pill ${user.status === "active" ? "good" : "fair"}`}>
-                {user.status === "active" ? "Active" : "Disabled"}
+                {user.status === "active" ? "ใช้งานอยู่" : "ปิดใช้งาน"}
               </span>
             </div>
           </div> 
@@ -1604,21 +1617,21 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
           <>
             <div className="admin-info-grid">
               <div className="admin-info-item">
-                <span className="admin-info-label">{isPatient ? "Phone number" : "Username"}</span>
+                <span className="admin-info-label">{isPatient ? "หมายเลขโทรศัพท์" : "ชื่อผู้ใช้"}</span>
                 <span className="admin-info-value">{user.username}</span>
               </div>
               <div className="admin-info-item">
-                <span className="admin-info-label">Last login</span>
-                <span className="admin-info-value">{user.lastLoginLabel}</span>
+                <span className="admin-info-label">เข้าสู่ระบบล่าสุด</span>
+                <span className="admin-info-value">{lastLoginDisplayLabel(user.lastLoginLabel)}</span>
               </div>
               {!isPatient && (
                 <>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">Email</span>
+                    <span className="admin-info-label">อีเมล</span>
                     <span className="admin-info-value">{user.email ?? "—"}</span>
                   </div>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">Contact phone</span>
+                    <span className="admin-info-label">หมายเลขโทรศัพท์</span>
                     <span className="admin-info-value">{user.phoneNumber ?? "—"}</span>
                   </div>
                 </>
@@ -1626,19 +1639,19 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
               {user.role === "patient" && (
                 <>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">Gender</span>
-                    <span className="admin-info-value">{user.gender && user.gender !== "unknown" ? user.gender[0].toUpperCase() + user.gender.slice(1) : "Unknown"}</span>
+                    <span className="admin-info-label">เพศ</span>
+                    <span className="admin-info-value">{user.gender === "male" ? "ชาย" : user.gender === "female" ? "หญิง" : user.gender === "other" ? "อื่น ๆ" : "ไม่ระบุ"}</span>
                   </div>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">Date of birth</span>
+                    <span className="admin-info-label">วันเกิด</span>
                     <span className="admin-info-value">{user.dateOfBirthLabel ?? "—"}</span>
                   </div>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">Height (cm)</span>
+                    <span className="admin-info-label">ส่วนสูง (ซม.)</span>
                     <span className="admin-info-value">{user.heightCm ?? "—"}</span>
                   </div>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">Weight (kg)</span>
+                    <span className="admin-info-label">น้ำหนัก (กก.)</span>
                     <span className="admin-info-value">{user.weightKg ?? "—"}</span>
                   </div>
                 </>
@@ -1646,26 +1659,26 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
               {user.role === "therapist" && (
                 <>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">License number</span>
+                    <span className="admin-info-label">เลขที่ใบอนุญาต</span>
                     <span className="admin-info-value">{user.licenseNumber ?? "—"}</span>
                   </div>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">License issued</span>
+                    <span className="admin-info-label">วันที่ออกใบอนุญาต</span>
                     <span className="admin-info-value">{user.licenseIssuedLabel ?? "—"}</span>
                   </div>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">License expiry</span>
+                    <span className="admin-info-label">วันหมดอายุใบอนุญาต</span>
                     <span className="admin-info-value">{user.licenseExpiryLabel ?? "—"}</span>
                   </div>
                   <div className="admin-info-item">
-                    <span className="admin-info-label">Patients</span>
+                    <span className="admin-info-label">จำนวนผู้ป่วย</span>
                     <span className="admin-info-value">{typeof user.patientCount === "number" ? user.patientCount : "—"}</span>
                   </div>
                 </>
               )}
               {user.role === "admin" && (
                 <div className="admin-info-item">
-                  <span className="admin-info-label">Employee ID</span>
+                  <span className="admin-info-label">รหัสพนักงาน</span>
                   <span className="admin-info-value">{user.employeeId ?? "—"}</span>
                 </div>
               )}
@@ -1674,7 +1687,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
             {/* Patient-only management: assigned therapist (moved from row buttons) */}
             {isPatient && (
               <div className="admin-info-section">
-                <strong>Assigned therapist</strong>
+                <strong>นักกายภาพบำบัดที่ได้รับมอบหมาย</strong>
                 {assignmentError && (
                   <p className="auth-error-banner admin-info-error" role="alert">
                     {assignmentError}
@@ -1691,7 +1704,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                       />
                       <div>
                         <strong>{user.assignedTherapist.displayName}</strong>
-                        <small>{user.assignedTherapist.licenseNumber ? `License ${user.assignedTherapist.licenseNumber}` : "Active therapist"}</small>
+                        <small>{user.assignedTherapist.licenseNumber ? `เลขที่ใบอนุญาต ${user.assignedTherapist.licenseNumber}` : "นักกายภาพบำบัดที่ใช้งานอยู่"}</small>
                       </div>
                     </div>
                     <div className="assign-patient-row-actions">
@@ -1700,9 +1713,9 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                         className="secondary-button"
                         disabled={assignmentBusy}
                         onClick={() => setUnassignConfirmOpen(true)}
-                        title="Unassign this therapist"
+                        title="ยกเลิกการมอบหมายนักกายภาพบำบัด"
                       >
-                        <UserMinus size={13} /> {assignmentBusy ? "Working…" : "Unassign"}
+                        <UserMinus size={13} /> {assignmentBusy ? "กำลังดำเนินการ…" : "ยกเลิกการมอบหมาย"}
                       </button>
                     </div>
                   </div>
@@ -1710,8 +1723,8 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                   <div className="assign-patient-row">
                     <div className="assign-patient-row-info">
                       <div>
-                        <strong>No therapist assigned</strong>
-                        <small>Assign one so this patient can start rehabilitation.</small>
+                        <strong>ยังไม่ได้มอบหมายนักกายภาพบำบัด</strong>
+                        <small>มอบหมายนักกายภาพบำบัดเพื่อให้ผู้ป่วยเริ่มฟื้นฟูสมรรถภาพ</small>
                       </div>
                     </div>
                     <div className="assign-patient-row-actions">
@@ -1721,7 +1734,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                         disabled={assignmentBusy}
                         onClick={() => setShowAssignModal(true)}
                       >
-                        <UserPlus size={13} /> Assign therapist
+                        <UserPlus size={13} /> มอบหมายนักกายภาพบำบัด
                       </button>
                     </div>
                   </div>
@@ -1733,7 +1746,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
           <>
             <div className="admin-info-editnote">
               <AlertCircle size={13} />
-              Editing enabled for the fields below. Role, status, and last login can't be changed here.
+              สามารถแก้ไขข้อมูลในช่องด้านล่างได้ ไม่สามารถเปลี่ยนบทบาท สถานะ หรือเวลาเข้าสู่ระบบล่าสุดได้
             </div>
 
             {error && (
@@ -1748,56 +1761,56 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
               <>
                 <div className="library-toggle-row">
                   <label>
-                    First name
+                    ชื่อ
                     <input value={firstName} onChange={(event) => setFirstName(event.target.value)} autoComplete="given-name" />
                   </label>
                   <label>
-                    Last name
+                    นามสกุล
                     <input value={lastName} onChange={(event) => setLastName(event.target.value)} autoComplete="family-name" />
                   </label>
                 </div>
                 <label>
-                  Phone number
+                  หมายเลขโทรศัพท์
                   <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="off" />
                 </label>
                 <div className="library-toggle-row">
                   <label>
-                    Gender
+                    เพศ
                     <select
                       className="admin-role-select"
                       value={gender}
                       onChange={(e) => setGender(e.target.value as "male" | "female" | "other" | "unknown")}
                     >
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                      <option value="other">Other</option>
-                      <option value="unknown">Unknown</option>
+                      <option value="male">ชาย</option>
+                      <option value="female">หญิง</option>
+                      <option value="other">อื่น ๆ</option>
+                      <option value="unknown">ไม่ระบุ</option>
                     </select>
                   </label>
                   <label>
-                    Date of birth
+                    วันเกิด
                     <input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
                   </label>
                 </div>
                 <div className="library-toggle-row">
                   <label>
-                    Height (cm)
-                    <input type="number" step="0.1" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} placeholder="e.g. 160" />
+                    ส่วนสูง (ซม.)
+                    <input type="number" step="0.1" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} placeholder="ตัวอย่าง: 160" />
                   </label>
                   <label>
-                    Weight (kg)
-                    <input type="number" step="0.1" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} placeholder="e.g. 58" />
+                    น้ำหนัก (กก.)
+                    <input type="number" step="0.1" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} placeholder="ตัวอย่าง: 58" />
                   </label>
                 </div>
               </>
             ) : (
               <>
                 <label>
-                  Display name
+                  ชื่อที่แสดง
                   <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name" />
                 </label>
                 <label>
-                  Username
+                  ชื่อผู้ใช้
                   <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
                 </label>
               </>
@@ -1806,16 +1819,16 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
             {user.role === "therapist" && (
               <>
                 <label>
-                  License number
-                  <input value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="e.g. PT-2024-00123" autoComplete="off" />
+                  เลขที่ใบอนุญาต
+                  <input value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="ตัวอย่าง: PT-2024-00123" autoComplete="off" />
                 </label>
                 <div className="library-toggle-row">
                   <label>
-                    License issued
+                    วันที่ออกใบอนุญาต
                     <input type="date" value={licenseIssued} onChange={(e) => setLicenseIssued(e.target.value)} />
                   </label>
                   <label>
-                    License expiry
+                    วันหมดอายุใบอนุญาต
                     <input type="date" value={licenseExpiry} onChange={(e) => setLicenseExpiry(e.target.value)} />
                   </label>
                 </div>
@@ -1824,14 +1837,14 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
 
             {user.role === "admin" && (
               <label>
-                Employee ID
-                <input value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="e.g. EMP-0042" autoComplete="off" />
+                รหัสพนักงาน
+                <input value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="ตัวอย่าง: EMP-0042" autoComplete="off" />
               </label>
             )}
 
             <div className="admin-info-edit-actions">
               <button type="button" className="secondary-button" onClick={cancelEdit} disabled={submitting}>
-                Discard
+                ยกเลิก
               </button>
               <button
                 type="button"
@@ -1839,7 +1852,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                 onClick={() => setConfirmOpen(true)}
                 disabled={submitting}
               >
-                {submitting ? "Saving…" : "Confirm changes"}
+                {submitting ? "กำลังบันทึก…" : "ยืนยันการเปลี่ยนแปลง"}
               </button>
             </div>
           </>
@@ -1849,21 +1862,20 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
         {confirmOpen && (
           <>
             <div className="therapist-panel-scrim admin-info-confirm-scrim" onClick={() => setConfirmOpen(false)} />
-            <div className="admin-modal admin-info-confirm" role="dialog" aria-label="Confirm account changes">
+            <div className="admin-modal admin-info-confirm" role="dialog" aria-label="ยืนยันการเปลี่ยนแปลงบัญชี">
               <span className="admin-info-confirm-icon">
                 <AlertCircle size={20} />
               </span>
-              <strong>Save changes?</strong>
+              <strong>บันทึกการเปลี่ยนแปลงหรือไม่</strong>
               <p>
-                Update {isPatient ? `${firstName.trim()} ${lastName.trim()}`.trim() || user.name : user.name}&#39;s
-                account information?
+                ต้องการอัปเดตข้อมูลบัญชีของ {isPatient ? `${firstName.trim()} ${lastName.trim()}`.trim() || user.name : user.name} หรือไม่
               </p>
               <div className="admin-info-confirm-actions">
                 <button type="button" className="secondary-button" onClick={() => setConfirmOpen(false)} disabled={submitting}>
-                  Cancel
+                  ยกเลิก
                 </button>
                 <button type="button" className="primary-button" onClick={submit} disabled={submitting}>
-                  {submitting ? "Saving…" : "Confirm & save"}
+                  {submitting ? "กำลังบันทึก…" : "ยืนยันและบันทึก"}
                 </button>
               </div>
             </div>
@@ -1877,18 +1889,18 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
         {unassignConfirmOpen && user.assignedTherapist && (
           <>
             <div className="therapist-panel-scrim admin-info-confirm-scrim" onClick={() => setUnassignConfirmOpen(false)} />
-            <div className="admin-modal admin-info-confirm" role="dialog" aria-label="Confirm therapist unassignment">
+            <div className="admin-modal admin-info-confirm" role="dialog" aria-label="ยืนยันการยกเลิกการมอบหมาย">
               <span className="admin-info-confirm-icon">
                 <AlertCircle size={20} />
               </span>
-              <strong>Unassign therapist?</strong>
+              <strong>ยกเลิกการมอบหมายนักกายภาพบำบัดหรือไม่</strong>
               <p>
-                Remove {user.assignedTherapist.displayName}&#39;s assignment from &quot;{user.name}&quot;?
-                The patient will have no assigned therapist until one is assigned again.
+                ต้องการยกเลิกการมอบหมาย {user.assignedTherapist.displayName} จาก &quot;{user.name}&quot; หรือไม่
+                ผู้ป่วยจะไม่มีนักกายภาพบำบัดที่รับผิดชอบจนกว่าจะมีการมอบหมายอีกครั้ง
               </p>
               <div className="admin-info-confirm-actions">
                 <button type="button" className="secondary-button" onClick={() => setUnassignConfirmOpen(false)} disabled={assignmentBusy}>
-                  Cancel
+                  ยกเลิก
                 </button>
                 <button
                   type="button"
@@ -1897,7 +1909,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                   onClick={handleUnassign}
                   disabled={assignmentBusy}
                 >
-                  {assignmentBusy ? "Unassigning…" : "Confirm unassign"}
+                  {assignmentBusy ? "กำลังยกเลิก…" : "ยืนยันการยกเลิก"}
                 </button>
               </div>
             </div>
@@ -1913,7 +1925,7 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
             busy={assignmentBusy}
             onClose={() => setShowAssignModal(false)}
             onAssign={async (therapist) => {
-              if (!token) throw new Error("Your session has expired. Please log in again.");
+              if (!token) throw new Error("เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบอีกครั้ง");
               setAssignmentBusy(true);
               setAssignmentError(null);
               try {
@@ -1932,12 +1944,10 @@ const roleTone = user.role === "admin" ? "poor" : user.role === "therapist" ? "g
                 setAssignmentBusy(false);
               }
             }}
-            onAssigned={(patientName, therapistName) => onAssignmentChanged(`${therapistName} was assigned to "${patientName}".`)}
+            onAssigned={(patientName, therapistName) => onAssignmentChanged(`มอบหมาย ${therapistName} ให้ "${patientName}" แล้ว`)}
           />
         )}
       </div>
     </>
   );
 }
-
-

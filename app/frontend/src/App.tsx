@@ -148,7 +148,7 @@ function AppShell() {
         trackingType: exercise.movementTracking === "none" ? "both" : exercise.movementTracking,
         targetLabel: exercise.targetValueLabel,
         status: exercise.status === "completed" ? "done" : exercise.status === "in_progress" ? "in_progress" : "not_started",
-        feedback: exercise.therapistInstruction ?? "Follow your therapist's prescribed instructions.",
+        feedback: exercise.therapistInstruction ?? "ปฏิบัติตามคำแนะนำที่นักกายภาพบำบัดกำหนด",
         progressLabel: exercise.targetValueLabel,
         durationMinutes: 0,
         sets: 0,
@@ -172,11 +172,11 @@ function AppShell() {
   const mockAiEvaluation = () => ({
     aiScore: Math.max(60, Math.min(98, (activeExercise.score ?? 80) + Math.round((Math.random() - 0.5) * 12))),
     aiFeedback:
-      "Solid form overall — keep your shoulder relaxed through the top of the movement. · ท่าทางโดยรวมดี พยายามผ่อนคลายไหล่ตอนยกสุด",
+      "ท่าทางโดยรวมดี พยายามผ่อนคลายไหล่ขณะยกแขนขึ้น",
     aiMetrics: [
-      { label: "Range of motion", value: `${70 + Math.round(Math.random() * 20)}%` },
-      { label: "Tempo", value: "Steady" },
-      { label: "Frames analyzed", value: `${120 + Math.round(Math.random() * 40)}` }
+      { label: "ช่วงการเคลื่อนไหว", value: `${70 + Math.round(Math.random() * 20)}%` },
+      { label: "จังหวะ", value: "สม่ำเสมอ" },
+      { label: "จำนวนเฟรมที่วิเคราะห์", value: `${120 + Math.round(Math.random() * 40)}` }
     ]
   });
 
@@ -205,11 +205,11 @@ function AppShell() {
       ...(poseSummary
         ? {
             aiScore: poseSummary.averageScore,
-            aiFeedback: `Average score from ${poseSummary.repScores.length} AI-scored repetition${poseSummary.repScores.length === 1 ? "" : "s"}.`,
+            aiFeedback: `คะแนนเฉลี่ยจากการทำท่าบริหาร ${poseSummary.repScores.length} ครั้งที่ AI ประเมินผลสำเร็จ`,
             aiMetrics: [
-              { label: "Scored repetitions", value: String(poseSummary.repScores.length) },
-              { label: "Score range", value: `${Math.min(...poseSummary.repScores)}–${Math.max(...poseSummary.repScores)}` },
-              { label: "Average score", value: String(poseSummary.averageScore) }
+              { label: "จำนวนครั้งที่ประเมินผล", value: String(poseSummary.repScores.length) },
+              { label: "ช่วงคะแนน", value: `${Math.min(...poseSummary.repScores)}–${Math.max(...poseSummary.repScores)}` },
+              { label: "คะแนนเฉลี่ย", value: String(poseSummary.averageScore) }
             ]
           }
         : mockAiEvaluation())

@@ -72,10 +72,20 @@ function formFromProfile(profile: UserProfile): TherapistProfileForm {
 }
 
 function formatDateLabel(iso: string): string {
-  if (!iso) return "Not set";
-  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", {
+  if (!iso) return "ไม่ระบุ";
+  return new Date(`${iso}T00:00:00`).toLocaleDateString("th-TH", {
     day: "2-digit",
     month: "short",
+    year: "numeric"
+  });
+}
+
+function formatCreatedAt(profile: UserProfile | null): string {
+  if (!profile) return "—";
+  if (!profile.createdAtIso) return profile.createdAtLabel || "—";
+  return new Date(profile.createdAtIso).toLocaleDateString("th-TH", {
+    day: "numeric",
+    month: "long",
     year: "numeric"
   });
 }
@@ -111,7 +121,7 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
       })
       .catch((err) => {
         if (!cancelled) {
-          setLoadError(err instanceof ApiError ? err.message : "Couldn't load your profile. Please try again.");
+          setLoadError(err instanceof ApiError ? err.message : "โหลดข้อมูลโปรไฟล์ไม่สำเร็จ กรุณาลองอีกครั้ง");
         }
       })
       .finally(() => {
@@ -172,24 +182,29 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2500);
     } catch (err) {
-      setSaveError(err instanceof ApiError ? err.message : "Couldn't save your profile. Please try again.");
+      setSaveError(err instanceof ApiError ? err.message : "บันทึกข้อมูลโปรไฟล์ไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setSaving(false);
     }
   };
 
-  const displayName = profile?.displayName || user?.displayName || user?.username || "Therapist";
+  const displayName = profile?.displayName || user?.displayName || user?.username || "นักกายภาพบำบัด";
 
   // --- Profile picture (same flow as PatientSettingsPage): pick -> POST /files
   // -> PATCH /users/:id { profilePictureFileId }; pixels via useProfilePicture.
   const avatarUrl = useProfilePicture(token, profile?.profilePictureFileId ?? null);
-  const picUpload = useProfilePictureUpload(token, user?.id ?? null, (updated) => {
-    setProfile(updated);
-    // Syncs the picture across every sidebar/topbar immediately (auth store).
-    updateUser({ profilePictureFileId: updated.profilePictureFileId });
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2500);
-  });
+  const picUpload = useProfilePictureUpload(
+    token,
+    user?.id ?? null,
+    (updated) => {
+      setProfile(updated);
+      // Syncs the picture across every sidebar/topbar immediately (auth store).
+      updateUser({ profilePictureFileId: updated.profilePictureFileId });
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2500);
+    },
+    "th"
+  );
 
   return (
     <section className="therapist-shell">
@@ -198,17 +213,17 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Settings</h1>
-            <p>Profile, license, and contact information</p>
+            <h1>ตั้งค่า</h1>
+            <p>ข้อมูลส่วนตัว ใบอนุญาต และข้อมูลติดต่อ</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>
-                <small>Physical Therapist</small>
+                <small>นักกายภาพบำบัด</small>
               </div>
               <span className={`avatar-badge${avatarUrl ? " with-photo" : ""}`}>
-                {avatarUrl ? <img src={avatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
+                {avatarUrl ? <img src={avatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : initialsFromName(displayName)}
               </span>
             </div>
           </div>
@@ -222,12 +237,12 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
           )}
 
           {loading ? (
-            <p className="pd-empty-note">Loading…</p>
+            <p className="pd-empty-note">กำลังโหลด…</p>
           ) : (
             <form className={`ps-card${isEditing ? " editing" : ""}`} onSubmit={handleSubmit}>
-              <div className={`ps-avatar-circle${avatarUrl ? " with-photo" : ""}`}>
+              <div className={`ps-avatar-circle lg${avatarUrl ? " with-photo" : ""}`}>
                 {avatarUrl ? (
-                  <img className="ps-avatar-img" src={avatarUrl} alt={`${displayName}'s profile picture`} />
+                  <img className="ps-avatar-img" src={avatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} />
                 ) : (
                   initialsFromName(displayName)
                 )}
@@ -249,43 +264,43 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
                 disabled={picUpload.uploading}
               >
                 <Camera size={13} />{" "}
-                {picUpload.uploading ? "Uploading…" : avatarUrl ? "Change photo" : "Upload photo"}
+                {picUpload.uploading ? "กำลังอัปโหลด…" : avatarUrl ? "เปลี่ยนรูปภาพ" : "อัปโหลดรูปภาพ"}
               </button>
 
               {isEditing && (
                 <span className="ps-editing-pill">
-                  <Pencil size={12} /> Editing profile
+                  <Pencil size={12} /> กำลังแก้ไขโปรไฟล์
                 </span>
               )}
 
               <div className="ps-panels">
                 <section className="ps-panel">
                   <div className="settings-section-heading">
-                    <User size={15} /> <strong>Profile</strong>
+                    <User size={15} /> <strong>ข้อมูลส่วนตัว</strong>
                   </div>
                   <SettingsField
-                    label="First name"
+                    label="ชื่อ"
                     value={form.firstName}
                     editing={isEditing}
                     onChange={updateField("firstName")}
                   />
                   <SettingsField
-                    label="Last name"
+                    label="นามสกุล"
                     value={form.lastName}
                     editing={isEditing}
                     onChange={updateField("lastName")}
                   />
                   <div className="settings-section-heading">
-                    <ShieldCheck size={15} /> <strong>License</strong>
+                    <ShieldCheck size={15} /> <strong>ใบอนุญาตประกอบวิชาชีพ</strong>
                   </div>
                   <SettingsField
-                    label="License number"
+                    label="เลขที่ใบอนุญาต"
                     value={form.licenseNumber}
                     editing={isEditing}
                     onChange={updateField("licenseNumber")}
                   />
                   <SettingsField
-                    label="License issued"
+                    label="วันที่ออกใบอนุญาต"
                     type="date"
                     value={form.licenseIssuedDate}
                     editing={isEditing}
@@ -293,7 +308,7 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
                     displayValue={formatDateLabel(form.licenseIssuedDate)}
                   />
                   <SettingsField
-                    label="License expires"
+                    label="วันหมดอายุใบอนุญาต"
                     type="date"
                     value={form.licenseExpiryDate}
                     editing={isEditing}
@@ -301,24 +316,24 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
                     displayValue={formatDateLabel(form.licenseExpiryDate)}
                   />
                   <div className="ps-field">
-                    <span className="ps-field-label">Therapist since</span>
-                    <p className="ps-field-value">{profile?.createdAtLabel ?? "—"}</p>
+                    <span className="ps-field-label">เป็นนักกายภาพบำบัดตั้งแต่</span>
+                    <p className="ps-field-value">{formatCreatedAt(profile)}</p>
                   </div>
                 </section>
 
                 <section className="ps-panel">
                   <div className="settings-section-heading">
-                    <Phone size={15} /> <strong>Contact Information</strong>
+                    <Phone size={15} /> <strong>ข้อมูลติดต่อ</strong>
                   </div>
                   <SettingsField
-                    label="Email address"
+                    label="อีเมล"
                     type="email"
                     value={form.email}
                     editing={isEditing}
                     onChange={updateField("email")}
                   />
                   <SettingsField
-                    label="Phone number"
+                    label="เบอร์โทรศัพท์"
                     value={form.phoneNumber}
                     editing={isEditing}
                     onChange={updateField("phoneNumber")}
@@ -336,7 +351,7 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
                       onClick={discardChanges}
                       disabled={saving}
                     >
-                      <X size={14} /> Discard changes
+                      <X size={14} /> ยกเลิกการแก้ไข
                     </button>
                     <button
                       key="therapist-save-btn"
@@ -344,19 +359,19 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
                       className="primary-button"
                       disabled={saving}
                     >
-                      <Save size={14} /> {saving ? "Saving…" : "Save changes"}
+                      <Save size={14} /> {saving ? "กำลังบันทึก…" : "บันทึกการเปลี่ยนแปลง"}
                     </button>
                   </>
                 ) : (
                   <>
-                    {saved && <span className="ps-saved-note">Saved</span>}
+                    {saved && <span className="ps-saved-note">บันทึกแล้ว</span>}
                     <button
                       key="therapist-edit-btn"
                       type="button"
                       className="primary-button"
                       onClick={startEditing}
                     >
-                      <Pencil size={14} /> Edit profile
+                      <Pencil size={14} /> แก้ไขโปรไฟล์
                     </button>
                   </>
                 )}

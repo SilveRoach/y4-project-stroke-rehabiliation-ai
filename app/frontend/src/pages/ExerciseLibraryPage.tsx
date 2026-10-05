@@ -19,7 +19,6 @@ import {
 } from "../services/api";
 import { useAuth } from "../store/authStore";
 import { useOwnProfilePicture } from "../hooks/useProfilePicture";
-import { describeCriteria } from "../utils/exerciseCriteria";
 import { initialsFromName } from "../utils/displayName";
 import type {
   ExerciseBaseCriteria,
@@ -77,9 +76,9 @@ interface ExerciseLibraryPageProps {
 type StatusFilter = "all" | ExerciseLibraryStatus;
 
 const trackingLabels: Record<ExerciseTrackingType, string> = {
-  pose: "Pose tracking",
-  virtual_grip: "Virtual grip",
-  none: "No AI tracking"
+  pose: "ติดตามท่าทาง",
+  virtual_grip: "วัดแรงบีบมือ",
+  none: "ไม่ใช้ AI ติดตาม"
 };
 
 const trackingIcon: Record<ExerciseTrackingType, typeof Dumbbell> = {
@@ -89,9 +88,18 @@ const trackingIcon: Record<ExerciseTrackingType, typeof Dumbbell> = {
 };
 
 function statusLabel(status: ExerciseLibraryStatus): string {
-  if (status === "active") return "Active";
-  if (status === "draft") return "Draft";
-  return "Archived";
+  if (status === "active") return "ใช้งาน";
+  if (status === "draft") return "ฉบับร่าง";
+  return "เก็บถาวร";
+}
+
+function criteriaLabel(criteria: ExerciseBaseCriteria): string {
+  const parts: string[] = [];
+  if (criteria.targetAngleDeg !== undefined) parts.push(`มุมเป้าหมาย ${criteria.targetAngleDeg}°`);
+  if (criteria.targetGripStrength !== undefined) parts.push(`แรงบีบมือ ${criteria.targetGripStrength}`);
+  if (criteria.repetitions !== undefined) parts.push(`${criteria.repetitions} ครั้ง`);
+  if (criteria.holdSeconds !== undefined) parts.push(`ค้างไว้ ${criteria.holdSeconds} วินาที`);
+  return parts.length > 0 ? parts.join(", ") : "ยังไม่ได้กำหนดเกณฑ์";
 }
 
 export function ExerciseLibraryPage({
@@ -155,7 +163,7 @@ export function ExerciseLibraryPage({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Couldn't load the exercise library. Please try again.");
+          setError(err instanceof ApiError ? err.message : "โหลดคลังท่าบริหารไม่สำเร็จ กรุณาลองอีกครั้ง");
         }
       })
       .finally(() => {
@@ -177,7 +185,7 @@ export function ExerciseLibraryPage({
         exercise.name,
         trackingLabels[exercise.movementTracking],
         exercise.movementTracking,
-        exercise.createdByName || "Therapist"
+        exercise.createdByName || "นักกายภาพบำบัด"
       ]
         .join(" ")
         .toLocaleLowerCase();
@@ -185,7 +193,7 @@ export function ExerciseLibraryPage({
     });
   }, [exercises, searchQuery, statusFilter]);
 
-  const displayName = user?.displayName || user?.username || "Therapist";
+  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
   const ownAvatarUrl = useOwnProfilePicture();
   // The exercise-library section is shared with the admin console (App routes
   // admins here from AdminSidebar's "Exercise Library" item): admins get the
@@ -209,17 +217,17 @@ export function ExerciseLibraryPage({
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Exercise Library</h1>
-            <p>{loading ? "Loading…" : `${exercises.length} exercises`}</p>
+            <h1>คลังท่าบริหาร</h1>
+            <p>{loading ? "กำลังโหลด…" : `ท่าบริหารทั้งหมด ${exercises.length} ท่า`}</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>
-                <small>Physical Therapist</small>
+                <small>นักกายภาพบำบัด</small>
               </div>
               <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
-                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
+                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : initialsFromName(displayName)}
               </span>
             </div>
           </div>
@@ -240,25 +248,25 @@ export function ExerciseLibraryPage({
                   type="search"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Search by name, type, or creator"
-                  aria-label="Search exercises by name, type, or creator"
+                  placeholder="ค้นหาชื่อ ประเภท หรือผู้สร้าง"
+                  aria-label="ค้นหาท่าบริหารด้วยชื่อ ประเภท หรือผู้สร้าง"
                 />
               </label>
               <label className="library-status-filter">
-                <span>Status</span>
+                <span>สถานะ</span>
                 <select
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-                  aria-label="Filter exercises by status"
+                  aria-label="กรองท่าบริหารตามสถานะ"
                 >
-                  <option value="all">All</option>
-                  <option value="active">Active</option>
-                  <option value="draft">Draft</option>
-                  <option value="archived">Archived</option>
+                  <option value="all">ทั้งหมด</option>
+                  <option value="active">ใช้งาน</option>
+                  <option value="draft">ฉบับร่าง</option>
+                  <option value="archived">เก็บถาวร</option>
                 </select>
               </label>
               <button type="button" className="primary-button" onClick={() => setEditingExercise("new")}>
-                <Plus size={16} /> New exercise
+                <Plus size={16} /> เพิ่มท่าบริหาร
               </button>
             </div>
           </div>
@@ -266,10 +274,10 @@ export function ExerciseLibraryPage({
           {!loading && filteredExercises.length === 0 ? (
             <p className="pd-empty-note">
               {exercises.length === 0
-                ? "No exercises have been created yet."
+                ? "ยังไม่มีท่าบริหาร"
                 : searchQuery.trim()
-                  ? "No exercises match your search."
-                  : "No exercises match this filter."}
+                  ? "ไม่พบท่าบริหารที่ตรงกับคำค้นหา"
+                  : "ไม่พบท่าบริหารที่ตรงกับตัวกรองนี้"}
             </p>
           ) : (
             <div className="library-grid">
@@ -288,19 +296,19 @@ export function ExerciseLibraryPage({
                         onSelectExercise?.(exercise);
                       }
                     }}
-                    title="Open exercise editor"
+                    title="เปิดตัวแก้ไขท่าบริหาร"
                   >
                     <div className="library-card-media">
                       {thumbnailUrls[exercise.id] ? (
                         <img
                           className="library-card-thumbnail library-card-video-thumbnail"
                           src={thumbnailUrls[exercise.id]}
-                          alt={`${exercise.name} demo video thumbnail`}
+                          alt={`ภาพตัวอย่างวิดีโอสาธิต ${exercise.name}`}
                         />
                       ) : (
                         <div className="library-card-thumbnail">
                           <Icon size={30} />
-                          <span>{exercise.hasDemoVideo ? "Demo video" : "No demo video"}</span>
+                          <span>{exercise.hasDemoVideo ? "วิดีโอสาธิต" : "ไม่มีวิดีโอสาธิต"}</span>
                         </div>
                       )}
                       <span className={`library-card-type tracking-${exercise.movementTracking}`}>
@@ -310,7 +318,7 @@ export function ExerciseLibraryPage({
 
                     <div className="library-card-details">
                       <strong className="library-card-title">{exercise.name}</strong>
-                      <span>Created by {exercise.createdByName || "Therapist"}</span>
+                      <span>สร้างโดย {exercise.createdByName || "นักกายภาพบำบัด"}</span>
                       <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
                       {exercise.versions.length > 1 ? (
                         <button
@@ -321,10 +329,10 @@ export function ExerciseLibraryPage({
                             setHistoryExercise(exercise);
                           }}
                         >
-                          History
+                          ประวัติ
                         </button>
                       ) : (
-                        <span className="library-card-history-link" style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>No history</span>
+                        <span className="library-card-history-link" style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>ไม่มีประวัติ</span>
                       )}
                     </div>
 
@@ -419,16 +427,16 @@ function ExerciseHistoryPanel({
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="therapist-detail-panel library-history-panel" role="dialog" aria-label="Version history">
+      <div className="therapist-detail-panel library-history-panel" role="dialog" aria-label="ประวัติเวอร์ชัน">
         <div className="therapist-detail-header">
-          <strong>History &middot; {exercise.name}</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <strong>ประวัติ · {exercise.name}</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </div>
 
         <p style={{ margin: "0 0 10px", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-          Select any version below to open it in the exercise workspace.
+          เลือกเวอร์ชันด้านล่างเพื่อเปิดดู
         </p>
 
         <div className="library-history-list">
@@ -447,12 +455,12 @@ function ExerciseHistoryPanel({
                     onViewVersion?.(version);
                   }
                 }}
-                title={`Open version ${version.versionNumber} in the exercise workspace`}
+                title={`เปิดเวอร์ชัน ${version.versionNumber} ในหน้าท่าบริหาร`}
               >
                 <div className="library-history-row-top">
                   <strong>
                     v{version.versionNumber}
-                    {isCurrent && <span className="library-history-current-tag">current</span>}
+                    {isCurrent && <span className="library-history-current-tag">ปัจจุบัน</span>}
                   </strong>
                   <span className={`library-status-badge ${version.status}`}>{statusLabel(version.status)}</span>
                 </div>
@@ -461,12 +469,12 @@ function ExerciseHistoryPanel({
                     {version.name}
                   </p>
                 )}
-                <p className="library-history-criteria">{describeCriteria(version.baseCriteria)}</p>
+                <p className="library-history-criteria">{criteriaLabel(version.baseCriteria)}</p>
                 <div className="library-history-row-bottom">
                   <p className="pd-record-meta">{version.createdAtLabel}</p>
                   <span className="library-history-view-hint">
                     <Eye size={13} />
-                    View version
+                    ดูเวอร์ชัน
                   </span>
                 </div>
               </div>
@@ -498,10 +506,10 @@ function ExerciseDetailPanel({ exercise, onClose, onEdit, onViewHistory }: Exerc
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="therapist-detail-panel library-history-panel" role="dialog" aria-label={`View ${exercise.name}`}>
+      <div className="therapist-detail-panel library-history-panel" role="dialog" aria-label={`ดูรายละเอียด ${exercise.name}`}>
         <div className="therapist-detail-header">
           <strong>{exercise.name}</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </div>
@@ -523,24 +531,24 @@ function ExerciseDetailPanel({ exercise, onClose, onEdit, onViewHistory }: Exerc
           </div>
 
           <div className="library-history-row">
-            <strong style={{ fontSize: "0.82rem" }}>Description</strong>
-            <p className="library-history-criteria">{exercise.description || "No description provided."}</p>
+            <strong style={{ fontSize: "0.82rem" }}>คำอธิบาย</strong>
+            <p className="library-history-criteria">{exercise.description || "ไม่มีคำอธิบาย"}</p>
           </div>
 
           <div className="library-history-row">
-            <strong style={{ fontSize: "0.82rem" }}>Base criteria</strong>
-            <p className="library-history-criteria">{describeCriteria(exercise.baseCriteria)}</p>
+            <strong style={{ fontSize: "0.82rem" }}>เกณฑ์พื้นฐาน</strong>
+            <p className="library-history-criteria">{criteriaLabel(exercise.baseCriteria)}</p>
           </div>
 
           <div className="library-history-row">
-            <strong style={{ fontSize: "0.82rem" }}>Demo video</strong>
-            <p className="library-history-criteria">{exercise.hasDemoVideo ? "Attached" : "None attached"}</p>
+            <strong style={{ fontSize: "0.82rem" }}>วิดีโอสาธิต</strong>
+            <p className="library-history-criteria">{exercise.hasDemoVideo ? "แนบแล้ว" : "ไม่ได้แนบ"}</p>
           </div>
 
           <div className="library-history-row">
-            <strong style={{ fontSize: "0.82rem" }}>Created</strong>
+            <strong style={{ fontSize: "0.82rem" }}>สร้างเมื่อ</strong>
             <p className="library-history-criteria">
-              {exercise.createdAtLabel} by {exercise.createdByName}
+              {exercise.createdAtLabel} โดย {exercise.createdByName}
             </p>
           </div>
         </div>
@@ -548,12 +556,12 @@ function ExerciseDetailPanel({ exercise, onClose, onEdit, onViewHistory }: Exerc
         <div className="library-history-row-actions">
           {onEdit && (
             <button type="button" className="primary-button" onClick={onEdit}>
-              Edit
+              แก้ไข
             </button>
           )}
           {onViewHistory && (
             <button type="button" className="text-action" onClick={onViewHistory}>
-              View history
+              ดูประวัติ
             </button>
           )}
         </div>
@@ -621,7 +629,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
       await publishExercise(token, exercise.id);
       onSaved();
     } catch (err) {
-      setStatusActionError(err instanceof ApiError ? err.message : "Couldn't publish this exercise. Please try again.");
+      setStatusActionError(err instanceof ApiError ? err.message : "เผยแพร่ท่าบริหารไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setStatusAction(null);
     }
@@ -635,7 +643,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
       await archiveExercise(token, exercise.id);
       onSaved();
     } catch (err) {
-      setStatusActionError(err instanceof ApiError ? err.message : "Couldn't archive this exercise. Please try again.");
+      setStatusActionError(err instanceof ApiError ? err.message : "เก็บท่าบริหารเข้าคลังไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setStatusAction(null);
     }
@@ -698,7 +706,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
       }
       onSaved();
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Couldn't save this exercise. Please try again.");
+      setFormError(err instanceof ApiError ? err.message : "บันทึกท่าบริหารไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setSaving(false);
     }
@@ -707,10 +715,10 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="library-modal" role="dialog" aria-label={exercise ? "Edit exercise" : "New exercise"}>
+      <div className="library-modal" role="dialog" aria-label={exercise ? "แก้ไขท่าบริหาร" : "เพิ่มท่าบริหาร"}>
         <div className="therapist-detail-header">
-          <strong>{exercise ? "Edit exercise" : "New exercise"}</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <strong>{exercise ? "แก้ไขท่าบริหาร" : "เพิ่มท่าบริหาร"}</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </div>
@@ -719,8 +727,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
           <div className="library-warning-banner">
             <AlertTriangle size={16} />
             <span>
-              Editing an active exercise creates a new version. This will update the exercise everywhere it&apos;s
-              currently used (BR-6).
+              การแก้ไขท่าบริหารที่ใช้งานอยู่จะสร้างเวอร์ชันใหม่ และอัปเดตท่าบริหารนี้ในทุกแผนที่ใช้งานอยู่ (BR-6)
             </span>
           </div>
         )}
@@ -729,7 +736,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
           <div className="library-warning-banner" style={{ borderColor: "var(--warning, #f59e0b)", background: "rgba(245, 158, 11, 0.1)" }}>
             <AlertTriangle size={16} />
             <span>
-              This exercise was created by {exercise.createdByName || "another therapist"}. Only the creator can edit or version it.
+              ท่าบริหารนี้สร้างโดย {exercise.createdByName || "นักกายภาพบำบัดท่านอื่น"} เฉพาะผู้สร้างเท่านั้นที่แก้ไขหรือสร้างเวอร์ชันใหม่ได้
             </span>
           </div>
         )}
@@ -738,7 +745,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
           <div className="library-history-row" style={{ margin: "0 20px" }}>
             <div className="library-history-row-top">
               <span>
-                Current status: <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
+                สถานะปัจจุบัน: <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
               </span>
             </div>
             {statusActionError && (
@@ -756,7 +763,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
                     onClick={handlePublish}
                   >
                     <CheckCircle2 size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-                    {statusAction === "publish" ? "Publishing…" : "Publish now"}
+                    {statusAction === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}
                   </button>
                 )}
                 <button
@@ -765,7 +772,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
                   disabled={statusAction !== null}
                   onClick={handleArchiveFromModal}
                 >
-                  {statusAction === "archive" ? "Archiving…" : "Archive"}
+                  {statusAction === "archive" ? "กำลังเก็บเข้าคลัง…" : "เก็บเข้าคลัง"}
                 </button>
               </div>
             )}
@@ -780,13 +787,13 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
 
         <form className="library-modal-form" onSubmit={handleSubmit}>
           <label>
-            Name
+            ชื่อท่าบริหาร
             <input value={name} onChange={(event) => setName(event.target.value)} required />
           </label>
 
           <div className="library-toggle-row">
             <label>
-              Movement tracking
+              วิธีติดตามการเคลื่อนไหว
               <select
                 className="creation-select"
                 value={movementTracking}
@@ -804,29 +811,35 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
           {/* Two-step mode: stop here and hand off to ExerciseCreationPage */}
           {isTwoStep ? (
             <button type="submit" className="primary-button full-width" disabled={!name.trim()}>
-              Continue →
+              ดำเนินการต่อ →
             </button>
           ) : (
             <>
               <label>
-                Description
+                คำอธิบาย
                 <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
               </label>
 
               <label>
-                Demo video
-                <FilePicker value={demoFile} onAttach={setDemoFile} onRemove={() => setDemoFile(null)} accept="video/*" />
+                วิดีโอสาธิต
+                <FilePicker
+                  value={demoFile}
+                  onAttach={setDemoFile}
+                  onRemove={() => setDemoFile(null)}
+                  accept="video/*"
+                  locale="th"
+                />
               </label>
 
               <div>
                 <p className="filepicker-label" style={{ marginBottom: 8 }}>
-                  Base criteria &mdash; {trackingLabels[movementTracking]} fields
+                  เกณฑ์พื้นฐาน &mdash; สำหรับ{trackingLabels[movementTracking]}
                 </p>
                 <div className="library-criteria-grid">
                   {movementTracking === "pose" && (
                     <>
                       <label>
-                        Target angle (&deg;)
+                        มุมเป้าหมาย (&deg;)
                         <input
                           type="number"
                           value={targetAngleDeg}
@@ -834,11 +847,11 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
                         />
                       </label>
                       <label>
-                        Repetitions
+                        จำนวนครั้ง
                         <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
                       </label>
                       <label>
-                        Hold (seconds)
+                        ค้างไว้ (วินาที)
                         <input type="number" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} />
                       </label>
                     </>
@@ -846,7 +859,7 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
                   {movementTracking === "virtual_grip" && (
                     <>
                       <label>
-                        Target grip strength
+                        แรงบีบมือเป้าหมาย
                         <input
                           type="number"
                           value={targetGripStrength}
@@ -854,18 +867,18 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
                         />
                       </label>
                       <label>
-                        Repetitions
+                        จำนวนครั้ง
                         <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
                       </label>
                       <label>
-                        Hold (seconds)
+                        ค้างไว้ (วินาที)
                         <input type="number" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} />
                       </label>
                     </>
                   )}
                   {movementTracking === "none" && (
                     <label>
-                      Repetitions
+                      จำนวนครั้ง
                       <input type="number" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} />
                     </label>
                   )}
@@ -874,14 +887,14 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
 
               <button type="submit" className="primary-button full-width" disabled={saving || (!isOwner && !!exercise)}>
                 {saving
-                  ? "Saving…"
+                  ? "กำลังบันทึก…"
                   : exercise
                     ? !isOwner
-                      ? "Read-only (not creator)"
+                      ? "ดูได้อย่างเดียว (ไม่ใช่ผู้สร้าง)"
                       : isEditingActive
-                        ? `Save as v${exercise.versionNumber + 1} \u00b7 draft`
-                        : "Save changes"
-                    : "Save as v1 \u00b7 draft"}
+                        ? `บันทึกเป็นเวอร์ชัน v${exercise.versionNumber + 1} · ฉบับร่าง`
+                        : "บันทึกการเปลี่ยนแปลง"
+                    : "บันทึกเป็นเวอร์ชัน v1 · ฉบับร่าง"}
               </button>
             </>
           )}

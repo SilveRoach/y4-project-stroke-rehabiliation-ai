@@ -26,6 +26,7 @@ interface FilePickerProps {
   // mockup's "used in context" panels.
   compact?: boolean;
   label?: string;
+  locale?: "en" | "th";
   onUpload?: (file: File, localPreviewUrl: string) => Promise<PickedFile>;
 }
 
@@ -83,6 +84,7 @@ export function FilePicker({
   maxSizeMB = DEFAULT_MAX_SIZE_MB,
   compact = false,
   label,
+  locale = "en",
   onUpload
 }: FilePickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -97,12 +99,12 @@ export function FilePicker({
 
     const type = detectType(file);
     if (!type) {
-      setError("Only image or video files are accepted.");
+      setError(locale === "th" ? "รองรับเฉพาะไฟล์รูปภาพหรือวิดีโอ" : "Only image or video files are accepted.");
       return;
     }
     const maxBytes = maxSizeMB * 1024 * 1024;
     if (file.size > maxBytes) {
-      setError(`File is too large — max ${maxSizeMB}MB.`);
+      setError(locale === "th" ? `ไฟล์มีขนาดใหญ่เกินไป — สูงสุด ${maxSizeMB}MB` : `File is too large — max ${maxSizeMB}MB.`);
       return;
     }
 
@@ -120,7 +122,13 @@ export function FilePicker({
       } catch (uploadError) {
         URL.revokeObjectURL(previewUrl);
         setUploading(null);
-        setError(uploadError instanceof Error ? uploadError.message : "Could not upload this file.");
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : locale === "th"
+              ? "อัปโหลดไฟล์ไม่สำเร็จ"
+              : "Could not upload this file."
+        );
       }
       return;
     }
@@ -194,15 +202,19 @@ export function FilePicker({
             <p className="filepicker-meta">
               {value.fileType === "video" && value.durationLabel ? `${value.durationLabel} \u00b7 ` : ""}
               {value.sizeLabel}
-              {value.fileType === "image" ? ` \u00b7 uploaded ${value.uploadedAtLabel}` : ""}
+              {value.fileType === "image"
+                ? locale === "th"
+                  ? ` \u00b7 อัปโหลดเมื่อ ${value.uploadedAtLabel}`
+                  : ` \u00b7 uploaded ${value.uploadedAtLabel}`
+                : ""}
             </p>
           </div>
           <a href={value.previewUrl} target="_blank" rel="noreferrer" className="filepicker-action">
-            {value.fileType === "video" ? "Preview" : "View"}
+            {locale === "th" ? "ดูตัวอย่าง" : value.fileType === "video" ? "Preview" : "View"}
           </a>
           {onRemove && (
             <button type="button" className="filepicker-action danger" onClick={onRemove}>
-              Remove
+              {locale === "th" ? "นำออก" : "Remove"}
             </button>
           )}
         </div>
@@ -218,17 +230,21 @@ export function FilePicker({
         >
           {compact ? (
             <button type="button" className="filepicker-compact-trigger" onClick={openPicker}>
-              <FolderOpen size={14} /> No file yet &middot; <span>Choose file</span>
+              <FolderOpen size={14} /> {locale === "th" ? "ยังไม่มีไฟล์" : "No file yet"} &middot;{" "}
+              <span>{locale === "th" ? "เลือกไฟล์" : "Choose file"}</span>
             </button>
           ) : (
             <>
               <ImageIcon size={22} className="filepicker-dropzone-icon" />
-              <p className="filepicker-dropzone-text">Drag a file here, or</p>
+              <p className="filepicker-dropzone-text">
+                {locale === "th" ? "ลากไฟล์มาวางที่นี่ หรือ" : "Drag a file here, or"}
+              </p>
               <button type="button" className="secondary-button" onClick={openPicker}>
-                Choose file
+                {locale === "th" ? "เลือกไฟล์" : "Choose file"}
               </button>
               <p className="filepicker-hint">
-                Accepts image or video &middot; max {maxSizeMB}MB
+                {locale === "th" ? "รองรับรูปภาพหรือวิดีโอ" : "Accepts image or video"} &middot;{" "}
+                {locale === "th" ? "สูงสุด" : "max"} {maxSizeMB}MB
               </p>
             </>
           )}

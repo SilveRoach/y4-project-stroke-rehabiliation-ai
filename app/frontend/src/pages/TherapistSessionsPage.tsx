@@ -28,10 +28,21 @@ interface CalendarCell {
 }
 
 const filterOptions: Array<{ key: SourceFilter; label: string }> = [
-  { key: "all", label: "All" },
-  { key: "ai", label: "AI-scored" },
-  { key: "pt_reviewed", label: "Therapist-reviewed" }
+  { key: "all", label: "ทั้งหมด" },
+  { key: "ai", label: "ประเมินด้วย AI" },
+  { key: "pt_reviewed", label: "นักกายภาพบำบัดตรวจแล้ว" }
 ];
+
+const SESSION_DATE_FORMATTER = new Intl.DateTimeFormat("th-TH", {
+  day: "numeric",
+  month: "long",
+  year: "numeric"
+});
+
+const SESSION_TIME_FORMATTER = new Intl.DateTimeFormat("th-TH", {
+  hour: "numeric",
+  minute: "2-digit"
+});
 
 function localIsoDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -65,7 +76,12 @@ function monthLabel(viewed: ViewedMonth): string {
 }
 
 function formatSessionTime(completedAtIso: string): string {
-  return new Date(completedAtIso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return SESSION_TIME_FORMATTER.format(new Date(completedAtIso));
+}
+
+function formatCalendarDate(dateIso: string): string {
+  const [year, month, day] = dateIso.split("-").map(Number);
+  return SESSION_DATE_FORMATTER.format(new Date(year, month - 1, day));
 }
 
 export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }: TherapistSessionsPageProps) {
@@ -84,7 +100,7 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
   useEffect(() => {
     if (!token || !user) {
       setLoading(false);
-      setError("Please sign in again to view your session results.");
+      setError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อดูผลการฝึก");
       return;
     }
     let cancelled = false;
@@ -103,7 +119,7 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Couldn't load your session results. Please try again.");
+          setError(err instanceof ApiError ? err.message : "โหลดผลการฝึกไม่สำเร็จ กรุณาลองอีกครั้ง");
         }
       })
       .finally(() => {
@@ -135,7 +151,7 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
     setSelectedDateIso(`${next.year}-${String(next.month + 1).padStart(2, "0")}-01`);
   };
 
-  const displayName = user?.displayName || user?.username || "Therapist";
+  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
   const ownAvatarUrl = useOwnProfilePicture();
 
   return (
@@ -145,14 +161,14 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Sessions</h1>
-            <p>Review submitted exercise results across your assigned patients</p>
+            <h1>การฝึก</h1>
+            <p>ตรวจสอบผลการฝึกที่ส่งมาจากผู้ป่วยที่คุณดูแล</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>
-                <small>Physical Therapist</small>
+                <small>นักกายภาพบำบัด</small>
               </div>
               <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
                 {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
@@ -172,17 +188,17 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
             <div className="summary-card pd-calendar-card">
               <div className="therapist-chart-heading">
                 <div>
-                  <strong>Session calendar</strong>
-                  <p>Dates with submitted exercise results</p>
+                  <strong>ปฏิทินการฝึก</strong>
+                  <p>วันที่มีการส่งผลการฝึก</p>
                 </div>
               </div>
 
               <div className="pp-calendar-month-nav">
-                <button type="button" className="icon-button" onClick={() => changeMonth(-1)} aria-label="Previous month">
+                <button type="button" className="icon-button" onClick={() => changeMonth(-1)} aria-label="เดือนก่อนหน้า">
                   <ChevronLeft size={16} />
                 </button>
                 <strong>{monthLabel(viewedMonth)}</strong>
-                <button type="button" className="icon-button" onClick={() => changeMonth(1)} aria-label="Next month">
+                <button type="button" className="icon-button" onClick={() => changeMonth(1)} aria-label="เดือนถัดไป">
                   <ChevronRight size={16} />
                 </button>
               </div>
@@ -204,7 +220,7 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
                       disabled={cell.dateIso === null}
                       aria-pressed={cell.dateIso === selectedDateIso}
                       aria-label={cell.dateIso
-                        ? `${cell.dateIso}${needsReview ? ", sessions need therapist review" : hasSessions ? ", all sessions reviewed" : ""}`
+                        ? `${formatCalendarDate(cell.dateIso)}${needsReview ? " มีผลการฝึกที่รอตรวจสอบ" : hasSessions ? " ตรวจสอบผลการฝึกแล้ว" : " ไม่มีผลการฝึก"}`
                         : undefined}
                       onClick={() => cell.dateIso && setSelectedDateIso(cell.dateIso)}
                     >
@@ -214,17 +230,17 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
                 })}
               </div>
               <div className="pd-legend">
-                <span><span className="pd-legend-dot needs_review" />Needs review</span>
-                <span><span className="pd-legend-dot completed" />Reviewed sessions</span>
-                <span><span className="pd-legend-dot no_plan" />No sessions</span>
+                <span><span className="pd-legend-dot needs_review" />รอตรวจสอบ</span>
+                <span><span className="pd-legend-dot completed" />ตรวจสอบแล้ว</span>
+                <span><span className="pd-legend-dot no_plan" />ไม่มีผลการฝึก</span>
               </div>
             </div>
 
             <div className="summary-card pp-history-panel">
               <div className="therapist-chart-heading therapist-session-list-heading">
                 <div>
-                  <strong>Exercise results</strong>
-                  <p>{new Date(`${selectedDateIso}T00:00:00`).toLocaleDateString()}</p>
+                  <strong>ผลการฝึก</strong>
+                  <p>{formatCalendarDate(selectedDateIso)}</p>
                 </div>
                 <div className="library-filter-chips">
                   {filterOptions.map((option) => (
@@ -243,20 +259,20 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
               <div className="pd-session-list">
                 {!loading && visibleSessions.length > 0 && (
                   <div className="ts-session-list-header" aria-hidden="true">
-                    <span>Patient / exercise</span>
-                    <span>Score</span>
-                    <span>Source</span>
-                    <span>Review</span>
-                    <span>Action</span>
+                    <span>ผู้ป่วย / ท่าบริหาร</span>
+                    <span>คะแนน</span>
+                    <span>แหล่งที่มา</span>
+                    <span>การตรวจสอบ</span>
+                    <span>การดำเนินการ</span>
                   </div>
                 )}
                 {loading ? (
-                  <p className="pd-empty-note" role="status">Loading session results…</p>
+                  <p className="pd-empty-note" role="status">กำลังโหลดผลการฝึก…</p>
                 ) : visibleSessions.length === 0 ? (
                   <p className="pd-empty-note">
                     {sessions.some((session) => session.dateIso === selectedDateIso)
-                      ? "No sessions match this score-source filter."
-                      : "No submitted exercise sessions for this date."}
+                      ? "ไม่มีผลการฝึกที่ตรงกับตัวกรองแหล่งคะแนนนี้"
+                      : "ไม่มีการส่งผลการฝึกในวันนี้"}
                   </p>
                 ) : visibleSessions.map((session) => (
                   <div
@@ -264,7 +280,7 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
                     className="pd-session-row ts-session-row-clickable"
                     role="button"
                     tabIndex={0}
-                    aria-label={`Review ${session.exerciseName} for ${session.patientName}, submitted at ${formatSessionTime(session.completedAtIso)}`}
+                    aria-label={`ตรวจสอบ${session.exerciseName}ของ${session.patientName} ส่งเมื่อเวลา ${formatSessionTime(session.completedAtIso)}`}
                     onClick={() => onReviewSession(session)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
@@ -286,17 +302,17 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
                       </div>
                     </div>
                     <span className="pd-session-score">
-                      Score: {session.currentScore ?? "—"}
+                      คะแนน: {session.currentScore ?? "—"}
                     </span>
                     <span className={`pd-session-source ${session.currentScoreSource ?? ""}`}>
                       {session.currentScoreSource
-                        ? session.currentScoreSource === "ai" ? "AI" : "Therapist"
+                        ? session.currentScoreSource === "ai" ? "AI" : "นักกายภาพบำบัด"
                         : "—"}
                     </span>
                     <span className={`badge-pill ${session.reviewed ? "good" : "fair"}`}>
-                      {session.reviewed ? "Reviewed" : "Not reviewed"}
+                      {session.reviewed ? "ตรวจสอบแล้ว" : "รอตรวจสอบ"}
                     </span>
-                    <span className="text-action">Review <ChevronRight size={12} /></span>
+                    <span className="text-action">ตรวจสอบ <ChevronRight size={12} /></span>
                   </div>
                 ))}
               </div>

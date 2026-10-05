@@ -43,7 +43,7 @@ function mapRealReviewToExercises(real: ScheduleDayReviewData): SessionExerciseR
       aiFeedback: attempt.aiFeedback ?? undefined,
       aiMetrics: attempt.aiMetrics ?? undefined,
       aiEvaluatedAtLabel: attempt.aiEvaluatedAtIso
-        ? new Date(attempt.aiEvaluatedAtIso).toLocaleString()
+        ? new Date(attempt.aiEvaluatedAtIso).toLocaleString("th-TH")
         : undefined,
       ptScore: attempt.ptScore ?? undefined,
       ptFeedback: attempt.ptFeedback ?? undefined,
@@ -57,14 +57,46 @@ function mapRealReviewToExercises(real: ScheduleDayReviewData): SessionExerciseR
 }
 
 function exerciseDifficultyLabel(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  const labels: Record<string, string> = { easy: "ง่าย", medium: "ปานกลาง", moderate: "ปานกลาง", hard: "ยาก" };
+  return labels[value.toLowerCase()] ?? value;
 }
 
 function movementTrackingLabel(value: string): string {
-  if (value === "pose") return "Pose tracking";
-  if (value === "virtual_grip") return "Virtual grip";
-  if (value === "none") return "No AI tracking";
+  if (value === "pose") return "ติดตามท่าทาง";
+  if (value === "virtual_grip") return "วัดแรงบีบมือ";
+  if (value === "none") return "ไม่ใช้ AI ติดตาม";
   return value.replace(/_/g, " ");
+}
+
+function criterionLabel(value: string): string {
+  const labels: Record<string, string> = {
+    "target angle": "มุมเป้าหมาย",
+    "target angle (degrees)": "มุมเป้าหมาย (องศา)",
+    "target grip strength": "แรงบีบมือเป้าหมาย",
+    "grip strength": "แรงบีบมือ",
+    repetitions: "จำนวนครั้ง",
+    reps: "จำนวนครั้ง",
+    "hold duration": "ระยะเวลาค้างไว้",
+    "hold duration (seconds)": "ระยะเวลาค้างไว้ (วินาที)"
+  };
+  return labels[value.trim().toLowerCase()] ?? value;
+}
+
+function reviewDayLabel(value: string): string {
+  return value.replace(/^day\s+(\d+)$/i, "วันที่ $1");
+}
+
+function formatReviewDateTime(value: string): string {
+  return new Date(value).toLocaleString("th-TH");
+}
+
+function formatReviewDate(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("th-TH", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
 }
 
 interface SessionResultReviewPageProps {
@@ -98,7 +130,7 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
   useEffect(() => {
     if (!token) {
       setLoadingReview(false);
-      setScoringStatus({ tone: "error", message: "Please sign in again to review this session." });
+      setScoringStatus({ tone: "error", message: "กรุณาเข้าสู่ระบบอีกครั้งเพื่อตรวจสอบผลการฝึก" });
       return;
     }
     let cancelled = false;
@@ -120,7 +152,7 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
           setExercises([]);
           setScoringStatus({
             tone: "error",
-            message: err instanceof ApiError ? err.message : "Couldn't load this session's results."
+            message: err instanceof ApiError ? err.message : "โหลดผลการฝึกไม่สำเร็จ"
           });
         }
       })
@@ -150,17 +182,17 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
 
   const saveTherapistReview = async () => {
     if (!selectedAttempt || !selectedExercise || !token || !persistedAttemptIds.has(selectedAttempt.id)) {
-      setScoringStatus({ tone: "error", message: "This session result cannot be saved." });
+      setScoringStatus({ tone: "error", message: "ไม่สามารถบันทึกผลการฝึกนี้ได้" });
       return;
     }
     const score = ptScoreDraft.trim() === "" ? null : Number(ptScoreDraft);
     if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100)) {
-      setScoringStatus({ tone: "error", message: "Enter a therapist score from 0 to 100, or leave it blank." });
+      setScoringStatus({ tone: "error", message: "กรุณากรอกคะแนนประเมินตั้งแต่ 0 ถึง 100 หรือเว้นว่างไว้" });
       return;
     }
 
     setSavingReview(true);
-    setScoringStatus({ tone: "saved", message: "Saving review…" });
+    setScoringStatus({ tone: "saved", message: "กำลังบันทึกผลการตรวจสอบ…" });
     try {
       const response = await updateAttemptScoring(token, selectedAttempt.id, {
         ptScore: score,
@@ -185,11 +217,11 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
           )
         }))
       );
-      setScoringStatus({ tone: "saved", message: "Therapist review saved." });
+      setScoringStatus({ tone: "saved", message: "บันทึกผลการตรวจสอบแล้ว" });
     } catch (err) {
       setScoringStatus({
         tone: "error",
-        message: err instanceof ApiError ? err.message : "Couldn't save your review. Please try again."
+        message: err instanceof ApiError ? err.message : "บันทึกผลการตรวจสอบไม่สำเร็จ กรุณาลองอีกครั้ง"
       });
     } finally {
       setSavingReview(false);
@@ -202,7 +234,7 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
     if (source === "pt" && selectedAttempt.ptScore == null) return;
 
     setChangingScoreSource(true);
-    setScoringStatus({ tone: "saved", message: "Saving grading score…" });
+    setScoringStatus({ tone: "saved", message: "กำลังบันทึกคะแนนที่ใช้ประเมิน…" });
     try {
       const response = await updateAttemptScoring(token, selectedAttempt.id, { evaluationSource: source });
       setExercises((current) =>
@@ -221,11 +253,11 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
           )
         }))
       );
-      setScoringStatus({ tone: "saved", message: "Grading score selection saved." });
+      setScoringStatus({ tone: "saved", message: "บันทึกการเลือกคะแนนที่ใช้ประเมินแล้ว" });
     } catch (err) {
       setScoringStatus({
         tone: "error",
-        message: err instanceof ApiError ? err.message : "Couldn't update the grading score. Please try again."
+        message: err instanceof ApiError ? err.message : "อัปเดตคะแนนที่ใช้ประเมินไม่สำเร็จ กรุณาลองอีกครั้ง"
       });
     } finally {
       setChangingScoreSource(false);
@@ -239,30 +271,30 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Session Result Review</h1>
-            <p>{review.patientName} &middot; {sessionDetails.planName || review.dayLabel}</p>
+            <h1>ตรวจสอบผลการฝึก</h1>
+            <p>{review.patientName} &middot; {sessionDetails.planName || reviewDayLabel(review.dayLabel)}</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{user?.displayName || user?.username || "Therapist"}</strong>
-                <small>Physical Therapist</small>
+                <strong>{user?.displayName || user?.username || "นักกายภาพบำบัด"}</strong>
+                <small>นักกายภาพบำบัด</small>
               </div>
-              <span className="avatar-badge">{initialsFromName(user?.displayName || user?.username || "Therapist")}</span>
+              <span className="avatar-badge">{initialsFromName(user?.displayName || user?.username || "นักกายภาพบำบัด")}</span>
             </div>
           </div>
         </header>
 
         <main className="therapist-main srr-page-main">
           <button type="button" className="text-action pd-back-link" onClick={onBack}>
-            <ArrowLeft size={14} /> Back
+            <ArrowLeft size={14} /> กลับ
           </button>
 
           {loadingReview ? (
-            <p className="srr-empty-note" role="status">Loading session results…</p>
+            <p className="srr-empty-note" role="status">กำลังโหลดผลการฝึก…</p>
           ) : exercises.length === 0 ? (
             <div className="summary-card" role={scoringStatus?.tone === "error" ? "alert" : undefined}>
-              <p className="srr-empty-note">{scoringStatus?.message ?? "No submitted exercise results were found for this session."}</p>
+              <p className="srr-empty-note">{scoringStatus?.message ?? "ไม่พบผลการฝึกที่ส่งมาสำหรับรอบนี้"}</p>
             </div>
           ) : (
             selectedExercise && (
@@ -294,7 +326,7 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
                           setSelectedAttemptByExercise((current) => ({ ...current, [selectedExercise.id]: attempt.id }))
                         }
                       >
-                        Attempt {attempt.attemptNumber}
+                        ครั้งที่ {attempt.attemptNumber}
                       </button>
                     ))}
                   </div>
@@ -309,15 +341,15 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
                       </div>
                       <span>
                         {selectedAttempt.completedAtIso
-                          ? new Date(selectedAttempt.completedAtIso).toLocaleString()
+                          ? formatReviewDateTime(selectedAttempt.completedAtIso)
                           : sessionDetails.scheduledDateIso
-                            ? new Date(`${sessionDetails.scheduledDateIso}T00:00:00`).toLocaleDateString()
+                            ? formatReviewDate(sessionDetails.scheduledDateIso)
                             : review.dateLabel}
                         {sessionDetails.planName ? ` · ${sessionDetails.planName}` : ""}
-                        {` · ${review.dayLabel}`}
+                        {` · ${reviewDayLabel(review.dayLabel)}`}
                       </span>
                       <span className={`badge-pill ${selectedAttemptReviewed ? "good" : "fair"}`}>
-                        {selectedAttemptReviewed ? "Reviewed" : "Not reviewed"}
+                        {selectedAttemptReviewed ? "ตรวจสอบแล้ว" : "รอตรวจสอบ"}
                       </span>
                     </div>
                     <AttemptReview
@@ -384,7 +416,7 @@ function AttemptReview({
     attempt.ptScore != null;
   const currentScore = attempt.currentScore ??
     (therapistScoreIsActive ? attempt.ptScore ?? attempt.finalScore : attempt.aiScore ?? attempt.finalScore);
-  const currentSource = currentScore == null ? "No score available" : therapistScoreIsActive ? "Therapist" : "AI";
+  const currentSource = currentScore == null ? "ไม่มีคะแนน" : therapistScoreIsActive ? "นักกายภาพบำบัด" : "AI";
   const hasTherapistReview = attempt.therapistReviewed ?? (attempt.ptScore != null || attempt.ptFeedback != null);
 
   // Stream the patient's recorded attempt video: the real attempt carries a
@@ -423,16 +455,16 @@ function AttemptReview({
   const videoLabel = attempt.referenceVideo?.fileName
     ? attempt.referenceVideo.fileName
     : videoUrl
-      ? "Patient's recorded attempt"
+      ? "วิดีโอการฝึกของผู้ป่วย"
       : videoError
-        ? "Couldn't load the patient's recording"
-        : "No reference video attached yet";
+        ? "โหลดวิดีโอการฝึกของผู้ป่วยไม่สำเร็จ"
+        : "ยังไม่มีวิดีโอแนบ";
 
   return (
     <div className="srr-layout">
       <div className="srr-main-column">
         <div className="srr-video-col">
-          <p className="pd-record-attachments-label">Patient recording · วิดีโอของผู้ป่วย</p>
+          <p className="pd-record-attachments-label">วิดีโอการฝึกของผู้ป่วย</p>
           {videoUrl ? (
             <PoseVideoPlayer
               src={videoUrl}
@@ -449,46 +481,46 @@ function AttemptReview({
 
         <section className="summary-card srr-exercise-info">
           <div className="srr-exercise-info-heading">
-            <strong>Exercise Information</strong>
+            <strong>ข้อมูลท่าบริหาร</strong>
             {exercise.exerciseVersionLabel && <span>{exercise.exerciseVersionLabel}</span>}
           </div>
           {exercise.description && <p>{exercise.description}</p>}
           <div className="srr-exercise-info-fields">
             {exercise.difficultyLevel && (
-              <span>Difficulty: <strong>{exerciseDifficultyLabel(exercise.difficultyLevel)}</strong></span>
+              <span>ระดับความยาก: <strong>{exerciseDifficultyLabel(exercise.difficultyLevel)}</strong></span>
             )}
             {exercise.movementTracking && (
-              <span>Movement tracking: <strong>{movementTrackingLabel(exercise.movementTracking)}</strong></span>
+              <span>การติดตามการเคลื่อนไหว: <strong>{movementTrackingLabel(exercise.movementTracking)}</strong></span>
             )}
             {exercise.targetValueLabel && (
-              <span>Target: <strong>{exercise.targetValueLabel}</strong></span>
+              <span>เป้าหมาย: <strong>{exercise.targetValueLabel}</strong></span>
             )}
             {exercise.baseCriteria?.map((criterion) => (
-              <span key={criterion.label}>{criterion.label}: <strong>{criterion.value}</strong></span>
+              <span key={criterion.label}>{criterionLabel(criterion.label)}: <strong>{criterion.value}</strong></span>
             ))}
           </div>
           {exercise.therapistInstruction && (
-            <p><strong>Instructions:</strong> {exercise.therapistInstruction}</p>
+            <p><strong>คำแนะนำ:</strong> {exercise.therapistInstruction}</p>
           )}
         </section>
       </div>
 
       <aside className="srr-sidebar">
         <section className="summary-card srr-current-score">
-          <span>Current Score</span>
+          <span>คะแนนปัจจุบัน</span>
           <strong>{currentScore ?? "—"}</strong>
           <span className={`pd-session-source ${therapistScoreIsActive ? "pt_reviewed" : "ai"}`}>
-            {currentScore == null ? "No score" : currentSource}
+            {currentScore == null ? "ไม่มีคะแนน" : currentSource}
           </span>
         </section>
 
         <div className="srr-score-grid">
           <div className="srr-score-panel srr-ai-panel">
             <div className="srr-score-panel-top">
-              <strong>AI score</strong>
+              <strong>คะแนนจาก AI</strong>
               <span className="srr-score-value">{attempt.aiScore ?? "—"}</span>
             </div>
-            <p>{attempt.aiFeedback || "No AI feedback is available for this attempt."}</p>
+            <p>{attempt.aiFeedback || "ไม่มีข้อเสนอแนะจาก AI สำหรับการฝึกครั้งนี้"}</p>
             {attempt.aiMetrics && attempt.aiMetrics.length > 0 && (
               <div className="srr-metrics-list">
                 {attempt.aiMetrics.map((metric) => (
@@ -498,12 +530,12 @@ function AttemptReview({
                 ))}
               </div>
             )}
-            {attempt.aiEvaluatedAtLabel && <p className="small">AI evaluated {attempt.aiEvaluatedAtLabel}</p>}
+            {attempt.aiEvaluatedAtLabel && <p className="small">AI ประเมินเมื่อ {attempt.aiEvaluatedAtLabel}</p>}
           </div>
 
           <div className="srr-score-panel srr-therapist-panel">
             <div className="srr-score-panel-top">
-              <strong>Therapist review {hasTherapistReview ? "· Reviewed" : "· Not reviewed"}</strong>
+              <strong>ผลประเมินจากนักกายภาพบำบัด {hasTherapistReview ? "· ตรวจสอบแล้ว" : "· รอตรวจสอบ"}</strong>
               <input
                 className="srr-score-input"
                 value={ptScoreDraft}
@@ -513,27 +545,27 @@ function AttemptReview({
                 max={100}
                 type="number"
                 placeholder="—"
-                aria-label="Therapist score from 0 to 100"
+                aria-label="คะแนนประเมินจากนักกายภาพบำบัดตั้งแต่ 0 ถึง 100"
                 disabled={saving || changingScoreSource}
               />
             </div>
             <textarea
               value={ptFeedbackDraft}
               onChange={(event) => onPtFeedbackChange(event.target.value)}
-              placeholder="Add therapist feedback for this attempt..."
-              aria-label="Therapist feedback"
+              placeholder="เพิ่มข้อเสนอแนะจากนักกายภาพบำบัดสำหรับการฝึกครั้งนี้..."
+              aria-label="ข้อเสนอแนะจากนักกายภาพบำบัด"
               disabled={saving || changingScoreSource}
             />
           </div>
         </div>
 
         <div className="srr-decision-bar">
-          <strong>Score used for grading</strong>
+          <strong>คะแนนที่ใช้ประเมิน</strong>
           <div
             className="srr-score-source-options"
             data-selected={therapistScoreIsActive ? "pt" : "ai"}
             role="radiogroup"
-            aria-label="Score used for grading"
+            aria-label="คะแนนที่ใช้ประเมิน"
           >
             <label>
               <input
@@ -544,7 +576,7 @@ function AttemptReview({
                 onChange={() => onSelectGradingScore("ai")}
                 disabled={attempt.aiScore == null || saving || changingScoreSource}
               />
-              <span>AI Score{attempt.aiScore != null ? ` (${attempt.aiScore})` : ""}</span>
+              <span>คะแนนจาก AI{attempt.aiScore != null ? ` (${attempt.aiScore})` : ""}</span>
             </label>
             <label>
               <input
@@ -555,12 +587,12 @@ function AttemptReview({
                 onChange={() => onSelectGradingScore("pt")}
                 disabled={attempt.ptScore == null || saving || changingScoreSource}
               />
-              <span>Therapist Score{attempt.ptScore != null ? ` (${attempt.ptScore})` : ""}</span>
+              <span>คะแนนจากนักกายภาพบำบัด{attempt.ptScore != null ? ` (${attempt.ptScore})` : ""}</span>
             </label>
           </div>
         </div>
         <button type="button" className="primary-button srr-save-review" onClick={onSave} disabled={saving || changingScoreSource}>
-          <Save size={14} /> {saving ? "Saving…" : hasTherapistReview ? "Update review" : "Submit review"}
+          <Save size={14} /> {saving ? "กำลังบันทึก…" : hasTherapistReview ? "อัปเดตผลประเมิน" : "ส่งผลประเมิน"}
         </button>
       </aside>
     </div>

@@ -7775,8 +7775,7 @@ div.exercise-card:hover {
 
 .srr-page-main {
   width: 100%;
-  max-width: 1480px;
-  align-self: center;
+  align-self: stretch;
   gap: 10px;
   padding: 12px 20px 20px;
 }
@@ -9878,6 +9877,10 @@ tr.admin-user-row:hover .admin-row-open-hint {
 }
 
 .patient-page-main.ps-main {
+  padding-top: 72px;
+}
+
+.therapist-main.ps-main {
   padding-top: 72px;
 }
 

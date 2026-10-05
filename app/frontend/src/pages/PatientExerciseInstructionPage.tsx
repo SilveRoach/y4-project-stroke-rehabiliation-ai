@@ -20,7 +20,7 @@ interface PatientExerciseInstructionPageProps {
 }
 
 function targetValueLabel(value: unknown): string {
-  if (value === null || value === undefined) return "No target set";
+  if (value === null || value === undefined) return "ไม่ได้กำหนดเป้าหมาย";
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (Array.isArray(value)) return value.map(String).join(" · ");
   if (typeof value === "object") {
@@ -32,7 +32,11 @@ function targetValueLabel(value: unknown): string {
 }
 
 function targetTypeLabel(targetType: PatientScheduledExerciseInstruction["targetType"]): string {
-  return targetType.charAt(0).toUpperCase() + targetType.slice(1);
+  const labels: Record<PatientScheduledExerciseInstruction["targetType"], string> = {
+    repetitions: "จำนวนครั้ง",
+    duration: "ระยะเวลา"
+  };
+  return labels[targetType] ?? targetType;
 }
 
 export function PatientExerciseInstructionPage({
@@ -54,7 +58,7 @@ export function PatientExerciseInstructionPage({
   useEffect(() => {
     if (!token) {
       setLoading(false);
-      setError("Please log in again to view this exercise.");
+      setError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อดูท่าบริหารนี้");
       return;
     }
     let cancelled = false;
@@ -65,7 +69,7 @@ export function PatientExerciseInstructionPage({
         if (!cancelled) setInstruction(response.scheduledExercise);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof ApiError ? err.message : "Couldn't load this exercise. Please try again.");
+        if (!cancelled) setError(err instanceof ApiError ? err.message : "โหลดข้อมูลท่าบริหารไม่สำเร็จ กรุณาลองอีกครั้ง");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -87,7 +91,7 @@ export function PatientExerciseInstructionPage({
         if (!cancelled) setVideoUrl(objectUrl);
       })
       .catch((err) => {
-        if (!cancelled) setVideoError(err instanceof ApiError ? err.message : "The demonstration video is unavailable.");
+        if (!cancelled) setVideoError(err instanceof ApiError ? err.message : "ไม่สามารถเปิดวิดีอตัวอย่างได้");
       })
       .finally(() => {
         if (!cancelled) setVideoLoading(false);
@@ -98,7 +102,7 @@ export function PatientExerciseInstructionPage({
     };
   }, [instruction, token]);
 
-  const patientName = user?.displayName ?? user?.username ?? "Patient";
+  const patientName = user?.displayName ?? user?.username ?? "ผู้ป่วย";
   const avatarInitials = patientName.slice(0, 2).toUpperCase();
   const exercise = instruction?.exercise;
 
@@ -108,35 +112,37 @@ export function PatientExerciseInstructionPage({
       <div className="therapist-workspace">
         <header className="therapist-topbar pei-topbar">
           <div>
-            <button type="button" className="sidebar-link" onClick={onBack}><ArrowLeft size={16} /> Back to today</button>
-            <p className="eyebrow">Exercise instruction</p>
-            <h1>{exercise?.name ?? "Exercise"}</h1>
+            <button type="button" className="sidebar-link" onClick={onBack}><ArrowLeft size={16} /> กลับไปหน้าวันนี้</button>
+            <p className="eyebrow">คำแนะนำท่าบริหาร</p>
+            <h1>{exercise?.name ?? "ท่าบริหาร"}</h1>
           </div>
         </header>
 
         {loading || error ? (
           <section className="today-main-panel exercise-panel" role={error ? "alert" : "status"}>
-            <p className="pd-empty-note">{loading ? "Loading exercise instructions…" : error}</p>
-            {error && <button className="secondary-button" onClick={() => setRetryKey((key) => key + 1)}>Try again</button>}
+            <p className="pd-empty-note">{loading ? "กำลังโหลดคำแนะนำท่าบริหาร…" : error}</p>
+            {error && <button className="secondary-button" onClick={() => setRetryKey((key) => key + 1)}>ลองอีกครั้ง</button>}
           </section>
         ) : instruction && exercise ? (
           <div className="today-grid">
             <section className="today-main-panel exercise-panel">
               <div className="program-heading">
-                <div><p className="eyebrow">PT demonstration</p><h2>{exercise.name}</h2></div>
-                <span className={`difficulty-badge ${exercise.difficultyLevel === "medium" ? "moderate" : exercise.difficultyLevel}`}>{exercise.difficultyLevel}</span>
+                <div><p className="eyebrow">วิดีโอตัวอย่างจากนักกายภาพบำบัด</p><h2>{exercise.name}</h2></div>
+                <span className={`difficulty-badge ${exercise.difficultyLevel === "medium" ? "moderate" : exercise.difficultyLevel}`}>
+                  {exercise.difficultyLevel === "easy" ? "ง่าย" : exercise.difficultyLevel === "medium" ? "ปานกลาง" : exercise.difficultyLevel === "hard" ? "ยาก" : exercise.difficultyLevel}
+                </span>
               </div>
               {videoUrl ? (
-                <video controls className="exercise-instruction-video" src={videoUrl}>Your browser does not support demonstration video playback.</video>
+                <video controls className="exercise-instruction-video" src={videoUrl}>เบราว์เซอร์ของคุณไม่รองรับการเล่นวิดีโอตัวอย่าง</video>
               ) : (
                 <div className="exercise-instruction-video-placeholder">
                   <VideoOff size={28} />
-                  <span>{videoLoading ? "Loading demonstration video…" : videoError ?? "No demonstration video is available for this exercise."}</span>
+                  <span>{videoLoading ? "กำลังโหลดวิดีโอตัวอย่าง…" : videoError ?? "ไม่มีวิดีโอตัวอย่างสำหรับท่าบริหารนี้"}</span>
                 </div>
               )}
               <section className="summary-card">
-                <p className="eyebrow">Description</p>
-                <p>{exercise.description ?? "No exercise description has been provided."}</p>
+                <p className="eyebrow">รายละเอียด</p>
+                <p>{exercise.description ?? "ยังไม่มีรายละเอียดท่าบริหาร"}</p>
               </section>
             </section>
 
@@ -146,13 +152,13 @@ export function PatientExerciseInstructionPage({
                 card above, rather than sitting loose in the grid. */}
             <section className="today-main-panel pei-details-panel">
               <section className="summary-card">
-                <p className="eyebrow">Your target</p>
+                <p className="eyebrow">เป้าหมาย</p>
                 <h2>{targetValueLabel(instruction.targetValue)}</h2>
                 <p>{targetTypeLabel(instruction.targetType)}</p>
               </section>
               <section className="summary-card">
-                <p className="eyebrow">Therapist instruction</p>
-                <p>{instruction.therapistInstruction ?? "No additional instruction has been provided by your therapist."}</p>
+                <p className="eyebrow">คำแนะนำจากนักกายภาพบำบัด</p>
+                <p>{instruction.therapistInstruction ?? "นักกายภาพบำบัดยังไม่มีคำแนะนำเพิ่มเติม"}</p>
               </section>
             </section>
           </div>
@@ -165,7 +171,7 @@ export function PatientExerciseInstructionPage({
         {instruction && exercise && !loading && !error && (
           <div className="pei-start-bar">
             <button type="button" className="primary-button patient-start-button pei-start-button" onClick={onStartExercise}>
-              <Play size={20} fill="currentColor" /> Start Exercise
+              <Play size={20} fill="currentColor" /> เริ่มทำท่าบริหาร
             </button>
           </div>
         )}

@@ -30,13 +30,52 @@ interface TherapistDashboardPageProps {
   onViewPatient: (patient: TherapistPatientSummary) => void;
 }
 
-const WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", { weekday: "long" });
-const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "long", year: "numeric" });
-// Plan-period labels: chart subtitle ("1 Sep 2026 – 14 Sep 2026"), x-axis
-// ticks ("5 Sep") and tooltip headers ("5 September 2026").
-const PERIOD_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
-const AXIS_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
-const FULL_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" });
+const WEEKDAY_FORMATTER = new Intl.DateTimeFormat("th-TH", { weekday: "long" });
+const DATE_FORMATTER = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "long", year: "numeric" });
+const PERIOD_DATE_FORMATTER = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", year: "numeric" });
+const AXIS_DATE_FORMATTER = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short" });
+const FULL_DATE_FORMATTER = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "long", year: "numeric" });
+
+const WEEKDAY_LABELS: Record<string, string> = {
+  Mon: "จ.",
+  Tue: "อ.",
+  Wed: "พ.",
+  Thu: "พฤ.",
+  Fri: "ศ.",
+  Sat: "ส.",
+  Sun: "อา."
+};
+
+const CONDITION_LABELS: Record<string, string> = {
+  "Ischemic Stroke": "โรคหลอดเลือดสมองชนิดขาดเลือด",
+  "Hemorrhagic Stroke": "โรคหลอดเลือดสมองชนิดเลือดออก",
+  "TIA Recovery": "ฟื้นฟูภาวะสมองขาดเลือดชั่วคราว",
+  "Post-Stroke": "ฟื้นฟูหลังโรคหลอดเลือดสมอง"
+};
+
+function conditionLabel(condition: string): string {
+  return CONDITION_LABELS[condition] ?? condition;
+}
+
+function sessionDateLabel(label: string): string {
+  const labels: Record<string, string> = {
+    Today: "วันนี้",
+    Yesterday: "เมื่อวาน",
+    "3 days ago": "3 วันที่แล้ว",
+    "1 week ago": "1 สัปดาห์ที่แล้ว"
+  };
+  return labels[label] ?? label;
+}
+
+function planStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    active: "กำลังดำเนินการ",
+    completed: "เสร็จสิ้น",
+    draft: "ฉบับร่าง",
+    paused: "หยุดชั่วคราว"
+  };
+  return labels[status.toLowerCase()] ?? status;
+}
 
 // ---------------------------------------------------------------------------
 // Plan-scoped recovery chart — the plan selector next to the patient selector
@@ -160,7 +199,9 @@ function buildPlanDayPoints(plan: ChartPlan | null): PlanDayPoint[] {
     if (day.dateLabel && ISO_DATE_RE.test(day.dateLabel)) dayByDate.set(day.dateLabel, day);
   }
   if (dayByDate.size === 0) {
-    return plan.days.map((day, index) => planDayPoint(day, `day-${index + 1}`, `Day ${index + 1}`, `Day ${index + 1}`));
+    return plan.days.map((day, index) =>
+      planDayPoint(day, `day-${index + 1}`, `วันที่ ${index + 1}`, `วันที่ ${index + 1}`)
+    );
   }
 
   const sortedDates = Array.from(dayByDate.keys()).sort();
@@ -196,19 +237,18 @@ function buildPlanDayPoints(plan: ChartPlan | null): PlanDayPoint[] {
   });
 }
 
-// "1 Sep 2026 – 14 Sep 2026" (or a scheduled-day count when undated) for the
-// chart subtitle — the same min/max the x-axis is sized to.
+// Thai date range (or a scheduled-day count when undated) for the chart subtitle.
 function planPeriodLabel(plan: ChartPlan): string {
   const count = plan.days.length;
   if (ISO_DATE_RE.test(plan.startDateLabel) && ISO_DATE_RE.test(plan.endDateLabel)) {
-    return `${PERIOD_DATE_FORMATTER.format(parseIsoDate(plan.startDateLabel))} – ${PERIOD_DATE_FORMATTER.format(
+    return `${PERIOD_DATE_FORMATTER.format(parseIsoDate(plan.startDateLabel))} ถึง ${PERIOD_DATE_FORMATTER.format(
       parseIsoDate(plan.endDateLabel)
     )}`;
   }
   if (ISO_DATE_RE.test(plan.startDateLabel)) {
-    return `from ${PERIOD_DATE_FORMATTER.format(parseIsoDate(plan.startDateLabel))} · ${count} day${count === 1 ? "" : "s"}`;
+    return `เริ่ม ${PERIOD_DATE_FORMATTER.format(parseIsoDate(plan.startDateLabel))} · ${count} วัน`;
   }
-  return `${count} scheduled day${count === 1 ? "" : "s"}`;
+  return `${count} วันที่กำหนดไว้`;
 }
 
 // Tooltip for the plan-day chart — recharts' default tooltip prints raw nulls
@@ -230,8 +270,8 @@ function PlanDayTooltip({ active, payload }: { active?: boolean; payload?: reado
       <strong style={{ display: "block", marginBottom: 2 }}>{point.longLabel}</strong>
       <span>
         {point.score === null
-          ? "No score yet · ยังไม่มีคะแนน"
-          : `Avg. score ${point.score}/100 · ${point.scoredExercises} exercise${point.scoredExercises === 1 ? "" : "s"}`}
+          ? "ยังไม่มีคะแนน"
+          : `คะแนนเฉลี่ย ${point.score}/100 · ${point.scoredExercises} ท่า`}
       </span>
     </div>
   );
@@ -280,7 +320,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
       })
       .catch((err) => {
         if (!cancelled) {
-          setDashboardError(err instanceof ApiError ? err.message : "Couldn't load the dashboard. Please try again.");
+          setDashboardError(err instanceof ApiError ? err.message : "โหลดแดชบอร์ดไม่สำเร็จ กรุณาลองอีกครั้ง");
         }
       })
       .finally(() => {
@@ -375,8 +415,9 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
   const filteredPatients = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return patients;
-    return patients.filter(
-      (patient) => patient.name.toLowerCase().includes(query) || patient.condition.toLowerCase().includes(query)
+    return patients.filter((patient) =>
+      [patient.name, patient.nameTh ?? "", patient.condition, conditionLabel(patient.condition)]
+        .some((value) => value.toLowerCase().includes(query))
     );
   }, [search, patients]);
 
@@ -399,7 +440,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
       ? trend.points[trend.points.length - 1].score - trend.points[0].score
       : null;
 
-  const displayName = user?.displayName || user?.username || "Therapist";
+  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
   const ownAvatarUrl = useOwnProfilePicture();
   const today = new Date();
 
@@ -410,16 +451,16 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Dashboard</h1>
-            <p>
-              {WEEKDAY_FORMATTER.format(today)}, {DATE_FORMATTER.format(today)}
+            <h1>แดชบอร์ด</h1>
+              <p>
+                {WEEKDAY_FORMATTER.format(today)}ที่ {DATE_FORMATTER.format(today)}
             </p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>
-                <small>Physical Therapist</small>
+                <small>นักกายภาพบำบัด</small>
               </div>
               <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
                 {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
@@ -438,24 +479,24 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
           <div className="therapist-stat-grid">
             <StatCard
               icon={<Users size={20} />}
-              label="Active Patients"
+              label="ผู้ป่วยที่ดูแล"
               value={dashboardLoading ? "…" : (stats?.activePatients ?? 0)}
             />
             <StatCard
               icon={<Activity size={20} />}
-              label="Sessions Today"
+              label="การฝึกวันนี้"
               value={dashboardLoading ? "…" : (stats?.sessionsToday ?? 0)}
               accent="teal"
             />
             <StatCard
               icon={<TrendingUp size={20} />}
-              label="Avg. Compliance"
+              label="อัตราการทำตามแผนเฉลี่ย"
               value={dashboardLoading ? "…" : `${stats?.avgCompliancePercent ?? 0}%`}
               accent="success"
             />
             <StatCard
               icon={<Clock size={20} />}
-              label="Pending Reviews"
+              label="รายการที่รอตรวจสอบ"
               value={dashboardLoading ? "…" : (stats?.pendingReviews ?? 0)}
               accent="warning"
             />
@@ -465,13 +506,13 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
             <div className="summary-card therapist-chart-card">
               <div className="therapist-chart-heading">
                 <div>
-                  <strong>Avg. Recovery Progress</strong>
+                  <strong>ความก้าวหน้าในการฟื้นฟูเฉลี่ย</strong>
                   <p>
                     {trendPatient
                       ? selectedPlan
                         ? `${selectedPlan.name} · ${planPeriodLabel(selectedPlan)}`
-                        : (trend?.planName ?? "Select a plan to view its day-by-day scores")
-                      : "Select a patient to view their recovery trend"}
+                        : (trend?.planName ?? "เลือกแผนการฟื้นฟูเพื่อดูคะแนนรายวัน")
+                      : "เลือกผู้ป่วยเพื่อดูแนวโน้มการฟื้นฟู"}
                   </p>
                 </div>
                 <div className="therapist-chart-heading-actions">
@@ -479,9 +520,9 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                     className="admin-role-select"
                     value={trendPatientId ?? ""}
                     onChange={(event) => setTrendPatientId(event.target.value || null)}
-                    aria-label="Select patient for recovery progress chart"
+                    aria-label="เลือกผู้ป่วยสำหรับกราฟความก้าวหน้าในการฟื้นฟู"
                   >
-                    <option value="">Select patient…</option>
+                    <option value="">เลือกผู้ป่วย…</option>
                     {patients.map((patient) => (
                       <option key={patient.id} value={patient.id}>
                         {patient.name}
@@ -497,20 +538,20 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                     value={trendPlanId ?? ""}
                     onChange={(event) => setTrendPlanId(event.target.value || null)}
                     disabled={!trendPatientId || planOptionsLoading}
-                    aria-label="Select plan for recovery progress chart"
+                    aria-label="เลือกแผนการฟื้นฟูสำหรับกราฟความก้าวหน้า"
                   >
                     <option value="">
                       {!trendPatientId
-                        ? "Select a patient first…"
+                        ? "เลือกผู้ป่วยก่อน…"
                         : planOptionsLoading
-                          ? "Loading plans…"
+                          ? "กำลังโหลดแผน…"
                           : planOptions.length > 0
-                            ? "Select plan…"
-                            : "No plans yet"}
+                            ? "เลือกแผน…"
+                            : "ยังไม่มีแผน"}
                     </option>
                     {planOptions.map((plan) => (
                       <option key={plan.id} value={plan.id}>
-                        {plan.name} ({plan.status})
+                        {plan.name} ({planStatusLabel(plan.status)})
                       </option>
                     ))}
                   </select>
@@ -525,7 +566,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
               {trendLoading || planOptionsLoading ? (
                 <div className="therapist-chart-empty">
                   <TrendingUp size={22} />
-                  <p>Loading trend…</p>
+                  <p>กำลังโหลดข้อมูลแนวโน้ม…</p>
                 </div>
               ) : trendPatient && selectedPlan ? (
                 // Plan-scoped chart: one point per calendar day across the
@@ -568,7 +609,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                 ) : (
                   <div className="therapist-chart-empty">
                     <TrendingUp size={22} />
-                    <p>This plan has no scheduled days yet.</p>
+                    <p>แผนนี้ยังไม่มีวันที่กำหนดไว้</p>
                   </div>
                 )
               ) : trend && trend.points.length > 0 ? (
@@ -582,7 +623,10 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                       tickLine={false}
                       domain={[0, 100]}
                     />
-                    <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid var(--border)", fontSize: 13 }} />
+                    <Tooltip
+                      formatter={(value) => [value, "คะแนน"]}
+                      contentStyle={{ borderRadius: 10, border: "1px solid var(--border)", fontSize: 13 }}
+                    />
                     <Line
                       type="monotone"
                       dataKey="score"
@@ -598,14 +642,14 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                   <TrendingUp size={22} />
                   <p>
                     {planOptions.length > 0
-                      ? "Select a plan above to plot its day-by-day scores."
-                      : "This patient has no rehabilitation plans yet."}
+                      ? "เลือกแผนด้านบนเพื่อแสดงคะแนนรายวัน"
+                      : "ผู้ป่วยรายนี้ยังไม่มีแผนการฟื้นฟู"}
                   </p>
                 </div>
               ) : (
                 <div className="therapist-chart-empty">
                   <TrendingUp size={22} />
-                  <p>Pick a patient above, or click a row in the table below, to plot their recovery trend.</p>
+                  <p>เลือกผู้ป่วยด้านบน หรือคลิกแถวในตารางด้านล่างเพื่อแสดงแนวโน้มการฟื้นฟู</p>
                 </div>
               )}
             </div>
@@ -613,16 +657,25 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
             <div className="summary-card therapist-chart-card">
               <div className="therapist-chart-heading">
                 <div>
-                  <strong>Weekly Sessions</strong>
-                  <p>Sessions completed per day</p>
+                  <strong>จำนวนครั้งการฝึกประจำสัปดาห์</strong>
+                  <p>จำนวนครั้งที่ฝึกในแต่ละวัน</p>
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={weeklySessions} barSize={24}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fontSize: 12, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} />
+                  <XAxis
+                    dataKey="day"
+                    tickFormatter={(day: string) => WEEKDAY_LABELS[day] ?? day}
+                    tick={{ fontSize: 12, fill: "var(--text-secondary)" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
                   <YAxis tick={{ fontSize: 12, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid var(--border)", fontSize: 13 }} />
+                  <Tooltip
+                    formatter={(value) => [value, "จำนวนครั้งที่ฝึก"]}
+                    contentStyle={{ borderRadius: 10, border: "1px solid var(--border)", fontSize: 13 }}
+                  />
                   <Bar dataKey="sessions" fill="var(--teal)" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -631,19 +684,19 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
 
           <div className="summary-card therapist-patient-card">
             <div className="therapist-patient-toolbar">
-              <strong>Patients</strong>
+              <strong>ผู้ป่วย</strong>
               <div className="therapist-patient-toolbar-actions">
                 <div className="therapist-search">
                   <Search size={16} />
                   <input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search patients…"
-                    aria-label="Search patients"
+                    placeholder="ค้นหาผู้ป่วย…"
+                    aria-label="ค้นหาผู้ป่วย"
                   />
                 </div>
                 <button type="button" className="primary-button therapist-add-patient" onClick={() => setAssignModalOpen(true)}>
-                  <Users size={14} /> Add Patient
+                  <Users size={14} /> เพิ่มผู้ป่วย
                 </button>
                 {assignModalOpen && (
                   <AssignPatientModal
@@ -671,12 +724,12 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
               <table className="therapist-table">
                 <thead>
                   <tr>
-                    <th>Patient</th>
-                    <th>Current Plan</th>
-                    <th>Last Session</th>
-                    <th>Compliance</th>
-                    <th>Progress</th>
-                    <th>Status</th>
+                    <th>ผู้ป่วย</th>
+                    <th>การวินิจฉัย</th>
+                    <th>การฝึกล่าสุด</th>
+                    <th>การทำตามแผน</th>
+                    <th>ความก้าวหน้า</th>
+                    <th>สถานะ</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -684,8 +737,8 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                     <tr>
                       <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
                         {patients.length === 0
-                          ? "No patients are currently assigned to you."
-                          : "No patients match your search."}
+                          ? "ยังไม่มีผู้ป่วยที่ได้รับมอบหมาย"
+                          : "ไม่พบผู้ป่วยที่ตรงกับคำค้นหา"}
                       </td>
                     </tr>
                   )}
@@ -702,17 +755,17 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                     >
                       <td>
                         <div className="therapist-table-patient">
-                          <PatientAvatar token={token} fileId={patient.profilePictureFileId} name={patient.name} />
+                          <PatientAvatar token={token} fileId={patient.profilePictureFileId} name={patient.nameTh || patient.name} />
                           <div>
-                            <strong>{patient.name}</strong>
+                            <strong>{patient.nameTh || patient.name}</strong>
                             <small>
-                              Age {patient.age} · {patient.sessionsCompleted} sessions
+                              อายุ {patient.age} ปี · ฝึกแล้ว {patient.sessionsCompleted} ครั้ง
                             </small>
                           </div>
                         </div>
                       </td>
-                      <td>{patient.condition}</td>
-                      <td>{patient.lastSessionLabel}</td>
+                      <td>{conditionLabel(patient.condition)}</td>
+                      <td>{sessionDateLabel(patient.lastSessionLabel)}</td>
                       <td>
                         <div className="therapist-compliance-bar">
                           <span className="therapist-compliance-track">
@@ -729,7 +782,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                       </td>
                       <td>
                         <span className={`badge-pill ${patient.standing === "active" ? "good" : "fair"}`}>
-                          {patient.standing === "active" ? "Active" : "At Risk"}
+                          {patient.standing === "active" ? "ปกติ" : "ควรติดตาม"}
                         </span>
                       </td>
                     </tr>

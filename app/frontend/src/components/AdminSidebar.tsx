@@ -45,7 +45,7 @@ export function AdminSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: A
   // previously this profile block hardcoded data/adminMock.ts's static
   // "Admin Suda" placeholder regardless of who was actually signed in.
   const { user } = useAuth();
-  const displayName = user?.displayName || user?.username || "Admin";
+  const displayName = user?.displayName || user?.username || "ผู้ดูแลระบบ";
   const initials = initialsFromName(displayName);
   // Resolve the logged-in admin's own picture from the auth store, mirroring
   // TherapistSidebar.tsx — so every admin page sharing this sidebar shows the
@@ -61,11 +61,11 @@ export function AdminSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: A
         <img className="therapist-brand-mark" src={rehabAiImage} alt="ระบบฟื้นฟูผู้ป่วย" />
         <div>
           <strong>ระบบฟื้นฟูผู้ป่วย</strong>
-          <small>Admin Console</small>
+          <small>ระบบผู้ดูแล</small>
         </div>
       </div>
 
-      <nav aria-label="Admin navigation" className="therapist-nav">
+      <nav aria-label="เมนูผู้ดูแลระบบ" className="therapist-nav">
         {navItems.map(({ icon: Icon, label }) => (
           <button
             key={label}
@@ -74,23 +74,23 @@ export function AdminSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: A
             onClick={() => onNavigate(label)}
           >
             <Icon size={17} />
-            {label}
+            {label === "Dashboard" ? "แดชบอร์ด" : label === "Users" ? "จัดการผู้ใช้" : label === "Exercise Library" ? "คลังท่าบริหาร" : "ตั้งค่า"}
           </button>
         ))}
       </nav>
 
       <div className="therapist-sidebar-profile">
         <span className={`avatar-badge admin-avatar${resolvedAvatarUrl ? " with-photo" : ""}`}>
-          {resolvedAvatarUrl ? <img src={resolvedAvatarUrl} alt={`${displayName}'s profile picture`} /> : initials}
+          {resolvedAvatarUrl ? <img src={resolvedAvatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : initials}
         </span>
         <div>
           <strong>{displayName}</strong>
-          <small>System Administrator</small>
+          <small>ผู้ดูแลระบบ</small>
         </div>
       </div>
 
       <button type="button" className="sidebar-link logout" onClick={onLogout}>
-        Log out
+        ออกจากระบบ
       </button>
     </aside>
   );

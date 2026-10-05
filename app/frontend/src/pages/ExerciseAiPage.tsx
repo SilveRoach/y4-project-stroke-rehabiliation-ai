@@ -16,7 +16,6 @@ import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
 import { useAuth } from "../store/authStore";
-import { describeCriteria } from "../utils/exerciseCriteria";
 import { initialsFromName } from "../utils/displayName";
 import { drawSkeleton } from "../ai/poseDetection";
 import {
@@ -77,34 +76,43 @@ interface ExerciseCheckpoint {
 
 /** The 3 FSM states the therapist marks on the base clip (reference order). */
 const CHECKPOINT_ROLES: { role: CheckpointRole; title: string; hint: string; icon: string }[] = [
-  { role: "ready", title: "Starting position", hint: "Pose the patient must hold before moving", icon: "📍" },
-  { role: "active", title: "Peak of movement", hint: "Furthest point they move to in this exercise", icon: "💪" },
-  { role: "return", title: "Return to start", hint: "Where a repetition counts as complete", icon: "🔁" }
+  { role: "ready", title: "ท่าเริ่มต้น", hint: "ท่าที่ผู้ป่วยต้องค้างไว้ก่อนเริ่มเคลื่อนไหว", icon: "📍" },
+  { role: "active", title: "จุดสูงสุดของการเคลื่อนไหว", hint: "จุดที่เคลื่อนไหวไปได้ไกลที่สุดในท่านี้", icon: "💪" },
+  { role: "return", title: "กลับสู่ท่าเริ่มต้น", hint: "จุดที่นับว่าทำครบหนึ่งครั้ง", icon: "🔁" }
 ];
+
+function describeCriteriaThai(criteria: ExerciseBaseCriteria): string {
+  const parts: string[] = [];
+  if (criteria.targetAngleDeg !== undefined) parts.push(`มุมเป้าหมาย ${criteria.targetAngleDeg}°`);
+  if (criteria.targetGripStrength !== undefined) parts.push(`แรงบีบมือ ${criteria.targetGripStrength}`);
+  if (criteria.repetitions !== undefined) parts.push(`${criteria.repetitions} ครั้ง`);
+  if (criteria.holdSeconds !== undefined) parts.push(`ค้างไว้ ${criteria.holdSeconds} วินาที`);
+  return parts.length > 0 ? parts.join(", ") : "ยังไม่ได้กำหนดเกณฑ์";
+}
 
 /** Rep-counting strictness levels per difficulty (from the reference view) —
  * level 2 is always the value the auto-calibration derived (scale = 1). */
 const DIFFICULTY_REP_SENSITIVITY: Record<Difficulty, { scale: number; label: string; desc: string }[]> = {
   easy: [
-    { scale: 1.15, label: "Very lenient", desc: "Slightly easier rep counting for limited mobility." },
-    { scale: 1.075, label: "Lenient", desc: "The patient does not need the full range for a rep to count." },
-    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "Medium (auto-suggested)", desc: "The value analyzed from the demo clip — right for most patients." },
-    { scale: 0.925, label: "Strict", desc: "Movement must closely match the demo clip." },
-    { scale: 0.85, label: "Very strict", desc: "Closest match to the demo clip — for well-recovered patients." }
+    { scale: 1.15, label: "ผ่อนปรนมาก", desc: "นับจำนวนครั้งได้ง่ายขึ้นเล็กน้อย เหมาะกับผู้ที่เคลื่อนไหวได้จำกัด" },
+    { scale: 1.075, label: "ผ่อนปรน", desc: "ผู้ป่วยไม่จำเป็นต้องเคลื่อนไหวได้เต็มช่วงเพื่อให้นับเป็นหนึ่งครั้ง" },
+    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "ปานกลาง (แนะนำอัตโนมัติ)", desc: "ค่าที่วิเคราะห์จากวิดีโอสาธิต เหมาะกับผู้ป่วยส่วนใหญ่" },
+    { scale: 0.925, label: "เข้มงวด", desc: "การเคลื่อนไหวต้องใกล้เคียงกับวิดีโอสาธิต" },
+    { scale: 0.85, label: "เข้มงวดมาก", desc: "ต้องเคลื่อนไหวใกล้เคียงวิดีโอสาธิตมาก เหมาะกับผู้ป่วยที่ฟื้นตัวได้ดี" }
   ],
   medium: [
-    { scale: 1.35, label: "Very lenient", desc: "Easier rep counting for noticeably limited mobility." },
-    { scale: 1.175, label: "Lenient", desc: "Less range than the demo still counts as a rep." },
-    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "Medium (auto-suggested)", desc: "The value analyzed from the demo clip — right for most patients." },
-    { scale: 0.825, label: "Strict", desc: "Movement must closely match the demo clip." },
-    { scale: 0.65, label: "Very strict", desc: "Nearly full demo range required — for well-recovered patients." }
+    { scale: 1.35, label: "ผ่อนปรนมาก", desc: "นับจำนวนครั้งได้ง่ายขึ้น เหมาะกับผู้ที่เคลื่อนไหวได้จำกัดชัดเจน" },
+    { scale: 1.175, label: "ผ่อนปรน", desc: "เคลื่อนไหวได้ไม่เต็มช่วงตามวิดีโอสาธิตก็ยังนับเป็นหนึ่งครั้ง" },
+    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "ปานกลาง (แนะนำอัตโนมัติ)", desc: "ค่าที่วิเคราะห์จากวิดีโอสาธิต เหมาะกับผู้ป่วยส่วนใหญ่" },
+    { scale: 0.825, label: "เข้มงวด", desc: "การเคลื่อนไหวต้องใกล้เคียงกับวิดีโอสาธิต" },
+    { scale: 0.65, label: "เข้มงวดมาก", desc: "ต้องเคลื่อนไหวได้เกือบเต็มช่วงตามวิดีโอ เหมาะกับผู้ป่วยที่ฟื้นตัวได้ดี" }
   ],
   hard: [
-    { scale: 1.6, label: "Very lenient", desc: "Much easier rep counting — for very limited mobility or a first attempt at this exercise." },
-    { scale: 1.4, label: "Lenient", desc: "Less range than the demo still counts as a rep." },
-    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "Medium (auto-suggested)", desc: "The value analyzed from the demo clip — right for most patients." },
-    { scale: 0.6, label: "Strict", desc: "Movement must closely match the demo clip." },
-    { scale: 0.45, label: "Very strict", desc: "Nearly the full demo range required — for well-recovered patients." }
+    { scale: 1.6, label: "ผ่อนปรนมาก", desc: "นับจำนวนครั้งได้ง่ายขึ้นมาก เหมาะกับผู้ที่เคลื่อนไหวได้น้อยหรือเพิ่งเริ่มฝึกท่านี้" },
+    { scale: 1.4, label: "ผ่อนปรน", desc: "เคลื่อนไหวได้ไม่เต็มช่วงตามวิดีโอสาธิตก็ยังนับเป็นหนึ่งครั้ง" },
+    { scale: DEFAULT_FSM_MARGIN_SCALE, label: "ปานกลาง (แนะนำอัตโนมัติ)", desc: "ค่าที่วิเคราะห์จากวิดีโอสาธิต เหมาะกับผู้ป่วยส่วนใหญ่" },
+    { scale: 0.6, label: "เข้มงวด", desc: "การเคลื่อนไหวต้องใกล้เคียงกับวิดีโอสาธิต" },
+    { scale: 0.45, label: "เข้มงวดมาก", desc: "ต้องเคลื่อนไหวได้เกือบเต็มช่วงตามวิดีโอ เหมาะกับผู้ป่วยที่ฟื้นตัวได้ดี" }
   ]
 };
 
@@ -118,18 +126,18 @@ const DIFFICULTY_LABELS_TH: Record<Difficulty, string> = {
 
 /** Difficulty meta shown under the selector (reference DIFFICULTY_INFO). */
 const DIFFICULTY_INFO: Record<Difficulty, { icon: string; rangeText: string; desc: string }> = {
-  easy: { icon: "🟢", rangeText: "±15%", desc: "This exercise is already easy — the adjustable range stays close to the analyzed value." },
-  medium: { icon: "🟡", rangeText: "±35%", desc: "Standard — suits most general exercises." },
-  hard: { icon: "🔴", rangeText: "±60%", desc: "This exercise is hard for some patients — the widest adjustable range, so it can be eased a lot." }
+  easy: { icon: "🟢", rangeText: "±15%", desc: "ท่านี้ค่อนข้างง่าย ช่วงที่ปรับได้จึงอยู่ใกล้กับค่าที่วิเคราะห์" },
+  medium: { icon: "🟡", rangeText: "±35%", desc: "ระดับมาตรฐาน เหมาะกับท่าบริหารทั่วไปส่วนใหญ่" },
+  hard: { icon: "🔴", rangeText: "±60%", desc: "ท่านี้อาจยากสำหรับผู้ป่วยบางราย จึงปรับช่วงได้กว้างเพื่อผ่อนระดับความยาก" }
 };
 
 /** Trunk-compensation sensitivity presets, replacing the raw bveThreshold. */
 const BVE_SENSITIVITY_LEVELS: { value: number; label: string; desc: string }[] = [
-  { value: 0.08, label: "Very strict", desc: "No trunk lean allowed — for patients with good core control." },
-  { value: 0.12, label: "Strict", desc: "Catches trunk compensation early." },
-  { value: 0.15, label: "Medium (recommended)", desc: "Balance between accuracy and real-world use." },
-  { value: 0.2, label: "Lenient", desc: "Allows some trunk assistance." },
-  { value: 0.28, label: "Very lenient", desc: "For early-stage patients who still lean to support themselves." }
+  { value: 0.08, label: "เข้มงวดมาก", desc: "ไม่อนุญาตให้เอนลำตัว เหมาะกับผู้ป่วยที่ควบคุมแกนกลางลำตัวได้ดี" },
+  { value: 0.12, label: "เข้มงวด", desc: "ตรวจจับการชดเชยด้วยการเอนลำตัวได้ตั้งแต่เนิ่นๆ" },
+  { value: 0.15, label: "ปานกลาง (แนะนำ)", desc: "สมดุลระหว่างความแม่นยำและการใช้งานจริง" },
+  { value: 0.2, label: "ผ่อนปรน", desc: "อนุญาตให้ใช้ลำตัวช่วยในการเคลื่อนไหวได้บ้าง" },
+  { value: 0.28, label: "ผ่อนปรนมาก", desc: "เหมาะกับผู้ป่วยระยะแรกที่ยังเอนตัวเพื่อช่วยพยุงตนเอง" }
 ];
 
 export function ExerciseAiPage({
@@ -143,7 +151,7 @@ export function ExerciseAiPage({
   isVersionView = false
 }: ExerciseAiPageProps) {
   const { token, user } = useAuth();
-  const displayName = user?.displayName || user?.username || "Therapist";
+  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
 
   // Exercise identity / payload fields.
   const [exerciseName, setExerciseName] = useState(exercise?.name ?? initialName);
@@ -381,7 +389,7 @@ export function ExerciseAiPage({
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.4)";
       ctx.font = "26px sans-serif";
-      ctx.fillText("Scan a demo clip to preview its skeleton", 48, canvas.height / 2);
+      ctx.fillText("สแกนวิดีโอสาธิตเพื่อดูโครงกระดูก", 48, canvas.height / 2);
     }
   };
   previewDrawRef.current();
@@ -391,18 +399,18 @@ export function ExerciseAiPage({
     if (!baseClip || scanBusy) return;
     setScanBusy(true);
     setScanError(null);
-    setScanProgressText("Scanning demo clip…");
+    setScanProgressText("กำลังสแกนวิดีโอสาธิต…");
     try {
       const frames = await scanVideoPoseFrames(
         baseClip,
         ({ currentTimeSeconds, durationSeconds, sampledFrames }) => {
-          setScanProgressText(`Scanning ${currentTimeSeconds.toFixed(1)}s / ${durationSeconds.toFixed(1)}s — ${sampledFrames} frames tracked`);
+          setScanProgressText(`กำลังสแกน ${currentTimeSeconds.toFixed(1)} / ${durationSeconds.toFixed(1)} วินาที — ติดตามแล้ว ${sampledFrames} เฟรม`);
         },
         // Live preview: the video frame + tracked skeleton, drawn while scanning.
         scanPreviewCanvasRef.current ? { canvas: scanPreviewCanvasRef.current } : undefined
       );
       if (frames.length < 10) {
-        throw new Error("Too few trackable frames — make sure the full body is visible in the clip.");
+        throw new Error("ติดตามเฟรมได้น้อยเกินไป — ตรวจสอบให้แน่ใจว่ามองเห็นร่างกายทั้งหมดในวิดีโอ");
       }
       const result = calibrateFromFrames(frames);
       setBaseFrames(frames);
@@ -418,10 +426,10 @@ export function ExerciseAiPage({
       setCheckpointLabelDraft("");
       setCheckpointDescDraft("");
       setActiveCheckpointRole("ready");
-      const confidenceText = { high: "high confidence", medium: "medium confidence — verify the numbers", low: "low confidence — the clip may not contain a clear movement, please verify" }[result.derived.confidence];
-      setScanProgressText(`Done — ${frames.length} frames analyzed. Suggested primary angle: “${result.primary.label}” (${confidenceText}).`);
+      const confidenceText = { high: "ความมั่นใจสูง", medium: "ความมั่นใจปานกลาง — โปรดตรวจสอบตัวเลข", low: "ความมั่นใจต่ำ — วิดีโออาจไม่มีการเคลื่อนไหวที่ชัดเจน โปรดตรวจสอบ" }[result.derived.confidence];
+      setScanProgressText(`เสร็จแล้ว — วิเคราะห์ ${frames.length} เฟรม มุมหลักที่แนะนำ: “${result.primary.label}” (${confidenceText})`);
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : "Scanning failed.");
+      setScanError(err instanceof Error ? err.message : "สแกนไม่สำเร็จ");
       setScanProgressText(null);
     } finally {
       setScanBusy(false);
@@ -558,12 +566,12 @@ export function ExerciseAiPage({
     if (scanBusy) return;
     setScanBusy(true);
     setScanError(null);
-    setScanProgressText(`Scanning ${kind === "master" ? "master take" : "wrong-form clip"}…`);
+    setScanProgressText(`กำลังสแกน${kind === "master" ? "วิดีโอตัวอย่างท่าที่ถูกต้อง" : "วิดีโอตัวอย่างท่าที่ไม่ถูกต้อง"}…`);
     try {
       const frames = await scanVideoPoseFrames(
         file,
         ({ currentTimeSeconds, durationSeconds, sampledFrames }) => {
-          setScanProgressText(`Scanning ${currentTimeSeconds.toFixed(1)}s / ${durationSeconds.toFixed(1)}s — ${sampledFrames} frames tracked`);
+          setScanProgressText(`กำลังสแกน ${currentTimeSeconds.toFixed(1)} / ${durationSeconds.toFixed(1)} วินาที — ติดตามแล้ว ${sampledFrames} เฟรม`);
         },
         scanPreviewCanvasRef.current ? { canvas: scanPreviewCanvasRef.current } : undefined
       );
@@ -571,7 +579,7 @@ export function ExerciseAiPage({
         id: Date.now(),
         description:
           (kind === "master" ? masterDescription : wrongFormDescription).trim() ||
-          `${kind === "master" ? "Master take" : "Wrong-form clip"} #${(kind === "master" ? masterClips : wrongFormClips).length + 1}`,
+          `${kind === "master" ? "ตัวอย่างท่าที่ถูกต้อง" : "ตัวอย่างท่าที่ไม่ถูกต้อง"} #${(kind === "master" ? masterClips : wrongFormClips).length + 1}`,
         frames
       };
       if (kind === "master") {
@@ -581,9 +589,9 @@ export function ExerciseAiPage({
         setWrongFormClips((prev) => [...prev, clip]);
         setWrongFormDescription("");
       }
-      setScanProgressText(`Done — ${frames.length} frames added.`);
+      setScanProgressText(`เสร็จแล้ว — เพิ่ม ${frames.length} เฟรม`);
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : "Scanning failed.");
+      setScanError(err instanceof Error ? err.message : "สแกนไม่สำเร็จ");
     } finally {
       setScanBusy(false);
     }
@@ -653,7 +661,7 @@ export function ExerciseAiPage({
     if (!token || !isOwner || isArchived) return;
     const poseReference = (calibration ? buildPoseReference() : targetExercise?.baseCriteria.poseReference) ?? undefined;
     if (isPoseExercise && !poseReference) {
-      setSaveError("Scan a demo clip to create the pose reference before saving.");
+      setSaveError("สแกนวิดีโอสาธิตเพื่อสร้างข้อมูลอ้างอิงท่าทางก่อนบันทึก");
       return;
     }
     setSaveBusy(true);
@@ -663,7 +671,7 @@ export function ExerciseAiPage({
       if (baseClip) {
         const { file: uploaded } = await uploadFile(token, baseClip);
         if (uploaded.fileType !== "video") {
-          throw new Error("The selected demo file must be a video.");
+          throw new Error("ไฟล์วิดีโอสาธิตที่เลือกต้องเป็นวิดีโอ");
         }
         uploadedClipId = uploaded.id;
       }
@@ -704,7 +712,7 @@ export function ExerciseAiPage({
       }
 
       if (isPoseExercise && !uploadedClipId) {
-        throw new Error("Select the base demo clip — it is stored as the exercise's demo video.");
+        throw new Error("เลือกวิดีโอสาธิตหลัก ซึ่งจะถูกบันทึกเป็นวิดีโอสาธิตของท่าบริหาร");
       }
       await createExercise(token, {
         name: exerciseName.trim(),
@@ -720,7 +728,7 @@ export function ExerciseAiPage({
       });
       setSavedExerciseName(exerciseName.trim());
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Saving failed.");
+      setSaveError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
     } finally {
       setSaveBusy(false);
     }
@@ -735,7 +743,7 @@ export function ExerciseAiPage({
       else await archiveExercise(token, targetExercise.id);
       onSaved();
     } catch (err) {
-      setSaveError(err instanceof ApiError ? err.message : `Couldn't ${action} this exercise.`);
+      setSaveError(err instanceof ApiError ? err.message : action === "publish" ? "เผยแพร่ท่าบริหารไม่สำเร็จ" : "เก็บท่าบริหารเข้าคลังไม่สำเร็จ");
     } finally {
       setLifecycleBusy(null);
     }
@@ -764,13 +772,13 @@ export function ExerciseAiPage({
   );
   const testDisabledReason =
     !isOwner || isArchived
-      ? "This exercise is read-only, so it can't be tested."
+      ? "ท่าบริหารนี้ดูได้อย่างเดียว จึงไม่สามารถทดสอบได้"
       : scanBusy
-        ? "Wait for the current clip scan to finish before testing."
+          ? "รอให้สแกนคลิปปัจจุบันเสร็จก่อนเริ่มทดสอบ"
         : movementTracking === "none"
-          ? "This exercise has no AI tracking to test."
+            ? "ท่าบริหารนี้ไม่ได้ใช้ AI ติดตาม จึงไม่สามารถทดสอบได้"
           : isPoseExercise && !hasTestablePoseReference
-            ? "Scan a base demo clip first — the test runs against the authored AI criteria."
+              ? "สแกนวิดีโอสาธิตหลักก่อน การทดสอบจะใช้เกณฑ์ AI ที่กำหนดไว้"
             : null;
   const canTest = testDisabledReason === null;
 
@@ -838,12 +846,12 @@ export function ExerciseAiPage({
         paused={testPaused}
         lowConfidence={false}
         testConfig={testSession.testConfig}
-        onBack={() => closeTest("Test session ended — nothing was uploaded · จบการทดสอบ — ไม่มีการอัปโหลด")}
+        onBack={() => closeTest("สิ้นสุดการทดสอบ — ไม่มีการอัปโหลด")}
         onRestart={() => setTestPaused(false)}
         onTogglePause={() => setTestPaused((value) => !value)}
         onFinishRecording={() =>
           closeTest(
-            "Test session finished — the take was discarded, nothing was uploaded · จบการทดสอบ — บันทึกนี้ถูกยกเลิก ไม่มีการอัปโหลด"
+            "การทดสอบเสร็จสิ้น — ยกเลิกวิดีโอที่บันทึกไว้แล้ว และไม่มีการอัปโหลด"
           )
         }
       />
@@ -862,25 +870,25 @@ export function ExerciseAiPage({
           <div className="creation-topbar-title">
             <Dumbbell size={20} />
             <div>
-              <strong>AI Exercise Workspace</strong>
-              <span>Author a pose reference from demo clips</span>
+              <strong>พื้นที่สร้างท่าบริหารด้วย AI</strong>
+              <span>สร้างข้อมูลอ้างอิงท่าทางจากวิดีโอสาธิต</span>
             </div>
           </div>
           <div className="therapist-topbar-profile">
-            <div><strong>{displayName}</strong><small>Physical Therapist</small></div>
+            <div><strong>{displayName}</strong><small>นักกายภาพบำบัด</small></div>
             <span className="avatar-badge">{initialsFromName(displayName)}</span>
           </div>
         </header>
 
         <main className="therapist-main exercise-creation-main ai-workspace-main">
           <button type="button" className="text-action pd-back-link" onClick={onBack}>
-            <ArrowLeft size={14} /> {isVersionView ? "Back to the Exercise Library" : "Back to exercise creation"}
+            <ArrowLeft size={14} /> {isVersionView ? "กลับไปยังคลังท่าบริหาร" : "กลับไปสร้างท่าบริหาร"}
           </button>
 
           {/* Page heading */}
           <div className="ai-workspace-heading" style={{ marginBottom: 20 }}>
             <div>
-              <h1>{exerciseName.trim() || "AI Reference Authoring"}</h1>
+              <h1>{exerciseName.trim() || "สร้างข้อมูลอ้างอิงท่าบริหารด้วย AI"}</h1>
             </div>
             {/* Test the exercise live against the camera with the criteria on
                 screen right now — the patient session flow, minus the upload /
@@ -892,10 +900,10 @@ export function ExerciseAiPage({
               disabled={!canTest}
               title={
                 testDisabledReason ??
-                "Run this exercise against the live camera using the criteria you've authored. Nothing is uploaded — you return here when the test ends."
+                "ทดสอบท่าบริหารนี้กับกล้องโดยใช้เกณฑ์ที่กำหนดไว้ ไม่มีการอัปโหลด และจะกลับมาหน้านี้เมื่อทดสอบเสร็จ"
               }
             >
-              <Play size={16} /> Test exercise · ทดสอบท่า
+              <Play size={16} /> ทดสอบท่าบริหาร
             </button>
           </div>
 
@@ -905,7 +913,7 @@ export function ExerciseAiPage({
             <div className="ai-banner ai-banner-success">
               <CheckCircle2 size={20} />
               <div>
-                <strong>Test run complete</strong>
+                <strong>ทดสอบเสร็จสิ้น</strong>
                 <div>{testNote}</div>
               </div>
             </div>
@@ -916,8 +924,8 @@ export function ExerciseAiPage({
             <div className="ai-banner ai-banner-success">
               <CheckCircle2 size={20} />
               <div>
-                <strong>Exercise created successfully!</strong>
-                <div>"{savedExerciseName}" was saved as a draft. You can publish it anytime from the Exercise Library.</div>
+                <strong>สร้างท่าบริหารสำเร็จ</strong>
+                <div>บันทึก “{savedExerciseName}” เป็นฉบับร่างแล้ว สามารถเผยแพร่ได้จากคลังท่าบริหาร</div>
               </div>
             </div>
           )}
@@ -933,12 +941,12 @@ export function ExerciseAiPage({
               <History size={16} />
               <div>
                 <strong>
-                  Version history · v{targetExercise.versionNumber}
-                  {targetExercise.versions.length > 1 ? ` of ${targetExercise.versions.length}` : ""} · {targetExercise.name}
+                  ประวัติเวอร์ชัน · v{targetExercise.versionNumber}
+                  {targetExercise.versions.length > 1 ? ` จาก ${targetExercise.versions.length}` : ""} · {targetExercise.name}
                 </strong>
                 <div>
-                  Created {targetExercise.createdAtLabel} by {targetExercise.createdByName || "Therapist"} ·{" "}
-                  {describeCriteria(targetExercise.baseCriteria)}
+                  สร้างเมื่อ {targetExercise.createdAtLabel} โดย {targetExercise.createdByName || "นักกายภาพบำบัด"} ·{" "}
+                  {describeCriteriaThai(targetExercise.baseCriteria)}
                 </div>
               </div>
             </div>
@@ -948,12 +956,12 @@ export function ExerciseAiPage({
             <div className={`ai-lifecycle-bar ${targetExercise.status}`}>
               <div>
                 <strong>{targetExercise.name} · v{targetExercise.versionNumber}</strong>
-                <span>{targetExercise.status === "active" ? "Active — saving edits creates a new draft version." : targetExercise.status === "draft" ? "Draft — changes save to this version." : "Archived — this version is read-only."}</span>
+                <span>{targetExercise.status === "active" ? "กำลังใช้งาน — การบันทึกการแก้ไขจะสร้างฉบับร่างเวอร์ชันใหม่" : targetExercise.status === "draft" ? "ฉบับร่าง — การเปลี่ยนแปลงจะบันทึกในเวอร์ชันนี้" : "เก็บถาวร — เวอร์ชันนี้ดูได้อย่างเดียว"}</span>
               </div>
               {isOwner && !isArchived && (
                 <div className="ai-lifecycle-actions">
-                  {targetExercise.status === "draft" && <button type="button" className="secondary-button" disabled={lifecycleBusy !== null} onClick={() => void handleLifecycleAction("publish")}>{lifecycleBusy === "publish" ? "Publishing…" : "Publish"}</button>}
-                  <button type="button" className="text-action danger" disabled={lifecycleBusy !== null} onClick={() => void handleLifecycleAction("archive")}>{lifecycleBusy === "archive" ? "Archiving…" : <><Archive size={14} /> Archive</>}</button>
+                  {targetExercise.status === "draft" && <button type="button" className="secondary-button" disabled={lifecycleBusy !== null} onClick={() => void handleLifecycleAction("publish")}>{lifecycleBusy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}</button>}
+                  <button type="button" className="text-action danger" disabled={lifecycleBusy !== null} onClick={() => void handleLifecycleAction("archive")}>{lifecycleBusy === "archive" ? "กำลังเก็บถาวร…" : <><Archive size={14} /> เก็บถาวร</>}</button>
                 </div>
               )}
             </div>
@@ -971,16 +979,16 @@ export function ExerciseAiPage({
               {savedDemoUrl ? (
                 <video className="ai-demo-video" src={savedDemoUrl} controls playsInline preload="metadata" />
               ) : savedDemoState === "loading" ? (
-                <p className="ai-progress">Loading saved demo video… · กำลังโหลดวิดีโอสาธิต…</p>
+                <p className="ai-progress">กำลังโหลดวิดีโอสาธิตที่บันทึกไว้…</p>
               ) : savedDemoState === "error" ? (
-                <p className="ai-error">Couldn't load the saved demo video. · โหลดวิดีโอสาธิตไม่สำเร็จ</p>
+                <p className="ai-error">โหลดวิดีโอสาธิตที่บันทึกไว้ไม่สำเร็จ</p>
               ) : null}
             </div>
           )}
 
           {!isOwner && targetExercise && (
             <div className="library-warning-banner">
-              <AlertTriangle size={16} /> This exercise was created by {targetExercise.createdByName || "another therapist"}. It is open in read-only mode.
+              <AlertTriangle size={16} /> ท่าบริหารนี้สร้างโดย {targetExercise.createdByName || "นักกายภาพบำบัดท่านอื่น"} และเปิดในโหมดดูอย่างเดียว
             </div>
           )}
 
@@ -1050,19 +1058,19 @@ export function ExerciseAiPage({
 
               {/* Step 2 — Base Demo Clip */}
               <section className="creation-section-card">
-                <div className="ai-card-step-tag">Step 2 · Base Demo Clip</div>
+                <div className="ai-card-step-tag">ขั้นตอนที่ 2 · วิดีโอสาธิตหลัก</div>
                 <div className="creation-section-header">
                   <Film size={20} />
                   <div>
-                    <strong>Base demo clip</strong>
-                    <p className="library-card-sub">One clean demonstration video to extract tracking angles &amp; rep thresholds.</p>
+                    <strong>วิดีโอสาธิตหลัก</strong>
+                    <p className="library-card-sub">วิดีโอสาธิตที่ชัดเจนหนึ่งคลิปสำหรับวิเคราะห์มุมการเคลื่อนไหวและเกณฑ์การนับครั้ง</p>
                   </div>
                 </div>
 
                 <label className="ai-file-upload-area">
                   <Upload size={24} className="ai-file-upload-icon" />
                   <span className="ai-file-upload-label">
-                    {baseClip ? baseClip.name : "Click to select demo video (.mp4, .webm)"}
+                    {baseClip ? baseClip.name : "คลิกเพื่อเลือกวิดีโอสาธิต (.mp4, .webm)"}
                   </span>
                   <input
                     type="file"
@@ -1091,14 +1099,14 @@ export function ExerciseAiPage({
                       />
                       <p className="library-card-sub" style={{ marginTop: 4 }}>
                         {baseClipUrl
-                          ? "Selected clip — replay it any time · คลิปที่เลือก — ดูซ้ำได้ตลอด"
-                          : "Saved demo video — replay it any time · วิดีโอสาธิตที่บันทึกไว้ — ดูซ้ำได้ตลอด"}
+                          ? "คลิปที่เลือก — ดูซ้ำได้ตลอด"
+                          : "วิดีโอสาธิตที่บันทึกไว้ — ดูซ้ำได้ตลอด"}
                       </p>
                     </>
                   ) : savedDemoState === "loading" ? (
-                    <p className="ai-progress">Loading saved demo video… · กำลังโหลดวิดีโอสาธิต…</p>
+                    <p className="ai-progress">กำลังโหลดวิดีโอสาธิตที่บันทึกไว้…</p>
                   ) : savedDemoState === "error" ? (
-                    <p className="ai-error">Couldn't load the saved demo video. · โหลดวิดีโอสาธิตไม่สำเร็จ</p>
+                    <p className="ai-error">โหลดวิดีโอสาธิตที่บันทึกไว้ไม่สำเร็จ</p>
                   ) : null)}
 
                 {/* Live scan preview — the video frame plus the tracked skeleton,
@@ -1126,7 +1134,7 @@ export function ExerciseAiPage({
                   disabled={!baseClip || scanBusy}
                 >
                   {scanBusy ? <Loader2 size={16} className="spin-icon" /> : <Upload size={16} />}
-                  Scan &amp; Calibrate
+                  สแกนและปรับเทียบ
                 </button>
                 {scanProgressText && <p className="ai-progress">{scanProgressText}</p>}
                 {scanError && <p className="ai-error">{scanError}</p>}
@@ -1134,31 +1142,31 @@ export function ExerciseAiPage({
 
               {/* Step 3 — Extra Master Takes (optional) */}
               <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
-                <div className="ai-card-step-tag">Step 3 · Extra Master Takes (optional)</div>
+                <div className="ai-card-step-tag">ขั้นตอนที่ 3 · วิดีโอตัวอย่างท่าที่ถูกต้องเพิ่มเติม (ไม่บังคับ)</div>
                 <div className="creation-section-header">
                   <Film size={20} />
                   <div>
                     <strong>
-                      Extra master takes
+                      วิดีโอตัวอย่างท่าที่ถูกต้องเพิ่มเติม
                       {masterClips.length > 0 && <span className="ai-clip-count">{masterClips.length}</span>}
-                      {" "}<small>(optional)</small>
+                      {" "}<small>(ไม่บังคับ)</small>
                     </strong>
-                    <p className="library-card-sub">Additional correct demonstrations to improve DTW matching variance.</p>
+                    <p className="library-card-sub">เพิ่มวิดีโอตัวอย่างท่าที่ถูกต้องเพื่อปรับปรุงความแม่นยำในการจับคู่การเคลื่อนไหว</p>
                   </div>
                 </div>
                 <div className="ai-field">
-                  <label>Take description</label>
+                  <label>คำอธิบายวิดีโอตัวอย่าง</label>
                   <input
                     className="ai-input"
                     value={masterDescription}
                     onChange={(e) => setMasterDescription(e.target.value)}
-                    placeholder="e.g. Take 2, slightly faster tempo"
+                    placeholder="เช่น ตัวอย่างที่ 2 จังหวะเร็วขึ้นเล็กน้อย"
                     disabled={scanBusy || !calibration}
                   />
                 </div>
                 <label className="ai-file-upload-area ai-file-upload-area-sm">
                   <Upload size={16} className="ai-file-upload-icon" />
-                  <span className="ai-file-upload-label">Upload additional master clip</span>
+                  <span className="ai-file-upload-label">อัปโหลดวิดีโอตัวอย่างท่าที่ถูกต้องเพิ่มเติม</span>
                   <input
                     type="file"
                     accept="video/*"
@@ -1177,11 +1185,11 @@ export function ExerciseAiPage({
                       <div className="ai-clip-row" key={clip.id}>
                         <CheckCircle2 size={14} className="ai-clip-ok" />
                         <span style={{ flex: 1 }}>{clip.description}</span>
-                        <small>{clip.frames.length} frames</small>
+                        <small>{clip.frames.length} เฟรม</small>
                         <button
                           type="button"
                           className="text-action danger"
-                          aria-label="Remove"
+                          aria-label="นำออก"
                           onClick={() => setMasterClips((prev) => prev.filter((c) => c.id !== clip.id))}
                         >
                           <Trash2 size={14} />
@@ -1194,31 +1202,31 @@ export function ExerciseAiPage({
 
               {/* Step 4 — Wrong-Form Clips (optional) */}
               <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
-                <div className="ai-card-step-tag">Step 4 · Wrong-Form Clips (optional)</div>
+                <div className="ai-card-step-tag">ขั้นตอนที่ 4 · วิดีโอตัวอย่างท่าที่ไม่ถูกต้อง (ไม่บังคับ)</div>
                 <div className="creation-section-header">
                   <Film size={20} />
                   <div>
                     <strong>
-                      Wrong-form clips
+                      วิดีโอตัวอย่างท่าที่ไม่ถูกต้อง
                       {wrongFormClips.length > 0 && <span className="ai-clip-count ai-clip-count-err">{wrongFormClips.length}</span>}
-                      {" "}<small>(optional)</small>
+                      {" "}<small>(ไม่บังคับ)</small>
                     </strong>
-                    <p className="library-card-sub">Demonstrations of incorrect posture to train form boundary checks.</p>
+                    <p className="library-card-sub">วิดีโอตัวอย่างท่าที่ไม่ถูกต้องสำหรับฝึกตรวจจับความผิดพลาดของท่าทาง</p>
                   </div>
                 </div>
                 <div className="ai-field">
-                  <label>Form defect description</label>
+                  <label>คำอธิบายข้อผิดพลาดของท่าทาง</label>
                   <input
                     className="ai-input"
                     value={wrongFormDescription}
                     onChange={(e) => setWrongFormDescription(e.target.value)}
-                    placeholder="e.g. Trunk leaning forward, shoulder hike"
+                    placeholder="เช่น เอนลำตัวไปข้างหน้า ยกไหล่"
                     disabled={scanBusy || !calibration}
                   />
                 </div>
                 <label className="ai-file-upload-area ai-file-upload-area-sm">
                   <Upload size={16} className="ai-file-upload-icon" />
-                  <span className="ai-file-upload-label">Upload wrong-form video clip</span>
+                  <span className="ai-file-upload-label">อัปโหลดวิดีโอตัวอย่างท่าที่ไม่ถูกต้อง</span>
                   <input
                     type="file"
                     accept="video/*"
@@ -1237,11 +1245,11 @@ export function ExerciseAiPage({
                       <div className="ai-clip-row" key={clip.id}>
                         <CheckCircle2 size={14} className="ai-clip-ok" />
                         <span style={{ flex: 1 }}>{clip.description}</span>
-                        <small>{clip.frames.length} frames</small>
+                        <small>{clip.frames.length} เฟรม</small>
                         <button
                           type="button"
                           className="text-action danger"
-                          aria-label="Remove"
+                          aria-label="นำออก"
                           onClick={() => setWrongFormClips((prev) => prev.filter((c) => c.id !== clip.id))}
                         >
                           <Trash2 size={14} />
@@ -1254,12 +1262,12 @@ export function ExerciseAiPage({
 
               {/* Step 5 — Scanned Frame Preview */}
               <section className="creation-section-card">
-                <div className="ai-card-step-tag">Step 5 · Verify Tracked Frames</div>
+                <div className="ai-card-step-tag">ขั้นตอนที่ 5 · ตรวจสอบเฟรมที่ติดตามได้</div>
                 <div className="creation-section-header">
                   <Film size={20} />
                   <div>
-                    <strong>Scanned skeleton preview</strong>
-                    <p className="library-card-sub">Scrub through the tracked skeleton frames of your base clip.</p>
+                    <strong>ตัวอย่างโครงกระดูกจากการสแกน</strong>
+                    <p className="library-card-sub">เลื่อนดูเฟรมโครงกระดูกที่ติดตามได้จากวิดีโอสาธิตหลัก</p>
                   </div>
                 </div>
 
@@ -1274,12 +1282,12 @@ export function ExerciseAiPage({
                     onChange={(e) => setPreviewIndex(Number(e.target.value))}
                     disabled={baseFrames.length === 0}
                     style={{ width: "100%", accentColor: "var(--primary)" }}
-                    aria-label="Preview frame"
+                    aria-label="ดูตัวอย่างเฟรม"
                   />
                   <p className="library-card-sub" style={{ marginTop: 4 }}>
                     {baseFrames.length > 0
-                      ? `Frame ${Math.min(previewIndex, baseFrames.length - 1) + 1} / ${baseFrames.length} · Timestamp: ${(previewFrame?.videoTimeSeconds ?? 0).toFixed(2)}s`
-                      : "No frames scanned yet."}
+                      ? `เฟรม ${Math.min(previewIndex, baseFrames.length - 1) + 1} / ${baseFrames.length} · เวลา: ${(previewFrame?.videoTimeSeconds ?? 0).toFixed(2)} วินาที`
+                      : "ยังไม่มีเฟรมที่สแกน"}
                   </p>
                 </div>
               </section>
@@ -1288,17 +1296,17 @@ export function ExerciseAiPage({
                   mark the starting position / peak / return frames on the base
                   clip; all three angles re-derive the FSM criteria directly. */}
               <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
-                <div className="ai-card-step-tag">Step 6 · Movement Checkpoints (optional)</div>
+                <div className="ai-card-step-tag">ขั้นตอนที่ 6 · จุดตรวจสอบการเคลื่อนไหว (ไม่บังคับ)</div>
                 <div className="creation-section-header">
                   <Flag size={20} />
                   <div>
                     <strong>
-                      Checkpoints
+                      จุดตรวจสอบ
                       {allCheckpointsSet && <span className="ai-clip-count">{CHECKPOINT_ROLES.length}</span>}
                     </strong>
                     <p className="library-card-sub">
-                      Scrub the preview to each movement moment and mark it — when all three are marked the rep
-                      thresholds come from your own reference frames instead of statistics.
+                      เลื่อนวิดีโอไปยังแต่ละช่วงของการเคลื่อนไหวแล้วทำเครื่องหมาย เมื่อทำเครื่องหมายครบทั้งสามจุด
+                      เกณฑ์การนับครั้งจะอ้างอิงจากเฟรมตัวอย่างแทนการใช้ค่าทางสถิติ
                     </p>
                   </div>
                 </div>
@@ -1318,7 +1326,7 @@ export function ExerciseAiPage({
                         <small>
                           {checkpoints[role]
                             ? `${checkpoints[role]!.angle}° · ${checkpoints[role]!.timestampSeconds.toFixed(2)}s`
-                            : "not marked yet"}
+                            : "ยังไม่ได้ทำเครื่องหมาย"}
                         </small>
                       </div>
                     </button>
@@ -1326,7 +1334,7 @@ export function ExerciseAiPage({
                 </div>
 
                 <div className="ai-field">
-                  <label>Checkpoint name</label>
+                  <label>ชื่อจุดตรวจสอบ</label>
                   <input
                     className="ai-input"
                     value={checkpointLabelDraft}
@@ -1336,12 +1344,12 @@ export function ExerciseAiPage({
                   />
                 </div>
                 <div className="ai-field">
-                  <label>Description (optional) — shown to the patient at this moment</label>
+                  <label>คำอธิบาย (ไม่บังคับ) — แสดงให้ผู้ป่วยเห็นในช่วงนี้</label>
                   <textarea
                     className="ai-input"
                     value={checkpointDescDraft}
                     onChange={(e) => setCheckpointDescDraft(e.target.value)}
-                    placeholder="e.g. Extend the elbow fully without shrugging"
+                    placeholder="เช่น เหยียดข้อศอกให้สุดโดยไม่ยกไหล่"
                     style={{ minHeight: 54, fontFamily: "inherit", resize: "vertical" }}
                     disabled={!calibration}
                   />
@@ -1354,15 +1362,15 @@ export function ExerciseAiPage({
                   onClick={handleMarkCheckpoint}
                   disabled={!calibration || baseFrames.length === 0}
                 >
-                  📌 Mark this frame as “{CHECKPOINT_ROLES.find((r) => r.role === activeCheckpointRole)?.title}”
+                  📌 ทำเครื่องหมายเฟรมนี้เป็น “{CHECKPOINT_ROLES.find((r) => r.role === activeCheckpointRole)?.title}”
                 </button>
                 <p className="ai-progress">
                   {baseFrames.length > 0
-                    ? `Selected frame ${Math.min(previewIndex, baseFrames.length - 1) + 1} · primary angle here: ${
+                    ? `เฟรมที่เลือก ${Math.min(previewIndex, baseFrames.length - 1) + 1} · มุมหลัก ณ จุดนี้: ${
                         angleAtPreviewFrame() ?? "—"
                       }°`
-                    : "Scan a demo clip first."}
-                  {allCheckpointsSet ? " — rep thresholds are now derived from your checkpoints." : ""}
+                    : "สแกนวิดีโอสาธิตก่อน"}
+                  {allCheckpointsSet ? " — เกณฑ์การนับครั้งคำนวณจากจุดตรวจสอบแล้ว" : ""}
                 </p>
 
                 {CHECKPOINT_ROLES.filter(({ role }) => checkpoints[role]).length > 0 && (
@@ -1389,63 +1397,63 @@ export function ExerciseAiPage({
 
               {/* Step 7 — Save to Library */}
               <section className="creation-section-card ai-card-full">
-                <div className="ai-card-step-tag">Step 7 · Save to Library</div>
+                <div className="ai-card-step-tag">ขั้นตอนที่ 7 · บันทึกลงคลัง</div>
                 <div className="creation-section-header">
                   <Save size={20} />
                   <div>
-                    <strong>Save exercise criteria</strong>
-                    <p className="library-card-sub">Persist this authored reference and criteria to the exercise library.</p>
+                    <strong>บันทึกเกณฑ์ท่าบริหาร</strong>
+                    <p className="library-card-sub">บันทึกข้อมูลอ้างอิงและเกณฑ์ที่กำหนดไว้ลงในคลังท่าบริหาร</p>
                   </div>
                 </div>
 
                 <div className="ai-field">
-                  <label>Save as</label>
+                  <label>บันทึกเป็น</label>
                   <select
                     className="ai-input"
                     value={targetExerciseId}
                     onChange={(e) => setTargetExerciseId(e.target.value)}
                   >
-                    <option value="new">New exercise (from the setup above)</option>
+                    <option value="new">ท่าบริหารใหม่ (จากการตั้งค่าด้านบน)</option>
                     {libraryExercises.map((item) => (
                       <option key={item.id} value={item.id}>
-                        Attach to: {item.name} (v{item.versionNumber} · {item.status})
+                        แนบกับ: {item.name} (v{item.versionNumber} · {item.status === "active" ? "ใช้งาน" : item.status === "draft" ? "ฉบับร่าง" : "เก็บถาวร"})
                       </option>
                     ))}
                   </select>
                   {targetExercise ? (
                     <>
                       <p className="library-card-sub" style={{ marginTop: 4 }}>
-                        Keeps “{targetExercise.name}” (name, description, difficulty) and merges the AI reference into
-                        its criteria
+                        คงข้อมูล “{targetExercise.name}” (ชื่อ คำอธิบาย ระดับความยาก) และรวมข้อมูลอ้างอิงจาก AI เข้ากับ
+                        เกณฑ์
                         {targetExercise.baseCriteria.poseReference
-                          ? " — it already has a pose reference, which will be replaced."
+                          ? " — ข้อมูลอ้างอิงท่าทางเดิมจะถูกแทนที่"
                           : "."}
                       </p>
                       {targetExercise.status === "active" && (
                         <>
                           <p className="library-card-sub">
-                            This version is active, so saving creates a new draft version (v{targetExercise.versionNumber + 1})
-                            — publish it from the library when you're happy.
+                            เวอร์ชันนี้กำลังใช้งาน การบันทึกจะสร้างฉบับร่างเวอร์ชันใหม่ (v{targetExercise.versionNumber + 1})
+                            — เผยแพร่จากคลังเมื่อพร้อม
                           </p>
                           <p className="ai-advanced-warning" style={{ marginTop: 6 }}>
-                            ⚠️ Patients' scheduled exercises still point at the current published version — after
-                            publishing, re-add/update this exercise in their plan so the new reference reaches sessions.
+                            ⚠️ ท่าบริหารที่กำหนดไว้ให้ผู้ป่วยยังอ้างอิงเวอร์ชันที่เผยแพร่อยู่ในปัจจุบัน — หลังเผยแพร่แล้ว
+                            ให้เพิ่มหรืออัปเดตท่านี้ในแผนของผู้ป่วยเพื่อให้เซสชันใช้ข้อมูลอ้างอิงใหม่
                           </p>
                         </>
                       )}
                       {!targetExercise.demoVideoFileId && !baseClip && (
-                        <p className="ai-error">This exercise has no demo video yet — select a base clip to add one.</p>
+                        <p className="ai-error">ท่าบริหารนี้ยังไม่มีวิดีโอสาธิต — เลือกวิดีโอสาธิตหลักเพื่อเพิ่ม</p>
                       )}
                     </>
                   ) : (
                     <p className="library-card-sub" style={{ marginTop: 4 }}>
-                      Creates a new draft exercise using the name above; the base clip becomes its demo video.
+                      สร้างท่าบริหารฉบับร่างโดยใช้ชื่อด้านบน และใช้วิดีโอสาธิตหลักเป็นวิดีโอสาธิต
                     </p>
                   )}
                 </div>
 
                 <div className="ai-field">
-                  <label>Rep-counting strictness level</label>
+                  <label>ระดับความเข้มงวดในการนับจำนวนครั้ง</label>
                   <select
                     className="ai-input"
                     value={repSensitivityIndex}
@@ -1457,15 +1465,15 @@ export function ExerciseAiPage({
                     ))}
                   </select>
                   <p className="library-card-sub" style={{ marginTop: 4 }}>
-                    {sensitivityLevels[repSensitivityIndex].desc} (difficulty {DIFFICULTY_INFO[difficulty].icon}{" "}
-                    {difficulty} allows {DIFFICULTY_INFO[difficulty].rangeText} around the analyzed value)
+                    {sensitivityLevels[repSensitivityIndex].desc} (ระดับความยาก {DIFFICULTY_INFO[difficulty].icon}{" "}
+                    {DIFFICULTY_LABELS_TH[difficulty]} ปรับได้ {DIFFICULTY_INFO[difficulty].rangeText} จากค่าที่วิเคราะห์)
                   </p>
                 </div>
 
                 {/* Target ROM — slider bounded to the measured range ±40%/160%
                     (reference behavior), with the clinic's measured value shown. */}
                 <div className="ai-field">
-                  <label>Target ROM (°) — patient must move at least this far per rep</label>
+                  <label>ช่วงการเคลื่อนไหวเป้าหมาย (°) — ผู้ป่วยต้องเคลื่อนไหวได้อย่างน้อยเท่านี้ต่อครั้ง</label>
                   <input
                     type="range"
                     min={Math.max(5, Math.round((calibration?.derived.range ?? targetRom) * 0.4))}
@@ -1476,7 +1484,7 @@ export function ExerciseAiPage({
                     style={{ width: "100%", accentColor: "var(--primary)" }}
                   />
                   <div className="ai-slider-row">
-                    <span className="library-card-sub">Lenient</span>
+                    <span className="library-card-sub">ผ่อนปรน</span>
                     <input
                       className="ai-input"
                       type="number"
@@ -1487,11 +1495,11 @@ export function ExerciseAiPage({
                       disabled={!calibration}
                       style={{ width: 88, textAlign: "center" }}
                     />
-                    <span className="library-card-sub">Strict</span>
+                    <span className="library-card-sub">เข้มงวด</span>
                   </div>
                   {calibration && (
                     <p className="library-card-sub">
-                      Measured from the demo clip: ±{Math.round(calibration.derived.range)}°
+                      วัดจากวิดีโอสาธิต: ±{Math.round(calibration.derived.range)}°
                     </p>
                   )}
                 </div>
@@ -1499,7 +1507,7 @@ export function ExerciseAiPage({
                 {/* Trunk-compensation sensitivity as labeled presets (reference
                     BVE_SENSITIVITY_LEVELS) instead of a raw number. */}
                 <div className="ai-field">
-                  <label>Trunk-compensation sensitivity (BVE)</label>
+                  <label>ความไวในการตรวจจับการชดเชยด้วยลำตัว (BVE)</label>
                   <div className="ai-choice-row">
                     {BVE_SENSITIVITY_LEVELS.map((level) => (
                       <button
@@ -1516,7 +1524,7 @@ export function ExerciseAiPage({
                   </div>
                   <p className="library-card-sub" style={{ marginTop: 4 }}>
                     {BVE_SENSITIVITY_LEVELS.find((l) => Math.abs(l.value - bveThreshold) < 1e-6)?.desc ??
-                      `Custom trunk-sway sensitivity: ${bveThreshold}`}
+                      `กำหนดความไวในการเอนลำตัวเอง: ${bveThreshold}`}
                   </p>
                 </div>
 
@@ -1527,7 +1535,7 @@ export function ExerciseAiPage({
                     onChange={(e) => setEnableTrunkBve(e.target.checked)}
                     disabled={!calibration}
                   />
-                  Penalize trunk-lean compensation (BVE)
+                  คิดคะแนนหักเมื่อใช้การเอนลำตัวชดเชย (BVE)
                 </label>
 
                 <div className="ai-save-actions">
@@ -1538,7 +1546,7 @@ export function ExerciseAiPage({
                     disabled={!canSave || saveBusy}
                   >
                     {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
-                    Create Exercise
+                    สร้างท่าบริหาร
                   </button>
                   <button
                     type="button"
@@ -1546,45 +1554,44 @@ export function ExerciseAiPage({
                     onClick={handleDownloadReference}
                     disabled={!calibration}
                   >
-                    Download reference_data.json
+                    ดาวน์โหลด reference_data.json
                   </button>
                 </div>
 
                 {saveError && <p className="ai-error">{saveError}</p>}
                 {savedExerciseName && (
                   <p className="ai-success">
-                    <CheckCircle2 size={16} /> “{savedExerciseName}” was created as a draft — publish it from the
-                    Exercise Library.
+                    <CheckCircle2 size={16} /> สร้าง “{savedExerciseName}” เป็นฉบับร่างแล้ว — เผยแพร่ได้จากคลังท่าบริหาร
                   </p>
                 )}
               </section>
 
               <section className="creation-section-card ai-manual-criteria-card ai-card-full">
-                <div className="ai-card-step-tag">Step 2 · Exercise criteria</div>
+                <div className="ai-card-step-tag">ขั้นตอนที่ 2 · เกณฑ์ท่าบริหาร</div>
                 <div className="creation-section-header">
                   {movementTracking === "virtual_grip" ? <Hand size={20} /> : <Dumbbell size={20} />}
                   <div>
-                    <strong>{movementTracking === "virtual_grip" ? "Virtual grip criteria" : "Exercise criteria"}</strong>
-                    <p className="library-card-sub">Set the criteria used when this activity is assigned to a patient.</p>
+                    <strong>{movementTracking === "virtual_grip" ? "เกณฑ์การวัดแรงบีบมือ" : "เกณฑ์ท่าบริหาร"}</strong>
+                    <p className="library-card-sub">กำหนดเกณฑ์ที่จะใช้เมื่อมอบหมายกิจกรรมนี้ให้ผู้ป่วย</p>
                   </div>
                 </div>
                 {movementTracking === "virtual_grip" && (
-                  <label className="ai-field">Target grip strength
+                  <label className="ai-field">แรงบีบมือเป้าหมาย
                     <input className="ai-input" type="number" min="0" value={targetGripStrength} onChange={(event) => setTargetGripStrength(event.target.value)} disabled={isArchived || !isOwner} />
                   </label>
                 )}
-                <label className="ai-field">Repetitions
+                <label className="ai-field">จำนวนครั้ง
                   <input className="ai-input" type="number" min="1" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} disabled={isArchived || !isOwner} />
                 </label>
                 {movementTracking === "virtual_grip" && (
-                  <label className="ai-field">Hold duration (seconds)
+                  <label className="ai-field">ระยะเวลาค้างไว้ (วินาที)
                     <input className="ai-input" type="number" min="0" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} disabled={isArchived || !isOwner} />
                   </label>
                 )}
                 <div className="ai-save-actions">
                   <button type="button" className="primary-button" onClick={handleSave} disabled={!canSave || saveBusy}>
                     {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
-                    {targetExercise?.status === "active" ? `Save as v${targetExercise.versionNumber + 1} draft` : targetExercise ? "Save changes" : "Create draft"}
+                    {targetExercise?.status === "active" ? `บันทึกเป็นฉบับร่าง v${targetExercise.versionNumber + 1}` : targetExercise ? "บันทึกการเปลี่ยนแปลง" : "สร้างฉบับร่าง"}
                   </button>
                 </div>
                 {saveError && <p className="ai-error">{saveError}</p>}

@@ -75,9 +75,9 @@ export interface PoseSessionSummary {
 }
 
 const trackingCopy = {
-  good: "Good · ดี",
-  fair: "Fair · พอใช้",
-  poor: "Poor · แย่"
+  good: "ดี",
+  fair: "พอใช้",
+  poor: "แย่"
 } as const;
 
 // REAL TRACKING — detect() is throttled to ~15fps (rather than every rAF tick)
@@ -103,6 +103,16 @@ function parseProgress(progressLabel: string) {
   }
 
   return { done: 0, total: 0 };
+}
+
+function progressDisplayLabel(progressLabel: string): string {
+  return progressLabel
+    .replace(/\bof\b/gi, "/")
+    .replace(/\b(reps?|repetitions?)\b/gi, "ครั้ง")
+    .replace(/\b(seconds?|secs?)\b/gi, "วินาที")
+    .replace(/\b(minutes?|mins?)\b/gi, "นาที")
+    .replace(/\bsets?\b/gi, "เซต")
+    .replace(/\blaps?\b/gi, "รอบ");
 }
 
 // CAMERA_TRACKING_MOCKUP_PLAN.md §2.6 — same icon used for this trackingType
@@ -214,8 +224,8 @@ function ExerciseDemoMedia({ exercise, overrideUrl }: { exercise: PatientExercis
 function demoFeedbackMessages(exercise: PatientExercise) {
   return [
     exercise.feedback,
-    "Nice control, keep the movement steady. \u00b7 \u0e04\u0e27\u0e1a\u0e04\u0e38\u0e21\u0e44\u0e14\u0e49\u0e14\u0e35 \u0e17\u0e33\u0e15\u0e48\u0e2d\u0e44\u0e1b",
-    "Good pace, stay in frame. \u00b7 \u0e08\u0e31\u0e07\u0e2b\u0e27\u0e30\u0e14\u0e35\u0e21\u0e32\u0e01 \u0e2d\u0e22\u0e39\u0e48\u0e43\u0e19\u0e01\u0e23\u0e2d\u0e1a\u0e15\u0e48\u0e2d\u0e44\u0e1b"
+    "ควบคุมการเคลื่อนไหวได้ดี ทำต่อไป",
+    "จังหวะดีมาก พยายามอยู่ในกรอบกล้อง"
   ];
 }
 
@@ -601,7 +611,7 @@ export function PatientSessionPage({
       // All prescribed reps done → transition into the existing
       // session-completion flow (STOP → SessionUploadConfirmPage for a real
       // session; straight back to the authoring page for a test run).
-      setPoseStatusText("All reps completed — finishing… · ทำครบทุกรอบแล้ว กำลังจบเซสชัน");
+      setPoseStatusText("ทำครบทุกครั้งแล้ว กำลังจบเซสชัน…");
       window.setTimeout(() => {
         if (cycle === repCycleRef.current) stopRef.current();
       }, 2000);
@@ -616,10 +626,10 @@ export function PatientSessionPage({
       if (remaining <= 0) {
         scoringHoldRef.current = false;
         fsmRef.current?.reset();
-        setPoseStatusText("Move into the starting position · กลับสู่ท่าเริ่มต้น");
+        setPoseStatusText("กลับสู่ท่าเริ่มต้น");
         return;
       }
-      setPoseStatusText(`Next rep in ${remaining}… · รอบถัดไปในอีก ${remaining}…`);
+      setPoseStatusText(`เริ่มครั้งถัดไปใน ${remaining}…`);
       remaining -= 1;
       window.setTimeout(tick, 1000);
     };
@@ -634,9 +644,9 @@ export function PatientSessionPage({
   async function submitCompletedRep(completed: CompletedRep) {
     const cycle = repCycleRef.current;
     const repNumber = demoDoneRef.current + 1;
-    setPoseStatusText(`Scoring rep ${repNumber}… · กำลังให้คะแนนรอบที่ ${repNumber}`);
+    setPoseStatusText(`กำลังประเมินผลครั้งที่ ${repNumber}…`);
     try {
-      if (!token) throw new Error("Not signed in.");
+      if (!token) throw new Error("ไม่ได้เข้าสู่ระบบ");
       const repRequest = {
         repNumber,
         frames: completed.sequence,
@@ -663,15 +673,15 @@ export function PatientSessionPage({
         repNumber,
         rep.score,
         rep.feedback,
-        `Rep ${repNumber}: ${rep.score} pts · รอบที่ ${repNumber}: ${rep.score} คะแนน`
+        `ครั้งที่ ${repNumber}: ${rep.score} คะแนน`
       );
     } catch (err) {
       if (cycle !== repCycleRef.current) return;
       // Failed scoring (network/backend error) — the rep is NOT counted; the
       // patient repeats this repetition from the starting position.
-      const message = err instanceof Error ? err.message : "Scoring request failed.";
+      const message = err instanceof Error ? err.message : "การประเมินผลไม่สำเร็จ";
       setRepFeedback(null);
-      setPoseStatusText(`Scoring failed — please repeat this rep · ให้คะแนนไม่สำเร็จ โปรดทำรอบนี้ซ้ำ (${message})`);
+      setPoseStatusText(`ประเมินผลไม่สำเร็จ กรุณาทำซ้ำ (${message})`);
       scoringHoldRef.current = false;
       fsmRef.current?.reset();
     }
@@ -700,13 +710,13 @@ export function PatientSessionPage({
     );
 
     // Caption (only on change — the loop runs ~15fps).
-    let caption = "Move into the starting position · เข้าสู่ท่าเริ่มต้น";
+    let caption = "เข้าสู่ท่าเริ่มต้น";
     if (output.state === "WAITING_READY_POSE" && output.readyCountdownSeconds !== null) {
-      caption = `Hold the starting position — ${output.readyCountdownSeconds}s · ค้างท่าเริ่มต้น — ${output.readyCountdownSeconds}s`;
+      caption = `ค้างท่าเริ่มต้น — ${output.readyCountdownSeconds} วินาที`;
     } else if (output.state === "IN_REP_ACTIVE") {
-      caption = "Performing one repetition · กำลังทำ 1 รอบ";
+      caption = "กำลังทำท่าบริหาร";
     } else if (output.state === "IN_REP_RETURN") {
-      caption = "Return to the starting position · กลับสู่ท่าเริ่มต้น";
+      caption = "กลับสู่ท่าเริ่มต้น";
     }
     if (caption !== lastPoseCaptionRef.current) {
       lastPoseCaptionRef.current = caption;
@@ -725,6 +735,7 @@ export function PatientSessionPage({
   // "1 / 10" repetition counter — completed reps / prescribed total (both the
   // camera HUD and the sidebar target section render from this).
   const progressLabel = total > 0 ? `${demoDone} / ${total}` : exercise.progressLabel;
+  const localizedProgressLabel = progressDisplayLabel(progressLabel);
   const progressPercent = total > 0 ? Math.round((demoDone / total) * 100) : 0;
   const score = demoScore;
   const trackingIcons = trackingIconsFor(exercise.trackingType);
@@ -755,7 +766,7 @@ export function PatientSessionPage({
     // repCycle guard drops this if the session was restarted meanwhile.
     if (total > 0 && next >= total) {
       const cycle = repCycleRef.current;
-      lastGripCaptionRef.current = "All reps completed — finishing… · ทำครบทุกรอบแล้ว กำลังจบเซสชัน";
+      lastGripCaptionRef.current = "ทำครบทุกครั้งแล้ว กำลังจบเซสชัน…";
       setGripStatusText(lastGripCaptionRef.current);
       window.setTimeout(() => {
         if (cycle === repCycleRef.current) stopRef.current();
@@ -887,7 +898,7 @@ export function PatientSessionPage({
           {camera.status === "requesting" && (
             <div className="camera-state-overlay">
               <Video size={28} />
-              <p>Turning on your camera… · กำลังเปิดกล้อง</p>
+              <p>กำลังเปิดกล้อง…</p>
             </div>
           )}
 
@@ -901,7 +912,7 @@ export function PatientSessionPage({
               <p>{camera.errorMessage}</p>
               {(camera.status === "denied" || camera.status === "error" || camera.status === "not-found") && (
                 <button type="button" className="secondary-button" onClick={camera.retry}>
-                  Try again · ลองอีกครั้ง
+                  ลองอีกครั้ง
                 </button>
               )}
             </div>
@@ -932,9 +943,9 @@ export function PatientSessionPage({
                     push the Exit button off-screen on narrow phones. */}
                 <span className="session-topbar-name">{exercise.name}</span>
               </strong>
-              <span>{exercise.nameTh ? `${exercise.nameTh} · ` : ""}{progressLabel}</span>
+              <span>{exercise.nameTh ? `${exercise.nameTh} · ` : ""}{localizedProgressLabel}</span>
             </div>
-            <button className="session-icon-button" onClick={handleExit} aria-label="Exit session">
+            <button className="session-icon-button" onClick={handleExit} aria-label="ออกจากเซสชัน">
               <LogOut size={18} />
             </button>
           </header>
@@ -945,10 +956,10 @@ export function PatientSessionPage({
               it rendered before this plan. */}
           {camera.status === "streaming" && !sessionStarted && (
             <div className="session-preroll">
-              <p>Position yourself in frame · ยืนให้อยู่ในกรอบกล้อง</p>
+              <p>จัดตำแหน่งตัวให้อยู่ในกรอบกล้อง</p>
               <FramingGuide />
               <button type="button" className="primary-button" onClick={handleStart}>
-                Start · เริ่ม
+                เริ่ม
               </button>
             </div>
           )}
@@ -957,7 +968,7 @@ export function PatientSessionPage({
             <>
               <div className={`tracking-status ${trackingStatus}`} role="status">
                 <span />
-                Tracking: {trackingCopy[trackingStatus]}
+                การติดตาม: {trackingCopy[trackingStatus]}
               </div>
 
               {/* §10/§12 — the old circular progress badge was removed: the bottom
@@ -966,7 +977,7 @@ export function PatientSessionPage({
 
               <div className={`reference-panel${referenceOpen ? " open" : ""}`}>
                 <ExerciseDemoMedia exercise={exercise} overrideUrl={testConfig?.demoVideoUrl} />
-                <span>Reference · ท่าอ้างอิง</span>
+                <span>ท่าอ้างอิง</span>
               </div>
               {/* Compact floating toggle: the reference thumb stays hidden behind
                   this button on phone/tablet so it never covers the patient's
@@ -977,35 +988,35 @@ export function PatientSessionPage({
                 className="reference-toggle"
                 onClick={() => setReferenceOpen((open) => !open)}
                 aria-expanded={referenceOpen}
-                aria-label={referenceOpen ? "Hide reference pose · ซ่อนท่าอ้างอิง" : "Show reference pose · ดูท่าอ้างอิง"}
+                aria-label={referenceOpen ? "ซ่อนท่าอ้างอิง" : "แสดงท่าอ้างอิง"}
               >
                 <Play size={13} />
-                Demo
+                ดูตัวอย่าง
               </button>
 
               {/* The live skeleton canvas itself is mounted above (as soon as the
                   camera streams) so it is visible during the preroll as well. */}
               <div className="overlay-caption" role="status">
                 {(poseTrackingEnabled || handTrackingEnabled) && trackingLoadState === "error"
-                  ? "Tracking unavailable — check your internet connection · โหลดโมเดลไม่สำเร็จ ตรวจการเชื่อมต่ออินเทอร์เน็ต"
+                  ? "ไม่สามารถเริ่มการติดตามได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต"
                   : (poseTrackingEnabled || handTrackingEnabled) && trackingLoadState === "loading"
-                  ? "Loading tracking… · กำลังโหลดโมเดล…"
+                  ? "กำลังโหลดระบบติดตาม…"
                   : poseTrackingEnabled && poseStatusText
                   ? poseStatusText
                   : handTrackingEnabled && gripStatusText
                   ? gripStatusText
                   : handTrackingEnabled && handDetected
-                  ? "Hand tracking active · กำลังติดตามมือ"
+                  ? "กำลังติดตามมือ"
                   : poseTrackingEnabled && poseDetected
-                  ? "Pose tracking active · กำลังติดตามร่างกาย"
+                  ? "กำลังติดตามท่าทาง"
                   : handTrackingEnabled
-                  ? "Show your hand to the camera · ยกมือขึ้นให้เห็นในกล้อง"
+                  ? "ยกมือให้กล้องมองเห็น"
                   : poseTrackingEnabled
-                  ? "Step back so your full body is in frame · ยืนให้เห็นทั้งตัวในกล้อง"
-                  : "Reference pose · ท่าอ้างอิง"}
+                  ? "ถอยออกมาเพื่อให้กล้องเห็นร่างกายทั้งหมด"
+                  : "ท่าอ้างอิง"}
               </div>
 
-              {paused && <div className="session-state">Paused · หยุดชั่วคราว</div>}
+              {paused && <div className="session-state">หยุดชั่วคราว</div>}
 
               <div className="session-bottom-stack">
                 {/* §9 — compact feedback chip instead of the old large permanent
@@ -1017,7 +1028,7 @@ export function PatientSessionPage({
                   </span>
                   <p>
                     {lowConfidence
-                      ? "Move a little farther back so your arm stays in frame. · ถอยออกมาอีกนิดให้แขนอยู่ในกรอบ"
+                      ? "ถอยออกมาอีกนิดเพื่อให้แขนอยู่ในกรอบกล้อง"
                       : feedbackText}
                   </p>
                 </div>
@@ -1025,12 +1036,12 @@ export function PatientSessionPage({
                 {/* §8 — single primary progress representation on the camera:
                     "X of Y" count + bar. The score chip is hidden on phones
                     (CSS) where the spec deprioritizes it, visible on tablet+. */}
-                <div className="session-progress-line" role="status" aria-label={`Session progress: ${progressLabel}`}>
+                <div className="session-progress-line" role="status" aria-label={`ความคืบหน้าของเซสชัน: ${localizedProgressLabel}`}>
                   <span className="session-progress-score">
                     {/* "—" until a real backend score exists — no mock number. */}
-                    {score === null ? <strong>—</strong> : <><strong>{score}</strong> pts</>}
+                    {score === null ? <strong>—</strong> : <><strong>{score}</strong> คะแนน</>}
                   </span>
-                  <span className="session-progress-count">{progressLabel}</span>
+                  <span className="session-progress-count">{localizedProgressLabel}</span>
                   <span className="session-progress-track" aria-hidden="true">
                     <span className="session-progress-fill" style={{ width: `${progressPercent}%` }} />
                   </span>
@@ -1048,16 +1059,16 @@ export function PatientSessionPage({
                       }
                       onTogglePause();
                     }}
-                    aria-label={paused ? "Resume · เล่นต่อ" : "Pause · หยุดชั่วคราว"}
+                    aria-label={paused ? "เล่นต่อ" : "หยุดชั่วคราว"}
                   >
                     {paused ? <TimerReset size={18} /> : <Square size={18} />}
-                    <span>{paused ? "Resume" : "Pause"}</span>
+                    <span>{paused ? "เล่นต่อ" : "หยุดชั่วคราว"}</span>
                   </button>
                   <button
                     type="button"
                     className="session-control-btn stop"
                     onClick={handleStop}
-                    aria-label="Finish session · จบเซสชัน"
+                    aria-label="จบเซสชัน"
                   >
                     STOP
                   </button>
@@ -1065,10 +1076,10 @@ export function PatientSessionPage({
                     type="button"
                     className="session-control-btn"
                     onClick={handleRestart}
-                    aria-label="Restart · เริ่มใหม่"
+                    aria-label="เริ่มใหม่"
                   >
                     <RotateCcw size={18} />
-                    <span>Restart</span>
+                    <span>เริ่มใหม่</span>
                   </button>
                 </div>
               </div>
@@ -1082,7 +1093,7 @@ export function PatientSessionPage({
         <aside className="session-side-panel">
           {/* A — session/exercise information */}
           <div className="side-section side-heading">
-            <p className="eyebrow">Training session · เซสชันฝึก</p>
+            <p className="eyebrow">เซสชันฝึก</p>
             <div className="side-name-row">
               <span className="side-tracking-icons" aria-hidden="true">
                 {trackingIcons.map((Icon, index) => (
@@ -1099,7 +1110,7 @@ export function PatientSessionPage({
               the floating phone/tablet panel; sized 16:9 and responsive to the
               sidebar width via CSS. */}
           <div className="side-section side-reference">
-            <p className="side-label">Exercise demo · ท่าอ้างอิง</p>
+            <p className="side-label">ท่าอ้างอิง</p>
             <ExerciseDemoMedia exercise={exercise} overrideUrl={testConfig?.demoVideoUrl} />
           </div>
 
@@ -1117,7 +1128,7 @@ export function PatientSessionPage({
               camera HUD — demoDone only advances after a successful backend
               scoring response, so the bar reflects scored repetitions. */}
           <div className="side-section side-target">
-            <p className="side-label">Target repetitions · เป้าหมายจำนวนครั้ง</p>
+            <p className="side-label">เป้าหมายจำนวนครั้ง</p>
             <span className="session-progress-track side-target-track" aria-hidden="true">
               <span className="session-progress-fill" style={{ width: `${progressPercent}%` }} />
             </span>
@@ -1125,10 +1136,10 @@ export function PatientSessionPage({
               {total > 0 ? (
                 <>
                   <strong className="side-target-done">{demoDone}</strong>
-                  {` / ${total} repetitions · ครั้ง`}
+                  {` / ${total} ครั้ง`}
                 </>
               ) : (
-                progressLabel
+                localizedProgressLabel
               )}
             </span>
           </div>
@@ -1136,25 +1147,25 @@ export function PatientSessionPage({
           {/* B — current performance: the score is the visual focal point.
               "—" until the first backend-scored repetition — no mock number. */}
           <div className="side-section side-score">
-            <p className="side-label">Current score · คะแนนปัจจุบัน</p>
+            <p className="side-label">คะแนนปัจจุบัน</p>
             <p className="side-score-value">
               <strong>{score ?? "—"}</strong>
               <span aria-hidden="true">{score === null ? "" : "/100"}</span>
             </p>
             {score === null && (
-              <p className="side-score-hint">Score appears after your first scored repetition · คะแนนจะแสดงหลังให้คะแนนรอบแรก</p>
+              <p className="side-score-hint">คะแนนจะแสดงหลังประเมินผลครั้งแรก</p>
             )}
           </div>
 
           {/* D — live feedback (same state/text as the camera feedback chip) */}
           <div className="side-section side-feedback">
-            <p className="side-label">Live feedback · คำแนะนำ</p>
+            <p className="side-label">คำแนะนำ</p>
             <div className={`side-feedback-body ${lowConfidence ? "warning" : ""}`} role="status" aria-live="polite">
               <span className="feedback-chip-icon" aria-hidden="true">
                 {lowConfidence ? <ArrowUp size={15} /> : <Check size={15} />}
               </span>
               <p>{lowConfidence
-                ? "Move a little farther back so your arm stays in frame. · ถอยออกมาอีกนิดให้แขนอยู่ในกรอบ"
+                ? "ถอยออกมาอีกนิดเพื่อให้แขนอยู่ในกรอบกล้อง"
                 : feedbackText}</p>
             </div>
           </div>
@@ -1176,14 +1187,14 @@ export function PatientSessionPage({
               }}
             >
               {paused ? <TimerReset size={16} /> : <Square size={16} />}
-              {paused ? "Resume · เล่นต่อ" : "Pause · หยุดชั่วคราว"}
+              {paused ? "เล่นต่อ" : "หยุดชั่วคราว"}
             </button>
             <button type="button" className="secondary-button" onClick={handleRestart}>
               <RotateCcw size={16} />
-              Restart · เริ่มใหม่
+              เริ่มใหม่
             </button>
             <button type="button" className="primary-button full-width finish-button" onClick={handleStop}>
-              Finish session · จบเซสชัน
+              จบเซสชัน
             </button>
           </div>
         </aside>
@@ -1204,26 +1215,25 @@ export function PatientSessionPage({
             onClick={(event) => event.stopPropagation()}
           >
             <div className="therapist-detail-header">
-              <strong id="exit-session-title">Exit session?</strong>
+              <strong id="exit-session-title">ออกจากเซสชันหรือไม่</strong>
               <button
                 type="button"
                 className="icon-button"
                 onClick={() => setExitConfirmOpen(false)}
-                aria-label="Close"
+                aria-label="ปิด"
               >
                 <X size={16} />
               </button>
             </div>
             <p className="pd-confirm-message">
-              Discard this attempt? Your recording hasn&apos;t been saved yet. ·
-              ยกเลิกครั้งนี้? การบันทึกยังไม่ถูกบันทึก
+              ต้องการทิ้งการฝึกครั้งนี้หรือไม่ วิดีโอที่บันทึกไว้ยังไม่ได้รับการบันทึก
             </p>
             <div className="pd-confirm-actions">
               <button type="button" className="secondary-button" onClick={() => setExitConfirmOpen(false)}>
-                Keep recording
+                กลับไปฝึกต่อ
               </button>
               <button type="button" className="primary-button" style={{ background: "var(--danger, #d33)" }} onClick={confirmExit}>
-                Discard &amp; exit
+                ทิ้งวิดีโอและออก
               </button>
             </div>
           </div>
