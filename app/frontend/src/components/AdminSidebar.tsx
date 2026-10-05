@@ -1,5 +1,6 @@
 import { Dumbbell, Settings, Shield, Users } from "lucide-react";
 import type { ComponentType } from "react";
+import rehabAiImage from "../assets/RehabAIimage.png";
 import { useAuth } from "../store/authStore";
 import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import { initialsFromName } from "../utils/displayName";
@@ -57,9 +58,9 @@ export function AdminSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: A
   return (
     <aside className="therapist-sidebar admin-sidebar">
       <div className="therapist-brand">
-        <span className="therapist-brand-mark">R</span>
+        <img className="therapist-brand-mark" src={rehabAiImage} alt="ระบบฟื้นฟูผู้ป่วย" />
         <div>
-          <strong>RehabiAI</strong>
+          <strong>ระบบฟื้นฟูผู้ป่วย</strong>
           <small>Admin Console</small>
         </div>
       </div>

@@ -119,6 +119,14 @@ main {
   letter-spacing: 0.01em;
 }
 
+.auth-brand-logo {
+  display: block;
+  width: 88px;
+  height: 88px;
+  justify-self: center;
+  object-fit: contain;
+}
+
 .auth-subtitle {
   margin: 0 0 20px;
   color: var(--text-secondary);
@@ -253,6 +261,10 @@ main {
 
   .auth-brand-name {
     text-align: left;
+  }
+
+  .auth-brand-name--login {
+    text-align: center;
   }
 
   .auth-card {
@@ -2589,15 +2601,9 @@ div.exercise-card:hover {
 }
 
 .therapist-brand-mark {
-  display: grid;
-  place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--primary), var(--teal));
-  color: #ffffff;
-  font-weight: 800;
-  font-size: 1rem;
+  object-fit: contain;
 }
 
 .therapist-brand strong {
@@ -3497,7 +3503,6 @@ div.exercise-card:hover {
   max-width: 320px;
 }
 
-.admin-sidebar .therapist-brand-mark,
 .admin-avatar {
   background: linear-gradient(135deg, #7c3aed, var(--primary));
   /* White initials over the saturated purple→blue gradient — without this the

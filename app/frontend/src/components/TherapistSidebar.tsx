@@ -1,5 +1,6 @@
 import { Activity, Dumbbell, Home, Settings, Users } from "lucide-react";
 import type { ComponentType } from "react";
+import rehabAiImage from "../assets/RehabAIimage.png";
 import { useAuth } from "../store/authStore";
 import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import { initialsFromName } from "../utils/displayName";
@@ -52,7 +53,7 @@ export function TherapistSidebar({ activeLabel, onNavigate, onLogout, avatarUrl 
   return (
     <aside className="therapist-sidebar">
       <div className="therapist-brand">
-        <span className="therapist-brand-mark">R</span>
+        <img className="therapist-brand-mark" src={rehabAiImage} alt="ระบบฟื้นฟูผู้ป่วย" />
         <div>
           <strong>{displayName}</strong>
           <small>นักกายภาพบำบัด</small>
