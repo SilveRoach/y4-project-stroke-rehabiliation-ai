@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { Lock, Plus, User } from "lucide-react";
+import rehabAiImage from "../assets/RehabAIimage.png";
 import { useAuth } from "../store/authStore";
 import type { Role } from "../types";
 
@@ -58,7 +59,8 @@ export function LoginPage({ onLogin, onRegister }: LoginPageProps) {
         <div className="auth-panel">
           <form className="auth-card" onSubmit={submit} noValidate>
             <h1 className="visually-hidden">เข้าสู่ระบบ</h1>
-            <p className="auth-brand-name">ระบบฟื้นฟูผู้ป่วยโรคหลอดเลือดสมอง</p>
+            <img className="auth-brand-logo" src={rehabAiImage} alt="โลโก้ RehabAI" />
+            <p className="auth-brand-name auth-brand-name--login">ระบบฟื้นฟูผู้ป่วยโรคหลอดเลือดสมอง</p>
             {/* Visible only at the 900px+ split-panel layout — on phones the
                 heading stays screen-reader-only (h1 above) so the card can go
                 straight into the fields, matching the reference. */}

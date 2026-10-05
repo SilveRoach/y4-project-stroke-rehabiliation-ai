@@ -24,6 +24,8 @@ interface AdminSettingsPageProps {
   onLogout: () => void;
   onNavigateDashboard: () => void;
   onNavigateUsers: () => void;
+  // Routes into the shared Exercise Library section (see handleAdminNavigate).
+  onNavigateExerciseLibrary: () => void;
 }
 
 interface AdminProfileForm {
@@ -41,19 +43,19 @@ interface AdminProfileForm {
 const PROFILE_CREATED_ISO = "2022-11-03";
 
 function formatDateLabel(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString("th-TH", {
     day: "2-digit",
     month: "short",
     year: "numeric"
   });
 }
 
-export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUsers }: AdminSettingsPageProps) {
+export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUsers, onNavigateExerciseLibrary }: AdminSettingsPageProps) {
   // Real logged-in admin for the topbar/sidebar profile chrome and the form's
   // pre-filled display name — mirrors PatientSettingsPage.tsx's idiom of
   // sourcing the shared chrome from the auth store instead of a static mock.
   const { token, user, updateUser } = useAuth();
-  const authDisplayName = user?.displayName || user?.username || "Admin";
+  const authDisplayName = user?.displayName || user?.username || "ผู้ดูแลระบบ";
 
   // --- Real profile picture (same flow as Patient/TherapistSettingsPage) ---
   // The other form fields remain local-only stubs, but the picture is real:
@@ -64,11 +66,11 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
 
   const [form, setForm] = useState<AdminProfileForm>({
     displayName: authDisplayName,
-    title: "System Administrator",
+    title: "ผู้ดูแลระบบ",
     employeeId: "EMP-0001",
     email: "suda.admin@rehabclinic.example",
     phoneNumber: "0898765432",
-    address: "Bangkok Rehabilitation Center, 45 Phahonyothin Rd, Bangkok 10400"
+    address: "ศูนย์ฟื้นฟูสมรรถภาพกรุงเทพฯ ถนนพหลโยธิน กรุงเทพมหานคร 10400"
   });
   const [isEditing, setIsEditing] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -166,7 +168,7 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2500);
     } catch (err) {
-      setSaveError(err instanceof ApiError ? err.message : "Failed to save profile. Please try again.");
+      setSaveError(err instanceof ApiError ? err.message : "บันทึกข้อมูลโปรไฟล์ไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setSaving(false);
     }
@@ -176,6 +178,7 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
   const handleNavigate = (label: AdminNavLabel) => {
     if (label === "Dashboard") onNavigateDashboard();
     if (label === "Users") onNavigateUsers();
+    if (label === "Exercise Library") onNavigateExerciseLibrary();
   };
 
   return (
@@ -185,17 +188,17 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Settings</h1>
-            <p>Profile, employee ID, and contact information</p>
+            <h1>ตั้งค่า</h1>
+            <p>โปรไฟล์ รหัสพนักงาน และข้อมูลติดต่อ</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{form.displayName}</strong>
-                <small>System Administrator</small>
+                <small>ผู้ดูแลระบบ</small>
               </div>
               <span className={`avatar-badge admin-avatar${avatarUrl ? " with-photo" : ""}`}>
-                {avatarUrl ? <img src={avatarUrl} alt={`${form.displayName}'s profile picture`} /> : initialsFromName(form.displayName)}
+                {avatarUrl ? <img src={avatarUrl} alt={`รูปโปรไฟล์ของ ${form.displayName}`} /> : initialsFromName(form.displayName)}
               </span>
             </div>
           </div>
@@ -211,7 +214,7 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
           )}
 
           <form className={`ps-card${isEditing ? " editing" : ""}`} onSubmit={handleSubmit}>
-            <div className={`ps-avatar-circle${avatarUrl ? " with-photo" : ""}`}>
+            <div className={`ps-avatar-circle lg${avatarUrl ? " with-photo" : ""}`}>
               {avatarUrl ? (
                 <img className="ps-avatar-img" src={avatarUrl} alt={`${form.displayName}'s profile picture`} />
               ) : (
@@ -233,61 +236,61 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
               onClick={picUpload.openFilePicker}
               disabled={picUpload.uploading}
             >
-              <Camera size={13} /> {picUpload.uploading ? "Uploading…" : avatarUrl ? "Change photo" : "Upload photo"}
+              <Camera size={13} /> {picUpload.uploading ? "กำลังอัปโหลด…" : avatarUrl ? "เปลี่ยนรูปภาพ" : "อัปโหลดรูปภาพ"}
             </button>
 
             {isEditing && (
               <span className="ps-editing-pill">
-                <Pencil size={12} /> Editing profile
+                <Pencil size={12} /> กำลังแก้ไขโปรไฟล์
               </span>
             )}
 
             <div className="ps-panels">
               <section className="ps-panel">
                 <div className="settings-section-heading">
-                  <User size={15} /> <strong>Profile</strong>
+                  <User size={15} /> <strong>โปรไฟล์</strong>
                 </div>
                 <SettingsField
-                  label="Display name"
+                  label="ชื่อที่แสดง"
                   value={form.displayName}
                   editing={isEditing}
                   onChange={updateField("displayName")}
                 />
-                <SettingsField label="Title" value={form.title} editing={isEditing} onChange={updateField("title")} />
+                <SettingsField label="ตำแหน่ง" value={form.title} editing={isEditing} onChange={updateField("title")} />
                 <div className="settings-section-heading">
-                  <Shield size={15} /> <strong>Employee</strong>
+                  <Shield size={15} /> <strong>ข้อมูลพนักงาน</strong>
                 </div>
                 <SettingsField
-                  label="Employee ID"
+                  label="รหัสพนักงาน"
                   value={form.employeeId}
                   editing={isEditing}
                   onChange={updateField("employeeId")}
                 />
                 <div className="ps-field">
-                  <span className="ps-field-label">Admin since</span>
+                  <span className="ps-field-label">ผู้ดูแลระบบตั้งแต่</span>
                   <p className="ps-field-value">{formatDateLabel(PROFILE_CREATED_ISO)}</p>
                 </div>
               </section>
 
               <section className="ps-panel">
                 <div className="settings-section-heading">
-                  <Phone size={15} /> <strong>Contact Information</strong>
+                  <Phone size={15} /> <strong>ข้อมูลติดต่อ</strong>
                 </div>
                 <SettingsField
-                  label="Email address"
+                  label="อีเมล"
                   type="email"
                   value={form.email}
                   editing={isEditing}
                   onChange={updateField("email")}
                 />
                 <SettingsField
-                  label="Phone number"
+                  label="หมายเลขโทรศัพท์"
                   value={form.phoneNumber}
                   editing={isEditing}
                   onChange={updateField("phoneNumber")}
                 />
                 <SettingsField
-                  label="Office address"
+                  label="ที่อยู่สำนักงาน"
                   value={form.address}
                   editing={isEditing}
                   onChange={updateField("address")}
@@ -305,7 +308,7 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
                     onClick={discardChanges}
                     disabled={saving}
                   >
-                    <X size={14} /> Discard changes
+                    <X size={14} /> ยกเลิกการเปลี่ยนแปลง
                   </button>
                   <button
                     key="admin-save-btn"
@@ -313,19 +316,19 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
                     className="primary-button"
                     disabled={saving}
                   >
-                    <Save size={14} /> {saving ? "Saving…" : "Save changes"}
+                    <Save size={14} /> {saving ? "กำลังบันทึก…" : "บันทึกการเปลี่ยนแปลง"}
                   </button>
                 </>
               ) : (
                 <>
-                  {saved && <span className="ps-saved-note">Saved</span>}
+                  {saved && <span className="ps-saved-note">บันทึกแล้ว</span>}
                   <button
                     key="admin-edit-btn"
                     type="button"
                     className="primary-button"
                     onClick={startEditing}
                   >
-                    <Pencil size={14} /> Edit profile
+                    <Pencil size={14} /> แก้ไขโปรไฟล์
                   </button>
                 </>
               )}

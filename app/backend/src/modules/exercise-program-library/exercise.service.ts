@@ -74,6 +74,14 @@ export interface ExerciseVersionSummary {
   id: string;
   versionNumber: number;
   status: ExerciseStatus;
+  // Per-version display fields so the frontend's History panel can open an OLD
+  // version's own read-only detail view — a version bump can change any of
+  // these, so they can't be taken from the family's latest row.
+  name: string;
+  description: string;
+  movementTracking: ExerciseTrackingType;
+  difficultyLevel: ExerciseDifficulty;
+  demoVideoFileId: string | null;
   baseCriteria: ExerciseBaseCriteria;
   createdAtLabel: string;
 }
@@ -173,6 +181,11 @@ function buildItem(familyRows: NonNullable<ExerciseRow>[]): ExerciseLibraryItemD
       id: v.id,
       versionNumber: v.versionNumber,
       status: v.status,
+      name: v.name,
+      description: v.description ?? "",
+      movementTracking: v.movementTracking,
+      difficultyLevel: v.difficultyLevel,
+      demoVideoFileId: v.demoVideoFileId,
       baseCriteria: toBaseCriteria(v.baseCriteria),
       createdAtLabel: relativeDateLabel(v.createdAt)
     }))

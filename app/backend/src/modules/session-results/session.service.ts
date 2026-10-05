@@ -63,6 +63,20 @@ export interface TherapistSessionLogEntryDto {
   evaluationSource?: EvaluationSource;
 }
 
+export interface TherapistExerciseSessionDto extends TherapistSessionLogEntryDto {
+  scheduledExerciseId: string;
+  exerciseLibraryId: string;
+  performanceResultId: string;
+  exerciseName: string;
+  exerciseVersionLabel: string;
+  dateIso: string;
+  completedAtIso: string;
+  aiScore: number | null;
+  currentScore: number | null;
+  currentScoreSource: EvaluationSource | null;
+  reviewed: boolean;
+}
+
 // Caps how far back the log looks — "recent training sessions", not a full
 // archive; the page has no pagination UI yet.
 const RECENT_SESSIONS_LIMIT = 50;
@@ -414,6 +428,11 @@ export interface ScheduleDayReviewAttemptDto {
   evaluationSource: "ai" | "pt" | "manual" | null;
   referenceVideoFileId: string | null;
   completedAtIso: string | null;
+  aiEvaluatedAtIso: string | null;
+  aiMetrics: Array<{ label: string; value: string }> | null;
+  currentScore: number | null;
+  currentScoreSource: "ai" | "pt" | "manual" | null;
+  therapistReviewed: boolean;
 }
 
 export interface ScheduleDayReviewExerciseDto {
@@ -421,6 +440,12 @@ export interface ScheduleDayReviewExerciseDto {
   scheduledExerciseId: string;
   exerciseName: string;
   exerciseVersionLabel: string;
+  description: string | null;
+  difficultyLevel: string;
+  movementTracking: string;
+  baseCriteria: Array<{ label: string; value: string }> | null;
+  targetValueLabel: string;
+  therapistInstruction: string | null;
   attempts: ScheduleDayReviewAttemptDto[];
 }
 
@@ -429,7 +454,59 @@ export interface ScheduleDayReviewDto {
   patientName: string;
   dateLabel: string;
   dayLabel: string;
+  planName: string;
+  scheduledDateIso: string;
   exercises: ScheduleDayReviewExerciseDto[];
+}
+
+function mapAiMetrics(metrics: unknown): Array<{ label: string; value: string }> | null {
+  if (!metrics || typeof metrics !== "object" || Array.isArray(metrics)) return null;
+  return Object.entries(metrics as Record<string, unknown>).map(([key, value]) => ({
+    label: key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase()),
+    value: typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+      ? String(value)
+      : JSON.stringify(value) ?? String(value)
+  }));
+}
+
+function mapExerciseCriteria(criteria: unknown): Array<{ label: string; value: string }> | null {
+  if (!criteria || typeof criteria !== "object" || Array.isArray(criteria)) return null;
+  const details = Object.entries(criteria as Record<string, unknown>)
+    .filter(([, value]) => typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    .map(([key, value]) => ({
+      label: key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase()),
+      value: String(value)
+    }));
+  return details.length > 0 ? details : null;
+}
+
+function currentAttemptScore(result: {
+  aiScore: { toNumber(): number } | null;
+  ptScore: { toNumber(): number } | null;
+  finalScore: { toNumber(): number } | null;
+  evaluationSource: string | null;
+}): number | null {
+  if (
+    (result.evaluationSource === "pt" || result.evaluationSource === "manual") &&
+    result.ptScore != null
+  ) {
+    return result.ptScore.toNumber();
+  }
+  return result.aiScore?.toNumber() ?? result.finalScore?.toNumber() ?? result.ptScore?.toNumber() ?? null;
+}
+
+function activeAttemptSource(result: {
+  aiScore: { toNumber(): number } | null;
+  ptScore: { toNumber(): number } | null;
+  evaluationSource: string | null;
+}): "ai" | "pt" | "manual" | null {
+  if (
+    (result.evaluationSource === "pt" || result.evaluationSource === "manual") &&
+    result.ptScore != null
+  ) {
+    return result.evaluationSource;
+  }
+  return result.aiScore != null ? "ai" : result.ptScore != null ? "pt" : null;
 }
 
 export async function getScheduleDayReview(dayId: string, therapistId: string, isAdmin: boolean): Promise<ScheduleDayReviewDto> {
@@ -438,7 +515,7 @@ export async function getScheduleDayReview(dayId: string, therapistId: string, i
     include: {
       rehabilitationPlan: { include: { patient: { include: { user: true } } } },
       scheduledExercises: {
-        where: { status: { in: ["completed", "skipped"] } },
+        where: { status: "completed" },
         orderBy: { orderNumber: "asc" },
         include: {
           exerciseLibrary: true,
@@ -472,6 +549,12 @@ export async function getScheduleDayReview(dayId: string, therapistId: string, i
       scheduledExerciseId: exercise.id,
       exerciseName: exercise.exerciseLibrary.name,
       exerciseVersionLabel: `v${exercise.exerciseLibrary.versionNumber}`,
+      description: exercise.exerciseLibrary.description,
+      difficultyLevel: exercise.exerciseLibrary.difficultyLevel,
+      movementTracking: exercise.exerciseLibrary.movementTracking,
+      baseCriteria: mapExerciseCriteria(exercise.exerciseLibrary.baseCriteria),
+      targetValueLabel: targetValueLabel(exercise.targetValue),
+      therapistInstruction: exercise.therapistInstruction,
       attempts: exercise.performanceResults.map((result) => ({
         id: result.id,
         attemptNumber: result.attemptNumber,
@@ -482,22 +565,29 @@ export async function getScheduleDayReview(dayId: string, therapistId: string, i
         finalScore: result.finalScore !== null && result.finalScore !== undefined ? result.finalScore.toNumber() : null,
         evaluationSource: (result.evaluationSource as "ai" | "pt" | "manual" | null) ?? null,
         referenceVideoFileId: result.referenceVideo,
-        completedAtIso: result.completedAt ? result.completedAt.toISOString() : null
+        completedAtIso: result.completedAt ? result.completedAt.toISOString() : null,
+        aiEvaluatedAtIso: result.aiEvaluatedAt ? result.aiEvaluatedAt.toISOString() : null,
+        aiMetrics: mapAiMetrics(result.aiMetrics),
+        currentScore: currentAttemptScore(result),
+        currentScoreSource: activeAttemptSource(result),
+        therapistReviewed:
+          result.ptEvaluatedAt !== null || result.ptScore !== null || result.ptFeedback !== null
       }))
-    }))
+    })),
+    planName: day.rehabilitationPlan.name,
+    scheduledDateIso: isoDate(day.scheduledDate)
   };
 }
 
 // --- PATCH /performance-results/:id/scoring ---------------------------------
-// Therapist scoring for one recorded attempt — powers Session Result Review's
-// PT score/feedback panel and its "Use AI score" / "Use my score" decision.
+// Therapist scoring for one recorded attempt — therapist score/feedback are
+// saved independently from the selected grading-score source.
 // Same access rule as getScheduleDayReview: the patient's assigned therapist or
 // an admin. Providing PT fields stamps pt_evaluated_by/pt_evaluated_at;
 // finalScore + evaluationSource record which score is the official result.
 export interface AttemptScoringPatch {
   ptScore?: number | null;
   ptFeedback?: string | null;
-  finalScore?: number | null;
   evaluationSource?: "ai" | "pt" | "manual";
 }
 
@@ -541,7 +631,20 @@ export async function updateAttemptScoring(
   }
 
   validateAttemptScore(payload.ptScore, "PT score");
-  validateAttemptScore(payload.finalScore, "Final score");
+  if (payload.ptFeedback !== undefined && payload.ptFeedback !== null && typeof payload.ptFeedback !== "string") {
+    throw new ValidationError("PT feedback must be text.");
+  }
+  if (
+    payload.evaluationSource !== undefined &&
+    payload.evaluationSource !== "ai" &&
+    payload.evaluationSource !== "pt" &&
+    payload.evaluationSource !== "manual"
+  ) {
+    throw new ValidationError("Evaluation source is invalid.");
+  }
+  if (payload.ptScore === null && result.evaluationSource === "pt" && payload.evaluationSource !== "ai") {
+    throw new ValidationError("Select the AI score for grading before removing the therapist score.");
+  }
 
   const data: {
     ptScore?: number | null;
@@ -557,8 +660,25 @@ export async function updateAttemptScoring(
   }
   if (payload.ptScore !== undefined) data.ptScore = payload.ptScore;
   if (payload.ptFeedback !== undefined) data.ptFeedback = payload.ptFeedback;
-  if (payload.finalScore !== undefined) data.finalScore = payload.finalScore;
-  if (payload.evaluationSource !== undefined) data.evaluationSource = payload.evaluationSource;
+  if (payload.ptScore !== undefined && result.evaluationSource === "pt" && payload.ptScore !== null) {
+    data.finalScore = payload.ptScore;
+  }
+  if (payload.evaluationSource !== undefined) {
+    if (payload.evaluationSource === "pt" && result.ptScore == null && payload.ptScore == null) {
+      throw new ValidationError("A therapist score is required before it can be used for grading.");
+    }
+    if (payload.evaluationSource === "ai" && result.aiScore == null) {
+      throw new ValidationError("An AI score is not available for this result.");
+    }
+    const selectedScore = payload.evaluationSource === "pt"
+      ? payload.ptScore ?? result.ptScore
+      : payload.evaluationSource === "ai"
+        ? result.aiScore
+        : result.finalScore;
+    if (selectedScore == null) throw new ValidationError("The selected grading score is not available.");
+    data.finalScore = typeof selectedScore === "number" ? selectedScore : selectedScore.toNumber();
+    data.evaluationSource = payload.evaluationSource;
+  }
   if (Object.keys(data).length === 0) throw new ValidationError("Nothing to update.");
 
   const updated = await prisma.exercisePerformanceResult.update({ where: { id: resultId }, data });
@@ -572,7 +692,12 @@ export async function updateAttemptScoring(
     finalScore: updated.finalScore !== null && updated.finalScore !== undefined ? updated.finalScore.toNumber() : null,
     evaluationSource: (updated.evaluationSource as "ai" | "pt" | "manual" | null) ?? null,
     referenceVideoFileId: updated.referenceVideo,
-    completedAtIso: updated.completedAt ? updated.completedAt.toISOString() : null
+    completedAtIso: updated.completedAt ? updated.completedAt.toISOString() : null,
+    aiEvaluatedAtIso: updated.aiEvaluatedAt ? updated.aiEvaluatedAt.toISOString() : null,
+    aiMetrics: mapAiMetrics(updated.aiMetrics),
+    currentScore: currentAttemptScore(updated),
+    currentScoreSource: activeAttemptSource(updated),
+    therapistReviewed: updated.ptEvaluatedAt !== null || updated.ptScore !== null || updated.ptFeedback !== null
   };
 }
 
@@ -593,6 +718,7 @@ export async function getTherapistSessions(
     if (!patientIds.includes(opts.patientId)) return [];
     patientIds = [opts.patientId];
   }
+
   if (patientIds.length === 0) return [];
 
   const days = await prisma.rehabilitationScheduleDay.findMany({
@@ -677,6 +803,112 @@ export async function getTherapistSessions(
       outcome: day.status === "skipped" ? "skipped" : "completed",
       avgScore,
       evaluationSource
+    };
+  });
+}
+
+export async function getTherapistExerciseSessions(
+  therapistId: string,
+  opts: { patientId?: string; planId?: string } = {}
+): Promise<TherapistExerciseSessionDto[]> {
+  const assignments = await prisma.patientTherapistAssignment.findMany({
+    where: { therapistId, status: "active" },
+    select: { patientId: true }
+  });
+  let patientIds = assignments.map((assignment) => assignment.patientId);
+  if (opts.patientId) {
+    if (!patientIds.includes(opts.patientId)) return [];
+    patientIds = [opts.patientId];
+  }
+  if (patientIds.length === 0) return [];
+
+  const results = await prisma.exercisePerformanceResult.findMany({
+    where: {
+      completedAt: { not: null },
+      scheduledExercise: {
+        status: "completed",
+        scheduleDay: {
+          rehabilitationPlan: {
+            patientId: { in: patientIds },
+            ...(opts.planId ? { id: opts.planId } : {})
+          }
+        }
+      }
+    },
+    orderBy: [{ completedAt: "desc" }, { attemptNumber: "desc" }],
+    include: {
+      scheduledExercise: {
+        include: {
+          exerciseLibrary: true,
+          scheduleDay: {
+            include: {
+              rehabilitationPlan: {
+                include: { patient: { include: { user: true } } }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const latestByPatientExerciseDate = new Map<string, { result: typeof results[number]; completedAt: Date }>();
+  for (const result of results) {
+    if (!result.completedAt) continue;
+    const scheduledExercise = result.scheduledExercise;
+    const plan = scheduledExercise.scheduleDay.rehabilitationPlan;
+    const dateIso = isoDate(scheduledExercise.scheduleDay.scheduledDate);
+    const key = `${plan.patientId}:${scheduledExercise.exerciseLibraryId}:${dateIso}`;
+    if (!latestByPatientExerciseDate.has(key)) {
+      latestByPatientExerciseDate.set(key, { result, completedAt: result.completedAt });
+    }
+  }
+
+  return Array.from(latestByPatientExerciseDate.values()).map(({ result, completedAt }) => {
+    const scheduledExercise = result.scheduledExercise;
+    const day = scheduledExercise.scheduleDay;
+    const plan = day.rehabilitationPlan;
+    const patientUser = plan.patient.user;
+    const name = displayName({
+      firstName: patientUser.firstName,
+      lastName: patientUser.lastName,
+      username: patientUser.username
+    });
+    const currentScore = currentAttemptScore(result);
+    const activeSource = activeAttemptSource(result);
+    const currentScoreSource: EvaluationSource | null = currentScore == null
+      ? null
+      : activeSource === "pt" || activeSource === "manual"
+        ? "pt_reviewed"
+        : "ai";
+    const planStart = plan.startDate ?? day.scheduledDate;
+    const dayNumber = Math.floor((day.scheduledDate.getTime() - planStart.getTime()) / 86_400_000) + 1;
+
+    return {
+      id: day.id,
+      patientId: plan.patientId,
+      patientName: name,
+      patientAvatarInitials: initialsFromName(name),
+      rehabilitationPlanId: plan.id,
+      rehabilitationPlanName: plan.name,
+      dateLabel: relativeDateLabel(day.scheduledDate),
+      dayLabel: `Day ${Math.max(1, dayNumber)}`,
+      exercisesAttempted: 1,
+      outcome: "completed",
+      avgScore: currentScore == null ? undefined : Math.round(currentScore),
+      evaluationSource: currentScoreSource ?? undefined,
+      scheduledExerciseId: scheduledExercise.id,
+      exerciseLibraryId: scheduledExercise.exerciseLibraryId,
+      performanceResultId: result.id,
+      exerciseName: scheduledExercise.exerciseLibrary.name,
+      exerciseVersionLabel: `v${scheduledExercise.exerciseLibrary.versionNumber}`,
+      dateIso: isoDate(day.scheduledDate),
+      completedAtIso: completedAt.toISOString(),
+      aiScore: result.aiScore == null ? null : result.aiScore.toNumber(),
+      currentScore,
+      currentScoreSource,
+      reviewed:
+        result.ptEvaluatedAt != null || result.ptScore != null || result.ptFeedback != null
     };
   });
 }

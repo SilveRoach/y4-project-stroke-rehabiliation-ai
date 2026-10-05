@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { PatientNavLabel } from "./components/PatientSidebar";
+import type { AdminNavLabel } from "./components/AdminSidebar";
 import type { TherapistNavLabel } from "./components/TherapistSidebar";
 import { Toast } from "./components/Toast";
 import { patientProgram } from "./data/patientMock";
 import { patientRehabPlans } from "./data/patientRehabPlanMock";
-import { getSessionReview } from "./data/sessionReviewMock";
 import type { RecordingResult } from "./hooks/useSessionRecording";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
@@ -37,6 +37,7 @@ import {
 import type {
   ExerciseLibraryItem,
   ExerciseTrackingType,
+  ExerciseVersionSummary,
   PatientExercise,
   PatientRehabPlan,
   PendingSessionAttempt,
@@ -108,6 +109,11 @@ function AppShell() {
   // when opened from there, or the patient's detail page when the therapist
   // used the "View" button in PatientDetailPage's exercise-picker popup.
   const [exerciseCreationReturn, setExerciseCreationReturn] = useState<"therapist-library" | "patient-detail">("therapist-library");
+  // True while the AI workspace above was opened from the library's Version
+  // History panel (openExerciseVersion) rather than from a library card or the
+  // creation flow — the page then shows its version banner and names the library
+  // in its back-link. Reset by every other path into that view.
+  const [exerciseVersionView, setExerciseVersionView] = useState(false);
 
   // CAMERA_TRACKING_MOCKUP_PLAN.md §6.6 — lifted from a plain module-level import
   // into state so a confirmed upload (see handleConfirmUpload below) can actually
@@ -142,7 +148,7 @@ function AppShell() {
         trackingType: exercise.movementTracking === "none" ? "both" : exercise.movementTracking,
         targetLabel: exercise.targetValueLabel,
         status: exercise.status === "completed" ? "done" : exercise.status === "in_progress" ? "in_progress" : "not_started",
-        feedback: exercise.therapistInstruction ?? "Follow your therapist's prescribed instructions.",
+        feedback: exercise.therapistInstruction ?? "ปฏิบัติตามคำแนะนำที่นักกายภาพบำบัดกำหนด",
         progressLabel: exercise.targetValueLabel,
         durationMinutes: 0,
         sets: 0,
@@ -166,11 +172,11 @@ function AppShell() {
   const mockAiEvaluation = () => ({
     aiScore: Math.max(60, Math.min(98, (activeExercise.score ?? 80) + Math.round((Math.random() - 0.5) * 12))),
     aiFeedback:
-      "Solid form overall — keep your shoulder relaxed through the top of the movement. · ท่าทางโดยรวมดี พยายามผ่อนคลายไหล่ตอนยกสุด",
+      "ท่าทางโดยรวมดี พยายามผ่อนคลายไหล่ขณะยกแขนขึ้น",
     aiMetrics: [
-      { label: "Range of motion", value: `${70 + Math.round(Math.random() * 20)}%` },
-      { label: "Tempo", value: "Steady" },
-      { label: "Frames analyzed", value: `${120 + Math.round(Math.random() * 40)}` }
+      { label: "ช่วงการเคลื่อนไหว", value: `${70 + Math.round(Math.random() * 20)}%` },
+      { label: "จังหวะ", value: "สม่ำเสมอ" },
+      { label: "จำนวนเฟรมที่วิเคราะห์", value: `${120 + Math.round(Math.random() * 40)}` }
     ]
   });
 
@@ -189,6 +195,7 @@ function AppShell() {
       scheduledExerciseId: activeExercise.id,
       exerciseName: activeExercise.name,
       exerciseNameTh: activeExercise.nameTh,
+      trackingType: activeExercise.trackingType,
       videoBlobUrl: URL.createObjectURL(result.blob),
       videoBlob: result.blob,
       videoFileName: `${fileSlug}-attempt.${extension}`,
@@ -198,11 +205,11 @@ function AppShell() {
       ...(poseSummary
         ? {
             aiScore: poseSummary.averageScore,
-            aiFeedback: `Average score from ${poseSummary.repScores.length} AI-scored repetition${poseSummary.repScores.length === 1 ? "" : "s"}.`,
+            aiFeedback: `คะแนนเฉลี่ยจากการทำท่าบริหาร ${poseSummary.repScores.length} ครั้งที่ AI ประเมินผลสำเร็จ`,
             aiMetrics: [
-              { label: "Scored repetitions", value: String(poseSummary.repScores.length) },
-              { label: "Score range", value: `${Math.min(...poseSummary.repScores)}–${Math.max(...poseSummary.repScores)}` },
-              { label: "Average score", value: String(poseSummary.averageScore) }
+              { label: "จำนวนครั้งที่ประเมินผล", value: String(poseSummary.repScores.length) },
+              { label: "ช่วงคะแนน", value: `${Math.min(...poseSummary.repScores)}–${Math.max(...poseSummary.repScores)}` },
+              { label: "คะแนนเฉลี่ย", value: String(poseSummary.averageScore) }
             ]
           }
         : mockAiEvaluation())
@@ -303,12 +310,44 @@ function AppShell() {
         return;
       }
       setSelectedExercise(exercise);
+      setExerciseVersionView(false);
       setCreationName(exercise.name);
       setCreationTracking(exercise.movementTracking);
       setView("exercise-ai");
     } catch {
       window.alert("Could not load exercise details.");
     }
+  };
+
+  // Version-history drill-in: ExerciseLibraryPage's History panel → the full
+  // ExerciseAiPage workspace (the same destination a library CARD click uses).
+  // The AI workspace renders exactly ONE exercise_library row, so the clicked
+  // version's own fields have to win: a version bump can change any of them
+  // (name, description, tracking, difficulty, demo video, base criteria), and
+  // the family's latest row only ever carries ITS values. Fields a version
+  // summary doesn't carry (creator, thumbnail descriptor, the family id and the
+  // whole history list) are inherited from the row the panel was opened for.
+  const openExerciseVersion = (exercise: ExerciseLibraryItem, version: ExerciseVersionSummary) => {
+    setSelectedExercise({
+      ...exercise,
+      id: version.id,
+      versionNumber: version.versionNumber,
+      status: version.status,
+      name: version.name || exercise.name,
+      description: version.description,
+      movementTracking: version.movementTracking,
+      difficultyLevel: version.difficultyLevel,
+      demoVideoFileId: version.demoVideoFileId,
+      hasDemoVideo: version.demoVideoFileId !== null,
+      demoVideoFile: null,
+      baseCriteria: version.baseCriteria,
+      createdAtLabel: version.createdAtLabel
+    });
+    setExerciseVersionView(true);
+    setCreationName(version.name || exercise.name);
+    setCreationTracking(version.movementTracking);
+    setExerciseCreationReturn("therapist-library");
+    setView("exercise-ai");
   };
 
   // Same idea as handleTherapistNavigate above, for the patient-role sidebar/
@@ -323,11 +362,25 @@ function AppShell() {
   };
 
   // Same idea as handleTherapistNavigate/handlePatientNavigate above, for the
-  // admin-role sidebar (components/AdminSidebar.tsx).
-  const handleAdminNavigate = (label: "Dashboard" | "Users" | "Settings") => {
+  // admin-role sidebar (components/AdminSidebar.tsx). "Exercise Library" routes
+  // admins into the shared Exercise Library section (ExerciseLibraryPage — the
+  // therapist's page, reused), which renders this same admin sidebar back.
+  const handleAdminNavigate = (label: AdminNavLabel) => {
     if (label === "Dashboard") setView("admin-dashboard");
     if (label === "Users") setView("admin-users");
     if (label === "Settings") setView("admin-settings");
+    if (label === "Exercise Library") setView("therapist-library");
+  };
+
+  // The Exercise Library section (library → AI authoring workspace) is shared
+  // by both roles: each page renders TherapistSidebar for therapists and
+  // AdminSidebar for admins (decided inside the page from useAuth), so this one
+  // handler dispatches the clicked label by the SIGNED-IN role — the labels
+  // overlap ("Dashboard", "Settings") but mean different views per role, and
+  // role-specific labels (Patients/Sessions vs Users) simply fall through.
+  const handleExerciseLibraryNavigate = (label: TherapistNavLabel | AdminNavLabel) => {
+    if (user?.role === "admin") handleAdminNavigate(label as AdminNavLabel);
+    else handleTherapistNavigate(label as TherapistNavLabel);
   };
 
   return (
@@ -438,20 +491,23 @@ function AppShell() {
             logout();
             setView("login");
           }}
-          onNavigate={handleTherapistNavigate}
+          onNavigate={handleExerciseLibraryNavigate}
           onCreateNew={(name, tracking) => {
             setSelectedExercise(null);
+            setExerciseVersionView(false);
             setCreationName(name);
             setCreationTracking(tracking);
             setView("exercise-ai");
           }}
           onSelectExercise={(exercise) => {
             setSelectedExercise(exercise);
+            setExerciseVersionView(false);
             setCreationName(exercise.name);
             setCreationTracking(exercise.movementTracking);
             setExerciseCreationReturn("therapist-library");
             setView("exercise-ai");
           }}
+          onViewVersion={openExerciseVersion}
         />
       )}
       {view === "exercise-ai" && (
@@ -459,6 +515,7 @@ function AppShell() {
           exercise={selectedExercise}
           initialName={creationName}
           initialTracking={creationTracking}
+          isVersionView={exerciseVersionView}
           onBack={() => {
             setSelectedExercise(null);
             setView(exerciseCreationReturn);
@@ -471,7 +528,7 @@ function AppShell() {
             logout();
             setView("login");
           }}
-          onNavigate={handleTherapistNavigate}
+          onNavigate={handleExerciseLibraryNavigate}
         />
       )}
       {view === "therapist-sessions" && (
@@ -481,7 +538,9 @@ function AppShell() {
             setView("login");
           }}
           onNavigate={handleTherapistNavigate}
-          onReviewSession={(session) => openSessionReview(session, session.patientName)}
+          onReviewSession={(session) =>
+            openSessionReview(session, session.patientName, session.scheduledExerciseId)
+          }
         />
       )}
       {view === "therapist-settings" && (
@@ -508,6 +567,7 @@ function AppShell() {
           pendingPlanUpdate={pendingPlanUpdate}
           onViewExercise={(exercise) => {
             setSelectedExercise(exercise);
+            setExerciseVersionView(false);
             setCreationName(exercise.name);
             setCreationTracking(exercise.movementTracking);
             setExerciseCreationReturn("patient-detail");
@@ -532,7 +592,13 @@ function AppShell() {
       )}
       {view === "session-result-review" && reviewSession && (
         <SessionResultReviewPage
-          review={getSessionReview(reviewSession, detailPatient?.name ?? reviewPatientName ?? "Patient")}
+          review={{
+            sessionId: reviewSession.id,
+            patientName: detailPatient?.name ?? reviewPatientName ?? "Patient",
+            dateLabel: reviewSession.dateLabel,
+            dayLabel: reviewSession.dayLabel,
+            exercises: []
+          }}
           focusExerciseId={reviewFocusExerciseId ?? undefined}
           onBack={() => setView(detailPatient ? "patient-detail" : "therapist-sessions")}
           onLogout={() => {
@@ -550,6 +616,7 @@ function AppShell() {
           }}
           onNavigateUsers={() => handleAdminNavigate("Users")}
           onNavigateSettings={() => handleAdminNavigate("Settings")}
+          onNavigateExerciseLibrary={() => handleAdminNavigate("Exercise Library")}
         />
       )}
       {view === "admin-users" && (
@@ -560,6 +627,7 @@ function AppShell() {
           }}
           onNavigateDashboard={() => handleAdminNavigate("Dashboard")}
           onNavigateSettings={() => handleAdminNavigate("Settings")}
+          onNavigateExerciseLibrary={() => handleAdminNavigate("Exercise Library")}
         />
       )}
       {view === "admin-settings" && (
@@ -570,6 +638,7 @@ function AppShell() {
           }}
           onNavigateDashboard={() => handleAdminNavigate("Dashboard")}
           onNavigateUsers={() => handleAdminNavigate("Users")}
+          onNavigateExerciseLibrary={() => handleAdminNavigate("Exercise Library")}
         />
       )}
     </main>

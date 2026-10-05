@@ -1,9 +1,7 @@
 // Session & Results module — HTTP handlers.
-// SCOPE: only GET /therapists/:id/sessions (cross-patient session log for
-// TherapistSessionsPage.tsx) is implemented this pass. Everything else
-// api-design.md's "Training Sessions" section documents — patient-facing
-// today/results submission, per-patient sessions/heatmap, PT evaluation — is
-// still not built. See session.service.ts for the full gap list.
+// HTTP handlers for patient exercise submissions and therapist session-result
+// review/scoring. Patient reads are self-scoped; therapist reads are restricted
+// to the authenticated therapist's active patient assignments.
 
 import { NextFunction, Request, Response } from "express";
 import path from "path";
@@ -29,7 +27,6 @@ export async function updateAttemptScoringHandler(req: Request, res: Response, n
     const payload = {
       ptScore: req.body?.ptScore,
       ptFeedback: req.body?.ptFeedback,
-      finalScore: req.body?.finalScore,
       evaluationSource: req.body?.evaluationSource
     };
     const attempt = await sessionService.updateAttemptScoring(req.user.sub, req.user.role, resultId, payload);
@@ -53,7 +50,10 @@ export async function getTherapistSessionsHandler(req: Request, res: Response, n
     // assignments inside the service.
     const patientId = typeof req.query.patientId === "string" ? req.query.patientId : undefined;
     const planId = typeof req.query.planId === "string" ? req.query.planId : undefined;
-    const sessions = await sessionService.getTherapistSessions(id, { patientId, planId });
+    const exerciseSessions = req.query.exerciseSessions === "1";
+    const sessions = exerciseSessions
+      ? await sessionService.getTherapistExerciseSessions(id, { patientId, planId })
+      : await sessionService.getTherapistSessions(id, { patientId, planId });
     res.json({ sessions });
   } catch (err) {
     next(err);

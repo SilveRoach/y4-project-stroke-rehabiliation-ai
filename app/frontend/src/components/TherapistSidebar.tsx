@@ -1,5 +1,6 @@
 import { Activity, Dumbbell, Home, Settings, Users } from "lucide-react";
 import type { ComponentType } from "react";
+import rehabAiImage from "../assets/RehabAIimage.png";
 import { useAuth } from "../store/authStore";
 import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import { initialsFromName } from "../utils/displayName";
@@ -39,9 +40,17 @@ const navItems: Array<{ icon: ComponentType<{ size?: number }>; label: Therapist
   { icon: Settings, label: "Settings" }
 ];
 
+const navLabels: Record<TherapistNavLabel, string> = {
+  Dashboard: "แดชบอร์ด",
+  Patients: "ผู้ป่วย",
+  "Exercise Library": "คลังท่าบริหาร",
+  Sessions: "การฝึก",
+  Settings: "ตั้งค่า"
+};
+
 export function TherapistSidebar({ activeLabel, onNavigate, onLogout, avatarUrl }: TherapistSidebarProps) {
   const { user } = useAuth();
-  const displayName = user?.displayName || user?.username || "Therapist";
+  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
   const initials = initialsFromName(displayName);
   // Resolve the logged-in therapist's own picture from the auth store, so every
   // page sharing this sidebar shows the photo without passing props. Pages that
@@ -52,14 +61,14 @@ export function TherapistSidebar({ activeLabel, onNavigate, onLogout, avatarUrl 
   return (
     <aside className="therapist-sidebar">
       <div className="therapist-brand">
-        <span className="therapist-brand-mark">R</span>
+        <img className="therapist-brand-mark" src={rehabAiImage} alt="ระบบฟื้นฟูผู้ป่วย" />
         <div>
-          <strong>{displayName}</strong>
+          <strong>ระบบฟื้นฟูผู้ป่วย</strong>
           <small>นักกายภาพบำบัด</small>
         </div>
       </div>
 
-      <nav aria-label="Therapist navigation" className="therapist-nav">
+      <nav aria-label="เมนูนักกายภาพบำบัด" className="therapist-nav">
         {navItems.map(({ icon: Icon, label }) => (
           <button
             key={label}
@@ -68,7 +77,7 @@ export function TherapistSidebar({ activeLabel, onNavigate, onLogout, avatarUrl 
             onClick={() => onNavigate(label)}
           >
             <Icon size={17} />
-            {label}
+            {navLabels[label]}
           </button>
         ))}
       </nav>
@@ -79,7 +88,7 @@ export function TherapistSidebar({ activeLabel, onNavigate, onLogout, avatarUrl 
         </span>
         <div>
           <strong>{displayName}</strong>
-          <small>Physical Therapist</small>
+          <small>นักกายภาพบำบัด</small>
         </div>
       </div>
 

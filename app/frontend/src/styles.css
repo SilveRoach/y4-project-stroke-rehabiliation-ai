@@ -119,6 +119,14 @@ main {
   letter-spacing: 0.01em;
 }
 
+.auth-brand-logo {
+  display: block;
+  width: 88px;
+  height: 88px;
+  justify-self: center;
+  object-fit: contain;
+}
+
 .auth-subtitle {
   margin: 0 0 20px;
   color: var(--text-secondary);
@@ -253,6 +261,10 @@ main {
 
   .auth-brand-name {
     text-align: left;
+  }
+
+  .auth-brand-name--login {
+    text-align: center;
   }
 
   .auth-card {
@@ -2589,15 +2601,9 @@ div.exercise-card:hover {
 }
 
 .therapist-brand-mark {
-  display: grid;
-  place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--primary), var(--teal));
-  color: #ffffff;
-  font-weight: 800;
-  font-size: 1rem;
+  object-fit: contain;
 }
 
 .therapist-brand strong {
@@ -3027,6 +3033,9 @@ div.exercise-card:hover {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  /* Two selectors (patient + plan) plus the delta badge — let them wrap to a
+     second row on narrow cards instead of squeezing the chart heading. */
+  flex-wrap: wrap;
 }
 
 .therapist-chart-heading-actions .admin-role-select {
@@ -3494,9 +3503,13 @@ div.exercise-card:hover {
   max-width: 320px;
 }
 
-.admin-sidebar .therapist-brand-mark,
 .admin-avatar {
   background: linear-gradient(135deg, #7c3aed, var(--primary));
+  /* White initials over the saturated purple→blue gradient — without this the
+     account-table avatars (therapist-avatar admin-avatar) inherited
+     .therapist-avatar's `color: var(--primary)`, i.e. blue text blending into
+     the blue half of this gradient. */
+  color: #ffffff;
 }
 
 .admin-sidebar .therapist-nav-link.active {
@@ -4638,6 +4651,73 @@ div.exercise-card:hover {
   margin-top: 4px;
 }
 
+/* Clickable version cards in the History panel. The whole card is the
+   affordance (role="button" + tabIndex in the JSX), so hover and keyboard focus
+   both have to read as "this opens something" — same treatment as .library-card. */
+.library-history-row-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.library-history-row-clickable:hover,
+.library-history-row-clickable:focus-visible {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-hover);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+/* Marks the version the library grid's own card points at, so "the one I clicked
+   History from" is distinguishable from the older rows below it. */
+.library-history-row-clickable.is-current {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.library-history-current-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.library-history-row-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.library-history-view-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  color: var(--primary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.library-history-row-clickable:hover .library-history-view-hint,
+.library-history-row-clickable:focus-visible .library-history-view-hint {
+  color: var(--primary-dark);
+}
+
+/* The History panel hands a clicked version over to ExerciseAiPage instead of
+   rendering its own in-sidebar sub-view, so the styles that sub-view used
+   (.library-history-back-header for its back-arrow title row and
+   .library-history-demo-video for its clip) are gone — the AI workspace's own
+   .ai-demo-video / .ai-version-view-banner cover both. */
+
 @media (min-width: 720px) {
   .library-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -5695,6 +5775,7 @@ div.exercise-card:hover {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .pd-program-status {
@@ -5892,6 +5973,12 @@ div.exercise-card:hover {
 
 .pd-calendar-cell.completed {
   background: var(--success);
+  color: #ffffff;
+}
+
+.pd-calendar-cell.needs_review,
+.pd-legend-dot.needs_review {
+  background: var(--warning);
   color: #ffffff;
 }
 
@@ -6294,6 +6381,26 @@ div.exercise-card:hover {
   color: var(--text-secondary);
   font-size: 0.74rem;
   line-height: 1.4;
+}
+
+/* Plan popup in read-only mode (PlanModal's readOnly — the signed-in therapist
+   is not assigned to the patient, so PatientDetailPage only lets them VIEW):
+   grey every disabled control so the popup visibly reads as view-only instead
+   of looking editable while the submit button is absent. */
+.pd-modal-form input:disabled,
+.pd-modal-form textarea:disabled,
+.pd-modal-form select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.pd-attachment-checkbox:disabled,
+.pd-attachment-checkbox:disabled + .pd-attachment-custom-check,
+.pd-attachment-note-clear:disabled,
+.pd-attachment-action-btn:disabled,
+.pd-attachments-browse-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 /* "Add exercise" confirm popup (PatientDetailPage's ExercisePickerModal):
@@ -6766,10 +6873,12 @@ div.exercise-card:hover {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .ts-session-patient > div {
   display: grid;
+  min-width: 0;
 }
 
 .ts-session-patient span {
@@ -6779,8 +6888,32 @@ div.exercise-card:hover {
 }
 
 .ts-session-patient small {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  margin-left: 0;
   color: var(--text-secondary);
   font-size: 0.76rem;
+}
+
+.ts-session-patient .ts-session-exercise-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(240px, 35vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 400;
+}
+
+.ts-session-patient .ts-session-time {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 400;
+  white-space: nowrap;
 }
 
 .settings-main {
@@ -7067,32 +7200,6 @@ div.exercise-card:hover {
   color: var(--primary);
 }
 
-.pd-attachments-tabs {
-  display: flex;
-  gap: 3px;
-  padding: 2px;
-  background: var(--border-light);
-  border-radius: 8px;
-}
-
-.pd-attachments-tab-btn {
-  border: 0;
-  background: transparent;
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.pd-attachments-tab-btn.active {
-  background: var(--card);
-  color: var(--primary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-}
-
 .pd-attachments-dropzone {
   display: flex;
   align-items: center;
@@ -7110,6 +7217,17 @@ div.exercise-card:hover {
 .pd-attachments-dropzone.drag-over {
   border-color: var(--primary);
   background: var(--primary-light);
+}
+
+/* Read-only dropzone (PlanModal readOnly — uploads are disabled): no hover
+   highlight, not clickable, clearly inert next to the view-only fields. */
+.pd-attachments-dropzone.read-only,
+.pd-attachments-dropzone.read-only:hover,
+.pd-attachments-dropzone.read-only.drag-over {
+  cursor: not-allowed;
+  opacity: 0.65;
+  border-color: var(--border);
+  background: var(--bg);
 }
 
 .pd-attachments-dropzone-left {
@@ -7606,7 +7724,7 @@ div.exercise-card:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .srr-exercise-tab {
@@ -7614,7 +7732,7 @@ div.exercise-card:hover {
   border-radius: 999px;
   background: var(--card);
   color: var(--text-secondary);
-  padding: 7px 14px;
+  padding: 6px 12px;
   font-size: 0.8rem;
   font-weight: 700;
 }
@@ -7628,7 +7746,7 @@ div.exercise-card:hover {
 .srr-attempt-chips {
   display: flex;
   gap: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .srr-attempt-chip {
@@ -7636,7 +7754,7 @@ div.exercise-card:hover {
   border-radius: 999px;
   background: var(--card);
   color: var(--text-secondary);
-  padding: 6px 14px;
+  padding: 5px 12px;
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -7650,44 +7768,101 @@ div.exercise-card:hover {
 .srr-layout {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.srr-page-main {
+  width: 100%;
+  align-self: stretch;
+  gap: 10px;
+  padding: 12px 20px 20px;
+}
+
+.srr-page-main > .pd-back-link {
+  align-self: flex-start;
+  margin: 0;
+}
+
+.srr-main-column,
+.srr-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.srr-sidebar {
+  padding: 0;
 }
 
 .srr-video-col {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   align-content: start;
+  justify-items: stretch;
+  min-width: 0;
 }
 
 .srr-video-col p {
   margin: 0;
   color: var(--text-secondary);
   font-size: 0.78rem;
-  text-align: center;
+}
+
+.srr-video-col .pd-record-attachments-label {
+  font-weight: 700;
 }
 
 .srr-video-placeholder {
   display: grid;
   place-items: center;
-  aspect-ratio: 3 / 4;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #2c2c2a, #565650);
+  width: 100%;
+  height: min(38vh, 360px);
+  min-height: 220px;
+  border-radius: 12px;
+  background: #000000;
   color: #ffffff;
+}
+
+.srr-video-col .pose-video-player {
+  width: 100%;
+  height: min(38vh, 360px);
+  min-height: 220px;
+  aspect-ratio: auto;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #000000;
+}
+
+.srr-video-col .pose-video-player .srr-review-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: inherit;
+  background: #000000;
+  object-fit: contain;
+}
+
+.srr-video-col .pose-video-overlay {
+  object-fit: contain;
 }
 
 .srr-score-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 12px;
+  gap: 10px;
 }
 
 .srr-score-panel {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--card);
-  padding: 14px 16px;
+  padding: 12px 14px;
 }
 
 .srr-score-panel-top {
@@ -7697,7 +7872,7 @@ div.exercise-card:hover {
 }
 
 .srr-score-panel-top strong {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
 }
 
 .srr-score-value {
@@ -7706,8 +7881,8 @@ div.exercise-card:hover {
 }
 
 .srr-score-input {
-  width: 64px;
-  min-height: 36px;
+  width: 72px;
+  min-height: 34px;
   text-align: center;
   font-size: 1.1rem;
   font-weight: 800;
@@ -7735,7 +7910,7 @@ div.exercise-card:hover {
 }
 
 .srr-score-panel textarea {
-  min-height: 64px;
+  min-height: 58px;
   border: 1.5px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
@@ -7747,20 +7922,166 @@ div.exercise-card:hover {
 }
 
 .srr-decision-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg);
-  padding: 10px 14px;
-  margin-top: 4px;
+  padding: 10px 12px;
 }
 
 .srr-decision-bar span {
   color: var(--text-secondary);
   font-size: 0.82rem;
+}
+
+.srr-score-source-options {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  width: 100%;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  isolation: isolate;
+}
+
+.srr-score-source-options::before {
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  border-radius: 7px;
+  background: var(--primary);
+  content: "";
+  transition: transform 180ms ease;
+}
+
+.srr-score-source-options[data-selected="pt"]::before {
+  transform: translateX(100%);
+}
+
+.srr-score-source-options label {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+  transition: color 180ms ease;
+}
+
+.srr-score-source-options[data-selected="ai"] label:first-of-type,
+.srr-score-source-options[data-selected="pt"] label:last-of-type {
+  color: #ffffff;
+}
+
+.srr-score-source-options[data-selected="ai"] label:first-of-type span,
+.srr-score-source-options[data-selected="pt"] label:last-of-type span {
+  color: #ffffff;
+}
+
+.srr-score-source-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.srr-score-source-options input:focus-visible + span {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+.srr-score-source-options input:disabled + span {
+  opacity: 0.55;
+}
+
+.srr-session-details,
+.srr-exercise-info {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 0.82rem;
+}
+
+.srr-session-details > span,
+.srr-exercise-info p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.srr-session-details {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.srr-session-details > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.srr-session-details > div strong {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+
+.srr-session-details > div span {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.srr-session-details > span:nth-child(2) {
+  grid-column: 1;
+}
+
+.srr-session-details > .badge-pill {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.srr-exercise-info-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+}
+
+.srr-exercise-info-heading span {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.srr-exercise-info-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.srr-exercise-info-fields strong {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .srr-decision-actions {
@@ -7791,19 +8112,118 @@ div.exercise-card:hover {
   color: var(--success);
 }
 
+.srr-current-score {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.srr-current-score > span:first-child {
+  margin-right: auto;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.srr-current-score > strong {
+  color: var(--text-primary);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.srr-save-review {
+  justify-content: center;
+}
+
 .srr-empty-note {
-  padding: 40px 0;
+  padding: 24px 0;
   text-align: center;
   color: var(--text-secondary);
 }
 
 @media (min-width: 900px) {
   .srr-layout {
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: minmax(0, 1.6fr) minmax(340px, 0.9fr);
+    gap: 18px;
   }
 
+  .srr-sidebar {
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding: 0 2px 2px 0;
+  }
+}
+
+@media (max-width: 899px) {
+  .srr-sidebar,
+  .srr-main-column,
   .srr-score-grid {
-    grid-template-columns: 1fr 1fr;
+    display: contents;
+  }
+
+  .srr-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .srr-video-col {
+    grid-row: 1;
+  }
+
+  .srr-current-score {
+    grid-row: 2;
+  }
+
+  .srr-ai-panel {
+    grid-row: 3;
+  }
+
+  .srr-exercise-info {
+    grid-row: 4;
+  }
+
+  .srr-therapist-panel {
+    grid-row: 5;
+  }
+
+  .srr-decision-bar {
+    grid-row: 6;
+  }
+
+  .srr-save-review {
+    grid-row: 7;
+  }
+}
+
+@media (max-width: 600px) {
+  .srr-page-main {
+    padding: 8px 12px 16px;
+  }
+
+  .srr-session-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .srr-session-details > .badge-pill {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+
+  .srr-session-details > span:nth-child(2) {
+    grid-column: 1;
+  }
+
+  .srr-exercise-info-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .srr-video-placeholder,
+  .srr-video-col .pose-video-player {
+    height: min(42vh, 300px);
+    min-height: 180px;
   }
 }
 
@@ -9280,6 +9700,116 @@ tr.admin-user-row:hover .admin-row-open-hint {
   background: var(--border-light);
 }
 
+.pd-session-source.ai {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.therapist-session-list-heading {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pd-session-row.ts-session-row-clickable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+}
+
+.ts-session-list-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.ph-result-modal {
+  width: min(100% - 32px, 540px);
+}
+
+.ph-result-modal .therapist-detail-header {
+  align-items: flex-start;
+}
+
+.ph-result-modal .therapist-detail-header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.ph-result-modal .therapist-detail-header small {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.ph-current-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 12px 14px;
+}
+
+.ph-current-result > span:first-child {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.ph-current-result strong {
+  font-size: 1.25rem;
+}
+
+.ph-result-section {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--border-light);
+  padding-top: 12px;
+}
+
+.ph-result-section h3,
+.ph-result-section p {
+  margin: 0;
+}
+
+.ph-result-section h3 {
+  font-size: 0.9rem;
+}
+
+.ph-result-section p {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.ph-result-section .ph-result-score {
+  color: var(--text-primary);
+}
+
+@media (max-width: 700px) {
+  .pd-session-row.ts-session-row-clickable {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .pd-session-row.ts-session-row-clickable > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .ts-session-list-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ts-session-list-header span:not(:first-child) {
+    display: none;
+  }
+}
+
 /* --- Patient Settings page (frontend-design.md's Patient Settings, revised per
    the "picture / Profile+assigned PT / Contact" wireframe). Phone keeps a
    simple single-column card (same footprint as the old .settings-card, just
@@ -9347,6 +9877,10 @@ tr.admin-user-row:hover .admin-row-open-hint {
 }
 
 .patient-page-main.ps-main {
+  padding-top: 72px;
+}
+
+.therapist-main.ps-main {
   padding-top: 72px;
 }
 
@@ -9824,6 +10358,10 @@ tr.admin-user-row:hover .admin-row-open-hint {
   pointer-events: none;
 }
 
+.srr-video-col .pose-video-player .pose-video-overlay {
+  object-fit: contain;
+}
+
 .sud-ai-title {
   display: inline-flex;
   align-items: center;
@@ -9968,8 +10506,8 @@ tr.admin-user-row:hover .admin-row-open-hint {
    shared CSS variables, so no new palette is introduced. --- */
 
 /* Mixed step flow: a two-column grid where lighter cards pair up row by row
-   (Step 1 | Step 2, Step 3 | Step 4, Step 7 | Step 8) and the dense steps
-   (5, 6, 9) opt into a full-width row via .ai-card-full. Fills main's full
+   (Step 1 | Step 2, Step 3 | Step 4, Step 5 | Step 6) and the dense step
+   (7) opts into a full-width row via .ai-card-full. Fills main's full
    content width so the rows line up with the heading/banners above (no empty
    strip on the right). */
 .ai-author-stack {
@@ -9990,8 +10528,8 @@ tr.admin-user-row:hover .admin-row-open-hint {
   margin-bottom: 0;
 }
 
-/* Step 8 sits in a half-width column — stack its checkpoint cards instead of
-   squeezing 3 across ~450px. */
+/* Step 6 (movement checkpoints) sits in a half-width column — stack its
+   checkpoint cards instead of squeezing 3 across ~450px. */
 .ai-author-stack > section:not(.ai-card-full) .ai-checkpoint-grid {
   grid-template-columns: 1fr;
 }
@@ -10203,6 +10741,20 @@ tr.admin-user-row:hover .admin-row-open-hint {
   border: 1px solid var(--border);
   background: #0f172a;
   display: block;
+}
+
+/* Replayable demo video in Step 2 (ExerciseAiPage) — the locally selected clip
+   or the exercise's saved demo video (fetched back via GET /files/:id/content),
+   framed like the scan/preview canvas so the card doesn't jump between states. */
+.ai-demo-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-top: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0f172a;
+  display: block;
+  object-fit: contain;
 }
 
 /* Checkpoint marking (ExerciseAiPage) — reuses the existing checkpoint card /
@@ -10484,6 +11036,50 @@ tr.admin-user-row:hover .admin-row-open-hint {
   pointer-events: none;
 }
 
+/* ...but a read-only stack must still PLAY its demo clip: viewing an archived
+   (or history) version's own demo video is the point of opening it, and a
+   <video>'s transport controls can't change any exercise data. Everything else
+   in the stack stays inert. */
+.ai-author-stack.readonly video {
+  pointer-events: auto;
+}
+
+/* Version-history drill-in banner (ExerciseAiPage's isVersionView — the page was
+   opened from the Exercise Library's History panel). Info-toned, not the amber
+   warning tone: inspecting history is a normal read-only action, and the
+   lifecycle bar right below already speaks to the row's status. */
+.ai-version-view-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--primary);
+  border-radius: 12px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.ai-version-view-banner svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.ai-version-view-banner strong {
+  display: block;
+  font-size: 0.88rem;
+}
+
+/* Non-pose version-history clip (see ExerciseAiPage's ai-version-view-clip):
+   .ai-demo-video is a full-column, 16/9 player sized for a card, which is far
+   too large out in the page's main column — cap it here. */
+.ai-version-view-clip {
+  max-width: 460px;
+  margin-bottom: 16px;
+}
+
 .ai-lifecycle-bar {
   display: flex;
   flex-wrap: wrap;
@@ -10517,4 +11113,3 @@ tr.admin-user-row:hover .admin-row-open-hint {
   align-items: center;
   gap: 8px;
 }
-

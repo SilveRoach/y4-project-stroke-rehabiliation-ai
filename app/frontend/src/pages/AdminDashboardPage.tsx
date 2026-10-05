@@ -21,6 +21,7 @@ import type { AdminNavLabel } from "../components/AdminSidebar";
 import { checkHealth, getAdminDashboard, syncScheduleStatuses } from "../services/api";
 import type { AdminDashboardData, HealthStatus } from "../services/api";
 import { useAuth } from "../store/authStore";
+import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import type { RoleDistributionSlice } from "../types";
 import { initialsFromName } from "../utils/displayName";
 
@@ -28,12 +29,19 @@ interface AdminDashboardPageProps {
   onLogout: () => void;
   onNavigateUsers: () => void;
   onNavigateSettings: () => void;
+  // Routes into the shared Exercise Library section (see handleAdminNavigate).
+  onNavigateExerciseLibrary: () => void;
 }
 
-export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettings }: AdminDashboardPageProps) {
+export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettings, onNavigateExerciseLibrary }: AdminDashboardPageProps) {
   const { token, user } = useAuth();
-  const adminDisplayName = user?.displayName || user?.username || "Admin";
+  const adminDisplayName = user?.displayName || user?.username || "ผู้ดูแลระบบ";
   const adminInitials = initialsFromName(adminDisplayName);
+  // Real profile picture for the topbar chrome — same idiom as
+  // AdminSettingsPage/adminUserManagementPage: resolve the logged-in admin's own
+  // picture via useOwnProfilePicture, falling back to the initials badge while it
+  // loads / when none is uploaded / if the fetch fails.
+  const adminAvatarUrl = useOwnProfilePicture();
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<AdminDashboardData | null>(null);
@@ -56,8 +64,10 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
       const result = await syncScheduleStatuses(token, localTodayIso);
       setSyncFeedback({
         type: "success",
-        message: result.message || "Schedule synchronization completed successfully.",
-        details: `Updated ${result.updatedDaysCount} schedule day(s) and ${result.updatedExercisesCount} scheduled exercise(s) (Skipped: ${result.summary.daysSkipped} days, ${result.summary.exercisesSkipped} exercises).`
+        message: result.message || "ซิงก์ตารางฝึกเรียบร้อยแล้ว",
+        details: `อัปเดตวันฝึก ${result.updatedDaysCount} วัน และท่าบริหาร ${result.updatedExercisesCount} รายการ${
+          result.updatedPlansCount > 0 ? ` และปิดแผนที่เลยวันสิ้นสุดแล้ว ${result.updatedPlansCount} แผน` : ""
+        } (ข้ามวันฝึก ${result.summary.daysSkipped} วัน และท่าบริหาร ${result.summary.exercisesSkipped} รายการ)`
       });
       // Refresh dashboard data so stats and logs update immediately
       getAdminDashboard(token).then((data) => setDashboardData(data)).catch(() => {});
@@ -65,7 +75,7 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
       console.error("Failed to sync schedules:", err);
       setSyncFeedback({
         type: "error",
-        message: err?.message || "Failed to synchronize schedules. Please try again."
+        message: err?.message || "ซิงก์ตารางฝึกไม่สำเร็จ กรุณาลองอีกครั้ง"
       });
     } finally {
       setSyncing(false);
@@ -130,9 +140,9 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
     admin: "#8b5cf6"
   };
   const roleLabels: Record<string, string> = {
-    patient: "Patients",
-    therapist: "Therapists",
-    admin: "Admins"
+    patient: "ผู้ป่วย",
+    therapist: "นักกายภาพบำบัด",
+    admin: "ผู้ดูแลระบบ"
   };
 
   const roleDistribution: RoleDistributionSlice[] = dashboardData?.roleDistribution
@@ -142,9 +152,9 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
         color: roleColors[slice.role] || "#8b5cf6"
       }))
     : [
-        { name: "Patients", value: 0, color: "var(--primary)" },
-        { name: "Therapists", value: 0, color: "var(--teal)" },
-        { name: "Admins", value: 0, color: "#8b5cf6" }
+        { name: "ผู้ป่วย", value: 0, color: "var(--primary)" },
+        { name: "นักกายภาพบำบัด", value: 0, color: "var(--teal)" },
+        { name: "ผู้ดูแลระบบ", value: 0, color: "#8b5cf6" }
       ];
 
   const logsToDisplay = dashboardData?.logs ?? [];
@@ -193,6 +203,7 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
         onNavigate={(label: AdminNavLabel) => {
           if (label === "Users") onNavigateUsers();
           if (label === "Settings") onNavigateSettings();
+          if (label === "Exercise Library") onNavigateExerciseLibrary();
         }}
         onLogout={onLogout}
       />
@@ -200,8 +211,8 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Admin Dashboard</h1>
-            <p>System status and platform overview</p>
+            <h1>แดชบอร์ดผู้ดูแลระบบ</h1>
+            <p>สถานะระบบและภาพรวมแพลตฟอร์ม</p>
           </div>
           <div className="therapist-topbar-actions">
             <button
@@ -209,17 +220,19 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
               className="admin-sync-button"
               onClick={handleSyncSchedules}
               disabled={syncing}
-              title="Synchronize schedule day and exercise statuses based on assignment date and current today's date"
+              title="ซิงก์สถานะวันฝึกและท่าบริหารตามวันที่กำหนดและวันที่ปัจจุบัน พร้อมปิดแผนที่เลยวันสิ้นสุด"
             >
               <RefreshCw size={15} className={syncing ? "spin-icon" : ""} />
-              <span>{syncing ? "Syncing Schedules…" : "Sync Schedules"}</span>
+              <span>{syncing ? "กำลังซิงก์ตารางฝึก…" : "ซิงก์ตารางฝึก"}</span>
             </button>
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{adminDisplayName}</strong>
-                <small>System Administrator</small>
+                <small>ผู้ดูแลระบบ</small>
               </div>
-              <span className="avatar-badge admin-avatar">{adminInitials}</span>
+              <span className={`avatar-badge admin-avatar${adminAvatarUrl ? " with-photo" : ""}`}>
+                {adminAvatarUrl ? <img src={adminAvatarUrl} alt={`รูปโปรไฟล์ของ ${adminDisplayName}`} /> : adminInitials}
+              </span>
             </div>
           </div>
         </header>
@@ -245,7 +258,7 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
                 type="button"
                 className="admin-sync-banner-close"
                 onClick={() => setSyncFeedback(null)}
-                aria-label="Dismiss notification"
+                aria-label="ปิดการแจ้งเตือน"
               >
                 ×
               </button>
@@ -254,29 +267,29 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
 
           <div className="summary-card admin-status-card">
             <div className="admin-status-heading">
-              <strong>System status</strong>
+              <strong>สถานะระบบ</strong>
               {!healthLoading && (
                 <span className={`badge-pill ${degraded ? "poor" : "good"}`}>
-                  {degraded ? "Degraded" : "All systems normal"}
+                  {degraded ? "ระบบขัดข้องบางส่วน" : "ระบบทำงานปกติ"}
                 </span>
               )}
             </div>
             <div className="admin-status-grid">
               <StatusRow
                 icon={<Server size={17} />}
-                label="Application server"
+                label="เซิร์ฟเวอร์แอปพลิเคชัน"
                 loading={healthLoading}
                 ok={health?.server === "ok"}
-                okLabel="Reachable"
-                downLabel="Unreachable"
+                okLabel="เชื่อมต่อได้"
+                downLabel="ไม่สามารถเชื่อมต่อได้"
               />
               <StatusRow
                 icon={<Database size={17} />}
-                label="Database"
+                label="ฐานข้อมูล"
                 loading={healthLoading}
                 ok={health?.database === "ok"}
-                okLabel="Connected"
-                downLabel="Unreachable"
+                okLabel="เชื่อมต่อแล้ว"
+                downLabel="ไม่สามารถเชื่อมต่อได้"
               />
             </div>
           </div>
@@ -285,19 +298,19 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
             <div className="summary-card therapist-chart-card admin-log-card">
               <div className="therapist-chart-heading">
                 <div>
-                  <strong>Activity logs</strong>
-                  <p>Recent changes from User Management and Exercise Library</p>
+                  <strong>บันทึกกิจกรรม</strong>
+                  <p>การเปลี่ยนแปลงล่าสุดจากการจัดการผู้ใช้และคลังท่าบริหาร</p>
                 </div>
                 {filteredLogs.length > 0 && (
                   <div className="admin-log-pagination">
                     <span className="admin-log-pagination-label">
-                      {logPage * LOG_PAGE_SIZE + 1}–{Math.min((logPage + 1) * LOG_PAGE_SIZE, filteredLogs.length)} of {filteredLogs.length}
+                      {logPage * LOG_PAGE_SIZE + 1}–{Math.min((logPage + 1) * LOG_PAGE_SIZE, filteredLogs.length)} จาก {filteredLogs.length}
                     </span>
                     <button
                       className="admin-log-pagination-btn"
                       onClick={() => setLogPage((p) => Math.max(0, p - 1))}
                       disabled={logPage === 0}
-                      aria-label="Previous page"
+                      aria-label="หน้าก่อนหน้า"
                     >
                       <ChevronLeft size={15} />
                     </button>
@@ -305,7 +318,7 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
                       className="admin-log-pagination-btn"
                       onClick={() => setLogPage((p) => Math.min(totalLogPages - 1, p + 1))}
                       disabled={logPage >= totalLogPages - 1}
-                      aria-label="Next page"
+                      aria-label="หน้าถัดไป"
                     >
                       <ChevronRight size={15} />
                     </button>
@@ -316,18 +329,18 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
                 <input
                   type="search"
                   className="admin-log-search"
-                  placeholder="Search object name, time, or user…"
+                  placeholder="ค้นหาชื่อรายการ เวลา หรือผู้ใช้…"
                   value={logSearch}
                   onChange={(e) => setLogSearch(e.target.value)}
-                  aria-label="Search activity logs"
+                  aria-label="ค้นหาบันทึกกิจกรรม"
                 />
                 <select
                   className="admin-log-filter-select"
                   value={logTypeFilter}
                   onChange={(e) => setLogTypeFilter(e.target.value)}
-                  aria-label="Filter by type"
+                  aria-label="กรองตามประเภท"
                 >
-                  <option value="all">All types</option>
+                  <option value="all">ทุกประเภท</option>
                   {logTypes.map((type) => (
                     <option key={type} value={type}>{type}</option>
                   ))}
@@ -336,9 +349,9 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
                   className="admin-log-filter-select"
                   value={logTableFilter}
                   onChange={(e) => setLogTableFilter(e.target.value)}
-                  aria-label="Filter by table"
+                  aria-label="กรองตามตาราง"
                 >
-                  <option value="all">All tables</option>
+                  <option value="all">ทุกตาราง</option>
                   {logTables.map((table) => (
                     <option key={table} value={table}>{table}</option>
                   ))}
@@ -348,24 +361,24 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
                 <table className="therapist-table admin-log-table">
                   <thead>
                     <tr>
-                      <th style={{ width: "100px" }}>Type</th>
-                      <th style={{ width: "110px" }}>Table</th>
-                      <th>Object Name</th>
-                      <th style={{ width: "130px" }}>Time</th>
-                      <th style={{ width: "170px" }}>By Who</th>
+                      <th style={{ width: "100px" }}>ประเภท</th>
+                      <th style={{ width: "110px" }}>ตาราง</th>
+                      <th>ชื่อรายการ</th>
+                      <th style={{ width: "130px" }}>เวลา</th>
+                      <th style={{ width: "170px" }}>ผู้ดำเนินการ</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dashboardLoading && !dashboardData ? (
                       <tr>
                         <td colSpan={5} style={{ textAlign: "center", padding: "28px", color: "var(--text-secondary)" }}>
-                          Loading activity logs…
+                          กำลังโหลดบันทึกกิจกรรม…
                         </td>
                       </tr>
                     ) : filteredLogs.length === 0 ? (
                       <tr>
                         <td colSpan={5} style={{ textAlign: "center", padding: "28px", color: "var(--text-secondary)" }}>
-                          {logsToDisplay.length === 0 ? "No activity logs recorded yet." : "No activity logs match your search or filters."}
+                          {logsToDisplay.length === 0 ? "ยังไม่มีบันทึกกิจกรรม" : "ไม่พบบันทึกกิจกรรมที่ตรงกับคำค้นหาหรือตัวกรอง"}
                         </td>
                       </tr>
                     ) : (
@@ -406,8 +419,8 @@ export function AdminDashboardPage({ onLogout, onNavigateUsers, onNavigateSettin
             <div className="summary-card therapist-chart-card">
               <div className="therapist-chart-heading">
                 <div>
-                  <strong>User roles</strong>
-                  <p>Distribution by role</p>
+                  <strong>บทบาทผู้ใช้</strong>
+                  <p>จำนวนผู้ใช้แยกตามบทบาท</p>
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={160}>
@@ -460,7 +473,7 @@ function StatusRow({
       <div>
         <strong>{label}</strong>
         {loading ? (
-          <span className="badge-pill fair">Checking…</span>
+          <span className="badge-pill fair">กำลังตรวจสอบ…</span>
         ) : ok ? (
           <span className="badge-pill good">{okLabel}</span>
         ) : (
@@ -470,4 +483,3 @@ function StatusRow({
     </div>
   );
 }
-

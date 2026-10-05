@@ -6,7 +6,7 @@ import { evaluateDTW } from "./dtwEvaluator";
 import { resolvePoseReference, toPublicReference } from "./poseReference";
 import { computeRepScore } from "./scoreEngine";
 import { buildRealWrongFormExamples, generateSyntheticTrainingSet } from "./syntheticData";
-import { FrameFeature, PoseReference, PoseReferencePublic, PoseRepScoringRequest } from "./poseScoring.types";
+import { FrameFeature, PoseReference, PoseReferencePublic, PoseRepScoringRequest, TestPoseRepScoringRequest } from "./poseScoring.types";
 
 export interface PoseRepScoreResult {
   repNumber: number;
@@ -126,13 +126,10 @@ export async function getPoseReference(
   return { poseReference: reference ? toPublicReference(reference) : null };
 }
 
-// POST /scheduled-exercises/:id/pose-rep-score — score one captured repetition.
-export async function scorePoseRep(
-  patientId: string,
-  scheduledExerciseId: string,
-  isAdmin: boolean,
-  request: PoseRepScoringRequest
-): Promise<{ rep: PoseRepScoreResult }> {
+// Shared per-request validation for BOTH the patient endpoint and the
+// therapist test endpoint: checks the rep payload and normalizes the captured
+// frame sequence.
+function validateRepRequest(request: PoseRepScoringRequest): FrameFeature[] {
   if (!isFiniteNumber(request.repNumber) || request.repNumber < 1) {
     throw new ValidationError('"repNumber" must be a positive integer.');
   }
@@ -146,9 +143,19 @@ export async function scorePoseRep(
   if (!isFiniteNumber(request.peakRom) || request.peakRom < 0) {
     throw new ValidationError('"peakRom" must be a non-negative number of degrees.');
   }
+  return frames;
+}
 
-  const scheduledExercise = await findScheduledExerciseForPatient(patientId, scheduledExerciseId, isAdmin);
-  const reference = loadReference(scheduledExercise);
+// The scoring engine itself (BVE → DTW → K-NN → scoreEngine) against an
+// already-resolved reference — shared by the patient endpoint (reference from
+// the scheduled exercise's library row) and the therapist test endpoint
+// (reference from the request body / library row). `frames` is the output of
+// validateRepRequest above.
+function scoreRepAgainstReference(
+  reference: PoseReference,
+  request: PoseRepScoringRequest,
+  frames: FrameFeature[]
+): { rep: PoseRepScoreResult } {
 
   // BVE: trunk-sway penalty, measured from the rep's baseline trunk point
   // (captured when the FSM entered IN_REP_ACTIVE) — same baseline the import
@@ -222,5 +229,59 @@ export async function scorePoseRep(
       }
     }
   };
+}
+
+// POST /scheduled-exercises/:id/pose-rep-score — score one captured repetition
+// against the reference stored on the patient's scheduled exercise.
+export async function scorePoseRep(
+  patientId: string,
+  scheduledExerciseId: string,
+  isAdmin: boolean,
+  request: PoseRepScoringRequest
+): Promise<{ rep: PoseRepScoreResult }> {
+  const frames = validateRepRequest(request);
+  const scheduledExercise = await findScheduledExerciseForPatient(patientId, scheduledExerciseId, isAdmin);
+  const reference = loadReference(scheduledExercise);
+  return scoreRepAgainstReference(reference, request, frames);
+}
+
+// Reference resolution for a therapist's test run (ExerciseAiPage's "Test
+// exercise"). Prefers the copy carried in the request body — that is the
+// criteria actually ON SCREEN, which may be freshly calibrated and not saved
+// yet — but only when it carries master samples (the sequences DTW/K-NN
+// compare against). Falls back to the exercise_library row's stored reference
+// (when an exerciseId was sent), then to the body copy even without samples
+// (evaluateDTW's documented empty-reference rule: it abstains neutrally).
+async function resolveTestReference(request: TestPoseRepScoringRequest): Promise<PoseReference> {
+  const fromBody = request.poseReference ? resolvePoseReference({ poseReference: request.poseReference }) : null;
+  if (fromBody && fromBody.masterSamples.length > 0) return fromBody;
+
+  if (request.exerciseId) {
+    const row = await prisma.exerciseLibrary.findUnique({
+      where: { id: request.exerciseId },
+      select: { baseCriteria: true }
+    });
+    if (!row) throw new NotFoundError("Exercise not found.");
+    const stored = resolvePoseReference(row.baseCriteria);
+    if (stored && stored.masterSamples.length > 0) return stored;
+  }
+
+  if (fromBody) return fromBody;
+
+  throw new ValidationError(
+    "This exercise has no pose reference criteria to score against — scan a base demo clip (or save the exercise) first."
+  );
+}
+
+// POST /exercises/test-pose-rep-score — therapist-side AI exercise TEST:
+// identical scoring pipeline to scorePoseRep, but with no patient/scheduled-
+// exercise context (the route gates the caller to therapist/admin). This is
+// what gives the test run real scores instead of a local approximation.
+export async function scoreTestPoseRep(
+  request: TestPoseRepScoringRequest
+): Promise<{ rep: PoseRepScoreResult }> {
+  const frames = validateRepRequest(request);
+  const reference = await resolveTestReference(request);
+  return scoreRepAgainstReference(reference, request, frames);
 }
 

@@ -26,7 +26,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
 
     async function fetchPatients() {
       if (!token) {
-        setLoadError("Authentication required.");
+        setLoadError("กรุณาเข้าสู่ระบบ");
         setLoading(false);
         return;
       }
@@ -42,7 +42,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
         const data = (await res.json()) as { patients: PatientListItem[] };
         if (!cancelled) setPatients(data.patients);
       } catch (err) {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Couldn't load patients. Try again.");
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "โหลดรายชื่อผู้ป่วยไม่สำเร็จ กรุณาลองอีกครั้ง");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -63,7 +63,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
     setAssignError(null);
     setAssigningId(patientId);
     if (!token) {
-      setAssignError("Authentication required.");
+      setAssignError("กรุณาเข้าสู่ระบบ");
       setAssigningId(null);
       return;
     }
@@ -77,7 +77,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
 
       if (res.status === 409) {
         const body = await res.json().catch(() => null);
-        setAssignError(body?.error?.message ?? "This patient is already assigned to another therapist.");
+        setAssignError(body?.error?.message ?? "ผู้ป่วยรายนี้มีนักกายภาพบำบัดดูแลอยู่แล้ว");
         // refresh list to reflect new assignment state
         try {
           const refreshed = await fetch(`/api/v1/patients`, { headers: { Authorization: `Bearer ${token}` } });
@@ -106,7 +106,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
       }
       onClose();
     } catch (err) {
-      setAssignError(err instanceof Error ? err.message : "Couldn't assign patient. Please try again.");
+      setAssignError(err instanceof Error ? err.message : "มอบหมายผู้ป่วยไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setAssigningId(null);
     }
@@ -120,7 +120,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
     setAssignError(null);
     setAssigningId(patientId);
     if (!token) {
-      setAssignError("Authentication required.");
+      setAssignError("กรุณาเข้าสู่ระบบ");
       setAssigningId(null);
       return;
     }
@@ -149,7 +149,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
         setPatients(d.patients);
       }
     } catch (err) {
-      setAssignError(err instanceof Error ? err.message : "Couldn't remove patient. Please try again.");
+      setAssignError(err instanceof Error ? err.message : "ยกเลิกการมอบหมายไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setAssigningId(null);
     }
@@ -158,17 +158,16 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="admin-modal assign-patient-modal" role="dialog" aria-label="Add patient">
+      <div className="admin-modal assign-patient-modal" role="dialog" aria-label="เพิ่มผู้ป่วย">
         <div className="therapist-detail-header">
-          <strong>Add Patient</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <strong>เพิ่มผู้ป่วย</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </div>
 
         <p className="assign-patient-subtitle">
-          Search every patient on the server. Assign yourself to a patient who doesn't have a therapist yet, or remove
-          a patient you're currently assigned to.
+          ค้นหารายชื่อผู้ป่วยทั้งหมดในระบบ มอบหมายผู้ป่วยที่ยังไม่มีนักกายภาพบำบัดให้กับคุณ หรือยกเลิกการมอบหมายผู้ป่วยที่คุณดูแลอยู่
         </p>
 
         <div className="therapist-search assign-patient-search">
@@ -176,8 +175,8 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by first or last name…"
-            aria-label="Search patients to assign"
+            placeholder="ค้นหาด้วยชื่อหรือนามสกุล…"
+            aria-label="ค้นหาผู้ป่วยเพื่อมอบหมาย"
             autoFocus
           />
         </div>
@@ -195,17 +194,17 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
 
         <div className="assign-patient-list">
           <div className="assign-patient-header">
-            <span>Patient</span>
-            <span>Status</span>
-            <span>Assigned to</span>
-            <span className="assign-patient-header-action">Action</span>
+            <span>ผู้ป่วย</span>
+            <span>สถานะ</span>
+            <span>ผู้ดูแล</span>
+            <span className="assign-patient-header-action">การดำเนินการ</span>
           </div>
 
-          {loading && <p className="assign-patient-empty">Loading patients…</p>}
+          {loading && <p className="assign-patient-empty">กำลังโหลดรายชื่อผู้ป่วย…</p>}
 
           {!loading && filteredPatients.length === 0 && (
             <p className="assign-patient-empty">
-              {patients.length === 0 ? "No patients exist on the server yet." : "No patients match your search."}
+              {patients.length === 0 ? "ยังไม่มีข้อมูลผู้ป่วยในระบบ" : "ไม่พบผู้ป่วยที่ตรงกับคำค้นหา"}
             </p>
           )}
 
@@ -230,14 +229,14 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
                   </div>
 
                   <span className={`badge-pill ${patient.status === "active" ? "good" : "fair"}`}>
-                    {patient.status === "active" ? "Active" : "Disabled"}
+                    {patient.status === "active" ? "ใช้งาน" : "ปิดใช้งาน"}
                   </span>
 
                   <div className="assign-patient-row-assigned">
                     {isMine ? (
-                      <strong>You</strong>
+                      <strong>คุณ</strong>
                     ) : isTakenByOther ? (
-                      <strong>{patient.assignedTherapistName || "Another therapist"}</strong>
+                      <strong>{patient.assignedTherapistName || "นักกายภาพบำบัดท่านอื่น"}</strong>
                     ) : (
                       <small>—</small>
                     )}
@@ -251,7 +250,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
                         onClick={() => handleUnassign(patient.id)}
                         disabled={!canAssign || busy}
                       >
-                        <UserMinus size={13} /> {busy ? "Removing…" : "Remove"}
+                        <UserMinus size={13} /> {busy ? "กำลังยกเลิก…" : "ยกเลิก"}
                       </button>
                     ) : isUnassigned ? (
                       <button
@@ -260,10 +259,10 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
                         onClick={() => handleAssign(patient.id)}
                         disabled={!canAssign || busy}
                       >
-                        <UserPlus size={13} /> {busy ? "Assigning…" : "Assign"}
+                        <UserPlus size={13} /> {busy ? "กำลังมอบหมาย…" : "มอบหมาย"}
                       </button>
                     ) : (
-                      <span className="badge-pill muted">Taken</span>
+                      <span className="badge-pill muted">มีผู้ดูแลแล้ว</span>
                     )}
                   </div>
                 </div>

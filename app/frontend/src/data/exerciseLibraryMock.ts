@@ -33,6 +33,11 @@ export const exerciseLibrary: ExerciseLibraryItem[] = [
       {
         id: "ex-001-v3",
         versionNumber: 3,
+        name: "Shoulder Flexion Exercise",
+        description: "Raise the affected arm forward to shoulder height, hold, then lower slowly.",
+        movementTracking: "pose",
+        difficultyLevel: "medium",
+        demoVideoFileId: "file-ex-001-demo",
         status: "active",
         baseCriteria: { targetAngleDeg: 90, repetitions: 10, holdSeconds: 5 },
         createdAtLabel: "2 days ago"
@@ -40,6 +45,11 @@ export const exerciseLibrary: ExerciseLibraryItem[] = [
       {
         id: "ex-001-v2",
         versionNumber: 2,
+        name: "Shoulder Flexion Exercise",
+        description: "Raise the affected arm forward to shoulder height, hold, then lower slowly.",
+        movementTracking: "pose",
+        difficultyLevel: "medium",
+        demoVideoFileId: null,
         status: "archived",
         baseCriteria: { targetAngleDeg: 80, repetitions: 10 },
         createdAtLabel: "3 weeks ago"
@@ -47,6 +57,11 @@ export const exerciseLibrary: ExerciseLibraryItem[] = [
       {
         id: "ex-001-v1",
         versionNumber: 1,
+        name: "Shoulder Flexion Exercise",
+        description: "Raise the affected arm forward to shoulder height, hold, then lower slowly.",
+        movementTracking: "pose",
+        difficultyLevel: "easy",
+        demoVideoFileId: null,
         status: "archived",
         baseCriteria: { targetAngleDeg: 80, repetitions: 8 },
         createdAtLabel: "2 months ago"
@@ -77,6 +92,11 @@ export const exerciseLibrary: ExerciseLibraryItem[] = [
       {
         id: "ex-002-v1",
         versionNumber: 1,
+        name: "Wrist Extension Stretch",
+        description: "Gently extend the wrist upward and hold before returning to neutral.",
+        movementTracking: "pose",
+        difficultyLevel: "easy",
+        demoVideoFileId: null,
         status: "draft",
         baseCriteria: { targetAngleDeg: 45, repetitions: 12, holdSeconds: 3 },
         createdAtLabel: "1 day ago"
@@ -107,6 +127,11 @@ export const exerciseLibrary: ExerciseLibraryItem[] = [
       {
         id: "ex-003-v2",
         versionNumber: 2,
+        name: "Grip Strength Trainer",
+        description: "Squeeze and release a virtual object to build grip strength and control.",
+        movementTracking: "virtual_grip",
+        difficultyLevel: "hard",
+        demoVideoFileId: "file-ex-003-demo",
         status: "active",
         baseCriteria: { targetGripStrength: 60, repetitions: 15, holdSeconds: 4 },
         createdAtLabel: "1 week ago"
@@ -114,6 +139,11 @@ export const exerciseLibrary: ExerciseLibraryItem[] = [
       {
         id: "ex-003-v1",
         versionNumber: 1,
+        name: "Grip Strength Trainer",
+        description: "Squeeze and release a virtual object to build grip strength and control.",
+        movementTracking: "virtual_grip",
+        difficultyLevel: "medium",
+        demoVideoFileId: null,
         status: "archived",
         baseCriteria: { targetGripStrength: 50, repetitions: 15 },
         createdAtLabel: "2 months ago"
@@ -143,6 +173,11 @@ export const exerciseLibrary: ExerciseLibraryItem[] = [
       {
         id: "ex-004-v1",
         versionNumber: 1,
+        name: "Balance Reach (legacy)",
+        description: "Reach toward a target while maintaining standing balance. No AI tracking.",
+        movementTracking: "none",
+        difficultyLevel: "medium",
+        demoVideoFileId: null,
         status: "archived",
         baseCriteria: { repetitions: 10 },
         createdAtLabel: "6 months ago"

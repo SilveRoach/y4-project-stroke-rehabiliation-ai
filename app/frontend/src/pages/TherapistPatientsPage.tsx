@@ -43,11 +43,33 @@ function PatientAvatar({ patient }: { patient: AllPatientListItem }) {
 }
 
 const accountFilters: Array<{ key: AccountFilter; label: string }> = [
-  { key: "all", label: "All" },
-  { key: "active", label: "Active" },
-  { key: "inactive", label: "Inactive" },
-  { key: "assigned", label: "Assigned to me" }
+  { key: "all", label: "ทั้งหมด" },
+  { key: "active", label: "ใช้งาน" },
+  { key: "inactive", label: "ไม่ใช้งาน" },
+  { key: "assigned", label: "ที่ฉันดูแล" }
 ];
+
+const conditionLabels: Record<string, string> = {
+  "Ischemic Stroke": "โรคหลอดเลือดสมองชนิดขาดเลือด",
+  "Hemorrhagic Stroke": "โรคหลอดเลือดสมองชนิดเลือดออก",
+  "TIA Recovery": "ฟื้นฟูภาวะสมองขาดเลือดชั่วคราว",
+  "Post-Stroke": "ฟื้นฟูหลังโรคหลอดเลือดสมอง"
+};
+
+function conditionLabel(condition: string): string {
+  return conditionLabels[condition] ?? condition;
+}
+
+function sessionDateLabel(label: string): string {
+  const labels: Record<string, string> = {
+    Today: "วันนี้",
+    Yesterday: "เมื่อวาน",
+    "3 days ago": "3 วันที่แล้ว",
+    "1 week ago": "1 สัปดาห์ที่แล้ว",
+    "No exercise session yet": "ยังไม่มีประวัติการฝึก"
+  };
+  return labels[label] ?? label;
+}
 
 export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: TherapistPatientsPageProps) {
   const { token, user } = useAuth();
@@ -72,7 +94,7 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Couldn't load your patients. Please try again.");
+          setError(err instanceof ApiError ? err.message : "โหลดรายชื่อผู้ป่วยไม่สำเร็จ กรุณาลองอีกครั้ง");
         }
       })
       .finally(() => {
@@ -129,7 +151,7 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
     });
   }, [search, accountFilter, patients, user?.id]);
 
-  const displayName = user?.displayName || user?.username || "Therapist";
+  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
   const ownAvatarUrl = useOwnProfilePicture();
 
   return (
@@ -139,14 +161,14 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Patients</h1>
-            <p>{loading ? "Loading patients…" : `${patients.length} patients in the system`}</p>
+            <h1>ผู้ป่วย</h1>
+            <p>{loading ? "กำลังโหลดรายชื่อผู้ป่วย…" : `ผู้ป่วยในระบบ ${patients.length} ราย`}</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{displayName}</strong>
-                <small>Physical Therapist</small>
+                <small>นักกายภาพบำบัด</small>
               </div>
               <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
                 {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
@@ -170,8 +192,8 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
                   type="search"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search by name, username, phone, or therapist"
-                  aria-label="Search patients by name, username, phone, condition, or therapist"
+                  placeholder="ค้นหาชื่อ ชื่อผู้ใช้ เบอร์โทร หรือผู้ดูแล"
+                  aria-label="ค้นหาผู้ป่วยด้วยชื่อ ชื่อผู้ใช้ เบอร์โทร ภาวะ หรือผู้ดูแล"
                 />
               </label>
               <div className="library-filter-chips">
@@ -192,11 +214,11 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
               <table className="therapist-table">
                 <thead>
                   <tr>
-                    <th>Patient</th>
-                    <th>Assigned to</th>
-                    <th>Account status</th>
-                    <th>Current active plan</th>
-                    <th>Last exercise session</th>
+                    <th>ผู้ป่วย</th>
+                    <th>ผู้ดูแล</th>
+                    <th>สถานะบัญชี</th>
+                    <th>แผนฟื้นฟูที่ใช้งานอยู่</th>
+                    <th>การฝึกล่าสุด</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -204,10 +226,10 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
                     <tr>
                       <td colSpan={5} style={{ textAlign: "center", padding: "24px 0", color: "var(--text-secondary)" }}>
                         {patients.length === 0
-                          ? "No patient accounts have been created yet."
+                          ? "ยังไม่มีบัญชีผู้ป่วยในระบบ"
                           : search.trim()
-                            ? "No patients match your search."
-                            : "No patients match this filter."}
+                            ? "ไม่พบผู้ป่วยที่ตรงกับคำค้นหา"
+                            : "ไม่พบผู้ป่วยที่ตรงกับตัวกรองนี้"}
                       </td>
                     </tr>
                   )}
@@ -228,21 +250,21 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
                           <div>
                             <strong>{patient.name}</strong>
                             <small>
-                              Age {patient.age} · {patient.sessionsCompleted} sessions
+                              อายุ {patient.age} ปี · ฝึกแล้ว {patient.sessionsCompleted} ครั้ง
                             </small>
                           </div>
                         </div>
                       </td>
                       <td>
-                        {patient.assignedTherapistName || <span className="therapist-table-muted">Unassigned</span>}
+                        {patient.assignedTherapistName || <span className="therapist-table-muted">ยังไม่มีผู้ดูแล</span>}
                       </td>
                       <td>
                         <span className={`badge-pill ${patient.status === "active" ? "good" : "fair"}`}>
-                          {patient.status === "active" ? "Active" : patient.status === "suspended" ? "Suspended" : "Inactive"}
+                          {patient.status === "active" ? "ใช้งาน" : patient.status === "suspended" ? "ระงับ" : "ไม่ใช้งาน"}
                         </span>
                       </td>
-                      <td>{patient.condition || "No active plan"}</td>
-                      <td>{patient.lastSessionLabel || "No exercise session yet"}</td>
+                      <td>{patient.condition ? conditionLabel(patient.condition) : "ไม่มีแผนฟื้นฟูที่ใช้งานอยู่"}</td>
+                      <td>{sessionDateLabel(patient.lastSessionLabel || "No exercise session yet")}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -147,6 +147,22 @@ export interface PoseRepScoringRequest {
   baseShoulderWidthNorm?: number | null;
 }
 
+/** Therapist AI-exercise test scoring request (ExerciseAiPage's "Test
+ *  exercise" button → POST /exercises/test-pose-rep-score): the normal rep
+ *  payload plus where to score against — no patient/scheduled exercise exists
+ *  for an authoring test. */
+export interface TestPoseRepScoringRequest extends PoseRepScoringRequest {
+  /** exercise_library row id — fallback reference source when the body copy
+   *  of poseReference is omitted, or carries no master samples. Undefined for
+   *  a brand-new, not-yet-saved exercise. */
+  exerciseId?: string;
+  /** The therapist's ON-SCREEN criteria (full baseCriteria.poseReference
+   *  shape, INCLUDING masterSamples) — possibly not saved yet. Raw JSON from
+   *  the client, parsed through resolvePoseReference() exactly like a stored
+   *  copy. */
+  poseReference?: unknown;
+}
+
 /** Full reference payload — ExerciseLibrary.baseCriteria.poseReference shape. */
 export interface PoseReference extends PoseReferencePublic {
   masterSamples: MasterSample[];

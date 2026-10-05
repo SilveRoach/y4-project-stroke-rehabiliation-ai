@@ -37,7 +37,7 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
 
   const handleConfirm = async () => {
     if (!token) {
-      setUploadError("Please log in again to submit this recording.");
+      setUploadError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อส่งวิดีโอนี้");
       return;
     }
     setUploading(true);
@@ -50,7 +50,7 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
       setUploaded(true);
       window.setTimeout(onConfirm, 500);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Failed to upload this recording. Please try again.");
+      setUploadError(err instanceof Error ? err.message : "อัปโหลดวิดีโอไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setUploading(false);
     }
@@ -60,15 +60,15 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
     <section className="sud-shell">
       <div className="sud-card">
         <header className="sud-header">
-          <p className="eyebrow">Review attempt &middot; ตรวจสอบครั้งนี้</p>
+          <p className="eyebrow">ตรวจสอบผลการฝึกครั้งนี้</p>
           <h1>{attempt.exerciseName}</h1>
           {attempt.exerciseNameTh && <p className="side-name-th">{attempt.exerciseNameTh}</p>}
         </header>
 
         <div className="srr-layout">
           <div className="srr-video-col">
-            <p className="pd-record-attachments-label">Your recording &middot; attempt {attemptNumber} if confirmed</p>
-            <PoseVideoPlayer src={attempt.videoBlobUrl} />
+            <p className="pd-record-attachments-label">วิดีโอของคุณ · ครั้งที่ {attemptNumber} (เมื่อยืนยัน)</p>
+            <PoseVideoPlayer src={attempt.videoBlobUrl} trackingType={attempt.trackingType} />
             <p>
               {attempt.videoFileName} &middot; {attempt.videoSizeLabel}
             </p>
@@ -78,7 +78,7 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
             <div className="srr-score-panel">
               <div className="srr-score-panel-top">
                 <strong className="sud-ai-title">
-                  <Sparkles size={14} /> AI prediction
+                  <Sparkles size={14} /> การประเมินจาก AI
                 </strong>
                 <span className="srr-score-value">{attempt.aiScore}</span>
               </div>
@@ -95,8 +95,8 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
             </div>
             <p className="pd-modal-hint sud-hint">
               {attempt.scoreSource === "pose_average"
-                ? "This is the rounded average of the successful AI-scored repetitions in this recording. Your therapist can still review it and add their own score later."
-                : "This score is a preview — real AI evaluation isn&apos;t wired up for this tracking mode yet. Your therapist can still review this recording and add their own score later."}
+                ? "คะแนนนี้เป็นค่าเฉลี่ยโดยประมาณของจำนวนครั้งที่ AI ประเมินผลสำเร็จจากวิดีโอนี้ นักกายภาพบำบัดยังสามารถตรวจสอบและเพิ่มคะแนนของตนเองได้ภายหลัง"
+                : "คะแนนนี้เป็นเพียงตัวอย่าง — ยังไม่มีการเชื่อมต่อการประเมินด้วย AI สำหรับโหมดติดตามนี้ นักกายภาพบำบัดยังสามารถตรวจสอบวิดีโอนี้และเพิ่มคะแนนของตนเองได้ภายหลัง"}
             </p>
           </div>
         </div>
@@ -111,22 +111,22 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
 
         <div className="sud-actions">
           {uploaded ? (
-            <p className="ps-saved-note">Uploaded &middot; อัปโหลดแล้ว</p>
+            <p className="ps-saved-note">อัปโหลดแล้ว</p>
           ) : uploading ? (
             <button type="button" className="primary-button full-width" disabled>
-              <Loader2 size={16} className="filepicker-spin" /> Uploading&hellip; &middot; กำลังอัปโหลด
+              <Loader2 size={16} className="filepicker-spin" /> กำลังอัปโหลด…
             </button>
           ) : (
             <>
               <button type="button" className="primary-button full-width" onClick={handleConfirm}>
-                <UploadCloud size={16} /> Confirm &amp; upload &middot; ยืนยันและอัปโหลด
+                <UploadCloud size={16} /> ยืนยันและอัปโหลด
               </button>
               <div className="sud-secondary-actions">
                 <button type="button" className="secondary-button" onClick={onRetry}>
-                  <RotateCcw size={14} /> Retry &middot; ลองใหม่
+                  <RotateCcw size={14} /> ลองใหม่
                 </button>
                 <button type="button" className="text-action sud-discard" onClick={onDiscard}>
-                  <Trash2 size={14} /> Discard &middot; ยกเลิก
+                  <Trash2 size={14} /> ยกเลิก
                 </button>
               </div>
             </>

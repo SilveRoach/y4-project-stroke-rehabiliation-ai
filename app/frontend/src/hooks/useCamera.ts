@@ -58,13 +58,13 @@ export function useCamera(active: boolean): UseCameraResult {
     // first time they try accessing a dev server from another device on the LAN.
     if (!window.isSecureContext) {
       setStatus("insecure-context");
-      setErrorMessage("Camera access requires HTTPS (or localhost). Contact your clinic if this persists.");
+      setErrorMessage("การใช้กล้องต้องเชื่อมต่อผ่าน HTTPS (หรือ localhost) หากยังใช้งานไม่ได้ กรุณาติดต่อคลินิก");
       return;
     }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatus("unsupported");
-      setErrorMessage("This browser doesn't support camera access. Try an up-to-date Chrome or Edge.");
+      setErrorMessage("เบราว์เซอร์นี้ไม่รองรับการใช้กล้อง กรุณาใช้ Chrome หรือ Edge เวอร์ชันล่าสุด");
       return;
     }
 
@@ -91,13 +91,13 @@ export function useCamera(active: boolean): UseCameraResult {
         const name = err instanceof DOMException ? err.name : "";
         if (name === "NotAllowedError" || name === "PermissionDeniedError") {
           setStatus("denied");
-          setErrorMessage("Camera access was denied. Allow camera permission in your browser settings, then try again.");
+          setErrorMessage("ไม่ได้รับอนุญาตให้ใช้กล้อง กรุณาอนุญาตการใช้กล้องในการตั้งค่าเบราว์เซอร์แล้วลองอีกครั้ง");
         } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
           setStatus("not-found");
-          setErrorMessage("No camera was found on this device.");
+          setErrorMessage("ไม่พบกล้องในอุปกรณ์นี้");
         } else {
           setStatus("error");
-          setErrorMessage("Couldn't start the camera. Close other apps that might be using it, then try again.");
+          setErrorMessage("เปิดกล้องไม่สำเร็จ กรุณาปิดแอปอื่นที่อาจกำลังใช้กล้องแล้วลองอีกครั้ง");
         }
       });
 

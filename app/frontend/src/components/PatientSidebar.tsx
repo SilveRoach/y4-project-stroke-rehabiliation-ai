@@ -1,5 +1,6 @@
 import { ClipboardList, History, Home, Settings } from "lucide-react";
 import type { ComponentType } from "react";
+import rehabAiImage from "../assets/RehabAIimage.png";
 
 // Shared desktop sidebar for every patient-role page (Home/Today, Progress,
 // History, Settings). Mirrors components/TherapistSidebar.tsx's structure and
@@ -46,9 +47,9 @@ export function PatientSidebar({ activeLabel, onNavigate, onLogout, displayName,
   return (
     <aside className="therapist-sidebar">
       <div className="therapist-brand">
-        <span className="therapist-brand-mark">R</span>
+        <img className="therapist-brand-mark" src={rehabAiImage} alt="ระบบฟื้นฟูผู้ป่วย" />
         <div>
-          <strong>RehabiAI</strong>
+          <strong>ระบบฟื้นฟูผู้ป่วย</strong>
           <small>ผู้ป่วย</small>
         </div>
       </div>

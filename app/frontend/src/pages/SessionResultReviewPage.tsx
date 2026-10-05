@@ -1,54 +1,102 @@
-// Session Result Review page (UI_MOCKUP_PLAN_NEWDB.md §2.7, new page — no prior
-// frontend-design.md section). Mirrors
-// docs/04-design/mockups/session-result-review.html: an exercise switcher (when a
-// session has more than one exercise), an attempt-number chip row per exercise, the
-// AI score/feedback/metrics shown read-only next to an editable PT score/feedback
-// panel, and a "Use AI score" / "Use my score" decision that sets
-// evaluationSource/finalScore. Reached from Patient Detail's per-session
-// "Review ›" action.
-//
-// Real: the PT score/feedback edits and the AI-vs-PT decision persist for real
-// recorded attempts via PATCH /performance-results/:id/scoring (assigned
-// therapist or admin) — see session.service.ts's updateAttemptScoring. Only
-// synthesized/mock fallback attempts (no server row) remain client-side only.
+// Reviews persisted exercise attempts for one schedule day. The selected
+// attempt's recording and AI/PT evaluations come from GET /schedule-days/:id/results;
+// therapist reviews are saved through PATCH /performance-results/:id/scoring.
 
-import { ArrowLeft, Video } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Save, Video } from "lucide-react";
+import { useEffect, useState } from "react";
 import { PoseVideoPlayer } from "../components/PoseVideoPlayer";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { ApiError, getFileContent, getScheduleDayReview, updateAttemptScoring } from "../services/api";
 import { useAuth } from "../store/authStore";
-import { therapistProfile } from "../data/therapistMock";
 import type {
   ExercisePerformanceAttempt,
   SessionExerciseReview,
   SessionReviewData
 } from "../types";
+import type { ScheduleDayReviewData } from "../services/api";
+import { initialsFromName } from "../utils/displayName";
 
 // Maps the real GET /schedule-days/:id/results payload onto the page's
 // SessionExerciseReview/attempt shape. The video comes through as a server
 // files-row id (referenceVideoFileId) — AttemptReview streams it via
 // getFileContent and renders a real <video> player in place of the placeholder.
-function mapRealReviewToExercises(real: any): SessionExerciseReview[] {
-  return (real.exercises ?? []).map((exercise: any) => ({
+function mapRealReviewToExercises(real: ScheduleDayReviewData): SessionExerciseReview[] {
+  return real.exercises.map((exercise) => ({
     id: exercise.id,
     scheduledExerciseId: exercise.scheduledExerciseId,
     exerciseName: exercise.exerciseName,
     exerciseVersionLabel: exercise.exerciseVersionLabel,
-    attempts: (exercise.attempts ?? []).map((attempt: any) => ({
+    description: exercise.description,
+    difficultyLevel: exercise.difficultyLevel,
+    movementTracking: exercise.movementTracking,
+    baseCriteria: exercise.baseCriteria,
+    targetValueLabel: exercise.targetValueLabel,
+    therapistInstruction: exercise.therapistInstruction,
+    attempts: exercise.attempts.map((attempt) => ({
       id: attempt.id,
       attemptNumber: attempt.attemptNumber,
+      completedAtIso: attempt.completedAtIso,
       referenceVideo: null,
       referenceVideoFileId: attempt.referenceVideoFileId ?? null,
       aiScore: attempt.aiScore ?? undefined,
       aiFeedback: attempt.aiFeedback ?? undefined,
+      aiMetrics: attempt.aiMetrics ?? undefined,
+      aiEvaluatedAtLabel: attempt.aiEvaluatedAtIso
+        ? new Date(attempt.aiEvaluatedAtIso).toLocaleString("th-TH")
+        : undefined,
       ptScore: attempt.ptScore ?? undefined,
       ptFeedback: attempt.ptFeedback ?? undefined,
       finalScore: attempt.finalScore ?? undefined,
-      evaluationSource: attempt.evaluationSource ?? undefined
+      evaluationSource: attempt.evaluationSource ?? undefined,
+      currentScore: attempt.currentScore,
+      currentScoreSource: attempt.currentScoreSource,
+      therapistReviewed: attempt.therapistReviewed
     }))
   }));
+}
+
+function exerciseDifficultyLabel(value: string): string {
+  const labels: Record<string, string> = { easy: "ง่าย", medium: "ปานกลาง", moderate: "ปานกลาง", hard: "ยาก" };
+  return labels[value.toLowerCase()] ?? value;
+}
+
+function movementTrackingLabel(value: string): string {
+  if (value === "pose") return "ติดตามท่าทาง";
+  if (value === "virtual_grip") return "วัดแรงบีบมือ";
+  if (value === "none") return "ไม่ใช้ AI ติดตาม";
+  return value.replace(/_/g, " ");
+}
+
+function criterionLabel(value: string): string {
+  const labels: Record<string, string> = {
+    "target angle": "มุมเป้าหมาย",
+    "target angle (degrees)": "มุมเป้าหมาย (องศา)",
+    "target grip strength": "แรงบีบมือเป้าหมาย",
+    "grip strength": "แรงบีบมือ",
+    repetitions: "จำนวนครั้ง",
+    reps: "จำนวนครั้ง",
+    "hold duration": "ระยะเวลาค้างไว้",
+    "hold duration (seconds)": "ระยะเวลาค้างไว้ (วินาที)"
+  };
+  return labels[value.trim().toLowerCase()] ?? value;
+}
+
+function reviewDayLabel(value: string): string {
+  return value.replace(/^day\s+(\d+)$/i, "วันที่ $1");
+}
+
+function formatReviewDateTime(value: string): string {
+  return new Date(value).toLocaleString("th-TH");
+}
+
+function formatReviewDate(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("th-TH", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
 }
 
 interface SessionResultReviewPageProps {
@@ -56,154 +104,202 @@ interface SessionResultReviewPageProps {
   onBack: () => void;
   onLogout: () => void;
   onNavigate: (label: TherapistNavLabel) => void;
-  // Scheduled-exercise id to focus when the review was opened from a specific
-  // exercise (PatientDetailPage's per-exercise "Review" action); undefined =
-  // whole-day review, starting on the first exercise.
+  // Scheduled-exercise id to focus when this review was opened for one exercise;
+  // undefined = whole-day review.
   focusExerciseId?: string;
 }
 
 export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, focusExerciseId }: SessionResultReviewPageProps) {
-  const { token } = useAuth();
-  const [exercises, setExercises] = useState<SessionExerciseReview[]>(review.exercises);
-  const [selectedExerciseId, setSelectedExerciseId] = useState<string | undefined>(() => {
-    return review.exercises.find((exercise) => exercise.id === focusExerciseId)?.id ?? review.exercises[0]?.id;
+  const { token, user } = useAuth();
+  const [exercises, setExercises] = useState<SessionExerciseReview[]>([]);
+  const [sessionDetails, setSessionDetails] = useState({
+    planName: review.planName ?? "",
+    scheduledDateIso: review.scheduledDateIso ?? ""
   });
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | undefined>();
+  const [loadingReview, setLoadingReview] = useState(true);
 
-  // Real attempts: the review payload handed in from App.tsx is mock/synthesized
-  // (data/sessionReviewMock.ts). Fetch the REAL exercise_performance_results for
-  // this schedule day and swap them in when they exist — mock data stays as the
-  // fallback for seeded days that never had a real recorded attempt. The real
-  // attempt ids are recorded in persistedAttemptIds: only those can be scored
-  // for real (PATCH /performance-results/:id/scoring) — mock/synthesized
-  // attempts have no server row, so their edits stay client-side.
+  // Only persisted attempts are rendered and can be reviewed.
   const [persistedAttemptIds, setPersistedAttemptIds] = useState<Set<string>>(new Set());
   const [scoringStatus, setScoringStatus] = useState<{ tone: "saved" | "error"; message: string } | null>(null);
+  const [ptScoreDraft, setPtScoreDraft] = useState("");
+  const [ptFeedbackDraft, setPtFeedbackDraft] = useState("");
+  const [savingReview, setSavingReview] = useState(false);
+  const [changingScoreSource, setChangingScoreSource] = useState(false);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setLoadingReview(false);
+      setScoringStatus({ tone: "error", message: "กรุณาเข้าสู่ระบบอีกครั้งเพื่อตรวจสอบผลการฝึก" });
+      return;
+    }
     let cancelled = false;
+    setLoadingReview(true);
     getScheduleDayReview(token, review.sessionId)
       .then((res) => {
         if (cancelled) return;
         const mapped = mapRealReviewToExercises(res.review);
-        if (mapped.length > 0) {
-          setExercises(mapped);
-          // Same focus rule as the initial state: the requested exercise when
-          // present, else the day's first exercise.
-          setSelectedExerciseId(mapped.find((exercise) => exercise.id === focusExerciseId)?.id ?? mapped[0].id);
-          setPersistedAttemptIds(
-            new Set(mapped.flatMap((exercise) => exercise.attempts.map((attempt) => attempt.id)))
-          );
+        setExercises(mapped);
+        setSessionDetails({
+          planName: res.review.planName,
+          scheduledDateIso: res.review.scheduledDateIso
+        });
+        setSelectedExerciseId(mapped.find((exercise) => exercise.id === focusExerciseId)?.id ?? mapped[0]?.id);
+        setPersistedAttemptIds(new Set(mapped.flatMap((exercise) => exercise.attempts.map((attempt) => attempt.id))));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setExercises([]);
+          setScoringStatus({
+            tone: "error",
+            message: err instanceof ApiError ? err.message : "โหลดผลการฝึกไม่สำเร็จ"
+          });
         }
       })
-      .catch(() => {
-        // Not found / not permitted / no real attempts — keep the fallback data.
+      .finally(() => {
+        if (!cancelled) setLoadingReview(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [token, review.sessionId]);
+  }, [token, review.sessionId, focusExerciseId]);
 
-  const [selectedAttemptByExercise, setSelectedAttemptByExercise] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    for (const exercise of review.exercises) {
-      if (exercise.attempts[0]) initial[exercise.id] = exercise.attempts[0].id;
-    }
-    return initial;
-  });
+  const [selectedAttemptByExercise, setSelectedAttemptByExercise] = useState<Record<string, string>>({});
 
   const selectedExercise = exercises.find((exercise) => exercise.id === selectedExerciseId) ?? exercises[0];
   const selectedAttemptId = selectedExercise ? selectedAttemptByExercise[selectedExercise.id] : undefined;
   const selectedAttempt = selectedExercise?.attempts.find((attempt) => attempt.id === selectedAttemptId) ?? selectedExercise?.attempts[0];
+  const selectedAttemptReviewed = selectedAttempt?.therapistReviewed ??
+    (selectedAttempt?.ptScore != null || selectedAttempt?.ptFeedback != null);
+  const focusedSession = Boolean(focusExerciseId);
 
-  // Applies a scoring patch locally, and persists it to
-  // PATCH /performance-results/:id/scoring when the attempt is a real server
-  // row (mock/synthesized fallback attempts stay client-side only). PT
-  // edits are debounced per attempt by the caller (the inputs fire per
-  // keystroke — debounce keeps request volume sane); the final-score decision
-  // buttons persist immediately.
-  const updateAttempt = (exerciseId: string, attemptId: string, patch: Partial<ExercisePerformanceAttempt>) => {
-    setExercises((current) =>
-      current.map((exercise) =>
-        exercise.id !== exerciseId
-          ? exercise
-          : {
-              ...exercise,
-              attempts: exercise.attempts.map((attempt) =>
-                attempt.id !== attemptId ? attempt : { ...attempt, ...patch }
-              )
-            }
-      )
-    );
+  useEffect(() => {
+    if (!selectedAttempt) return;
+    setPtScoreDraft(selectedAttempt?.ptScore == null ? "" : String(selectedAttempt.ptScore));
+    setPtFeedbackDraft(selectedAttempt?.ptFeedback ?? "");
+    setScoringStatus(null);
+  }, [selectedAttempt?.id]);
 
-    const scoringPatch: Record<string, unknown> = {};
-    for (const key of ["ptScore", "ptFeedback", "finalScore", "evaluationSource"] as const) {
-      if (key in patch) scoringPatch[key] = patch[key];
+  const saveTherapistReview = async () => {
+    if (!selectedAttempt || !selectedExercise || !token || !persistedAttemptIds.has(selectedAttempt.id)) {
+      setScoringStatus({ tone: "error", message: "ไม่สามารถบันทึกผลการฝึกนี้ได้" });
+      return;
     }
-    if (Object.keys(scoringPatch).length === 0) return;
-    if (!token || !persistedAttemptIds.has(attemptId)) return;
+    const score = ptScoreDraft.trim() === "" ? null : Number(ptScoreDraft);
+    if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100)) {
+      setScoringStatus({ tone: "error", message: "กรุณากรอกคะแนนประเมินตั้งแต่ 0 ถึง 100 หรือเว้นว่างไว้" });
+      return;
+    }
 
-    setScoringStatus({ tone: "saved", message: "Saving…" });
-    window.clearTimeout(scoringTimerRef.current);
-    scoringTimerRef.current = window.setTimeout(() => {
-      updateAttemptScoring(token, attemptId, scoringPatch)
-        .then(() => setScoringStatus({ tone: "saved", message: "Scoring saved" }))
-        .catch((err) => {
-          setScoringStatus({
-            tone: "error",
-            message: err instanceof ApiError ? err.message : "Couldn't save your scoring. Please try again."
-          });
-        });
-    }, 600);
+    setSavingReview(true);
+    setScoringStatus({ tone: "saved", message: "กำลังบันทึกผลการตรวจสอบ…" });
+    try {
+      const response = await updateAttemptScoring(token, selectedAttempt.id, {
+        ptScore: score,
+        ptFeedback: ptFeedbackDraft.trim()
+      });
+      setExercises((current) =>
+        current.map((exercise) => ({
+          ...exercise,
+          attempts: exercise.attempts.map((attempt) =>
+            attempt.id === response.attempt.id
+              ? {
+                  ...attempt,
+                  ptScore: response.attempt.ptScore ?? undefined,
+                  ptFeedback: response.attempt.ptFeedback ?? undefined,
+                  finalScore: response.attempt.finalScore ?? undefined,
+                  evaluationSource: response.attempt.evaluationSource ?? undefined,
+                  currentScore: response.attempt.currentScore,
+                  currentScoreSource: response.attempt.currentScoreSource,
+                  therapistReviewed: response.attempt.therapistReviewed
+                }
+              : attempt
+          )
+        }))
+      );
+      setScoringStatus({ tone: "saved", message: "บันทึกผลการตรวจสอบแล้ว" });
+    } catch (err) {
+      setScoringStatus({
+        tone: "error",
+        message: err instanceof ApiError ? err.message : "บันทึกผลการตรวจสอบไม่สำเร็จ กรุณาลองอีกครั้ง"
+      });
+    } finally {
+      setSavingReview(false);
+    }
   };
 
-  const useAiScore = (exerciseId: string, attempt: ExercisePerformanceAttempt) => {
-    if (attempt.aiScore == null) return;
-    updateAttempt(exerciseId, attempt.id, { finalScore: attempt.aiScore, evaluationSource: "ai" });
-  };
+  const selectGradingScore = async (source: "ai" | "pt") => {
+    if (!selectedAttempt || !token || !persistedAttemptIds.has(selectedAttempt.id)) return;
+    if (source === "ai" && selectedAttempt.aiScore == null) return;
+    if (source === "pt" && selectedAttempt.ptScore == null) return;
 
-  const useMyScore = (exerciseId: string, attempt: ExercisePerformanceAttempt) => {
-    if (attempt.ptScore == null) return;
-    updateAttempt(exerciseId, attempt.id, { finalScore: attempt.ptScore, evaluationSource: "pt" });
+    setChangingScoreSource(true);
+    setScoringStatus({ tone: "saved", message: "กำลังบันทึกคะแนนที่ใช้ประเมิน…" });
+    try {
+      const response = await updateAttemptScoring(token, selectedAttempt.id, { evaluationSource: source });
+      setExercises((current) =>
+        current.map((exercise) => ({
+          ...exercise,
+          attempts: exercise.attempts.map((attempt) =>
+            attempt.id === response.attempt.id
+              ? {
+                  ...attempt,
+                  finalScore: response.attempt.finalScore ?? undefined,
+                  evaluationSource: response.attempt.evaluationSource ?? undefined,
+                  currentScore: response.attempt.currentScore,
+                  currentScoreSource: response.attempt.currentScoreSource
+                }
+              : attempt
+          )
+        }))
+      );
+      setScoringStatus({ tone: "saved", message: "บันทึกการเลือกคะแนนที่ใช้ประเมินแล้ว" });
+    } catch (err) {
+      setScoringStatus({
+        tone: "error",
+        message: err instanceof ApiError ? err.message : "อัปเดตคะแนนที่ใช้ประเมินไม่สำเร็จ กรุณาลองอีกครั้ง"
+      });
+    } finally {
+      setChangingScoreSource(false);
+    }
   };
-
-  // Debounce handle for PT-scoring persistence (see updateAttempt).
-  const scoringTimerRef = useRef<number | undefined>(undefined);
 
   return (
     <section className="therapist-shell">
-      <TherapistSidebar activeLabel="Patients" onNavigate={onNavigate} onLogout={onLogout} />
+      <TherapistSidebar activeLabel="Sessions" onNavigate={onNavigate} onLogout={onLogout} />
 
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Session Result Review</h1>
-            <p>
-              {review.patientName} &middot; {review.dateLabel} &middot; {review.dayLabel}
-            </p>
+            <h1>ตรวจสอบผลการฝึก</h1>
+            <p>{review.patientName} &middot; {sessionDetails.planName || reviewDayLabel(review.dayLabel)}</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
-                <strong>{therapistProfile.displayName}</strong>
-                <small>{therapistProfile.title}</small>
+                <strong>{user?.displayName || user?.username || "นักกายภาพบำบัด"}</strong>
+                <small>นักกายภาพบำบัด</small>
               </div>
-              <span className="avatar-badge">{therapistProfile.initials}</span>
+              <span className="avatar-badge">{initialsFromName(user?.displayName || user?.username || "นักกายภาพบำบัด")}</span>
             </div>
           </div>
         </header>
 
-        <main className="therapist-main">
+        <main className="therapist-main srr-page-main">
           <button type="button" className="text-action pd-back-link" onClick={onBack}>
-            <ArrowLeft size={14} /> Back to patient
+            <ArrowLeft size={14} /> กลับ
           </button>
 
-          {exercises.length === 0 ? (
-            <p className="srr-empty-note">No exercises were attempted this session.</p>
+          {loadingReview ? (
+            <p className="srr-empty-note" role="status">กำลังโหลดผลการฝึก…</p>
+          ) : exercises.length === 0 ? (
+            <div className="summary-card" role={scoringStatus?.tone === "error" ? "alert" : undefined}>
+              <p className="srr-empty-note">{scoringStatus?.message ?? "ไม่พบผลการฝึกที่ส่งมาสำหรับรอบนี้"}</p>
+            </div>
           ) : (
             selectedExercise && (
               <>
-                {exercises.length > 1 && (
+                {!focusedSession && exercises.length > 1 && (
                   <div className="srr-exercise-tabs">
                     {exercises.map((exercise) => (
                       <button
@@ -219,7 +315,7 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
                   </div>
                 )}
 
-                {selectedExercise.attempts.length > 1 && (
+                {!focusedSession && selectedExercise.attempts.length > 1 && (
                   <div className="srr-attempt-chips">
                     {selectedExercise.attempts.map((attempt) => (
                       <button
@@ -230,26 +326,48 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
                           setSelectedAttemptByExercise((current) => ({ ...current, [selectedExercise.id]: attempt.id }))
                         }
                       >
-                        Attempt {attempt.attemptNumber}
+                        ครั้งที่ {attempt.attemptNumber}
                       </button>
                     ))}
                   </div>
                 )}
 
                 {selectedAttempt && (
-                  <AttemptReview
-                    attempt={selectedAttempt}
-                    token={token}
-                    onUpdate={(patch) => updateAttempt(selectedExercise.id, selectedAttempt.id, patch)}
-                    onUseAiScore={() => useAiScore(selectedExercise.id, selectedAttempt)}
-                    onUseMyScore={() => useMyScore(selectedExercise.id, selectedAttempt)}
-                  />
+                  <>
+                    <div className="summary-card srr-session-details">
+                      <div>
+                        <strong>{review.patientName}</strong>
+                        <span>{selectedExercise.exerciseName}</span>
+                      </div>
+                      <span>
+                        {selectedAttempt.completedAtIso
+                          ? formatReviewDateTime(selectedAttempt.completedAtIso)
+                          : sessionDetails.scheduledDateIso
+                            ? formatReviewDate(sessionDetails.scheduledDateIso)
+                            : review.dateLabel}
+                        {sessionDetails.planName ? ` · ${sessionDetails.planName}` : ""}
+                        {` · ${reviewDayLabel(review.dayLabel)}`}
+                      </span>
+                      <span className={`badge-pill ${selectedAttemptReviewed ? "good" : "fair"}`}>
+                        {selectedAttemptReviewed ? "ตรวจสอบแล้ว" : "รอตรวจสอบ"}
+                      </span>
+                    </div>
+                    <AttemptReview
+                      attempt={selectedAttempt}
+                      exercise={selectedExercise}
+                      token={token}
+                      ptScoreDraft={ptScoreDraft}
+                      ptFeedbackDraft={ptFeedbackDraft}
+                      onPtScoreChange={setPtScoreDraft}
+                      onPtFeedbackChange={setPtFeedbackDraft}
+                      onSave={saveTherapistReview}
+                      saving={savingReview}
+                      onSelectGradingScore={selectGradingScore}
+                      changingScoreSource={changingScoreSource}
+                    />
+                  </>
                 )}
 
-                {/* PT-scoring persistence feedback — "Saved" after the debounced
-                    PATCH resolves, or the API's error message if it fails. Only
-                    real (server-persisted) attempts can be saved; synthesized
-                    fallback attempts are local-only. */}
                 {scoringStatus && (
                   <p
                     className="pd-modal-hint"
@@ -270,19 +388,36 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
 
 function AttemptReview({
   attempt,
+  exercise,
   token,
-  onUpdate,
-  onUseAiScore,
-  onUseMyScore
+  ptScoreDraft,
+  ptFeedbackDraft,
+  onPtScoreChange,
+  onPtFeedbackChange,
+  onSave,
+  saving,
+  onSelectGradingScore,
+  changingScoreSource
 }: {
   attempt: ExercisePerformanceAttempt;
+  exercise: SessionExerciseReview;
   token?: string | null;
-  onUpdate: (patch: Partial<ExercisePerformanceAttempt>) => void;
-  onUseAiScore: () => void;
-  onUseMyScore: () => void;
+  ptScoreDraft: string;
+  ptFeedbackDraft: string;
+  onPtScoreChange: (value: string) => void;
+  onPtFeedbackChange: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  onSelectGradingScore: (source: "ai" | "pt") => void;
+  changingScoreSource: boolean;
 }) {
-  const finalLabel =
-    attempt.evaluationSource === "pt" ? "PT-reviewed" : attempt.evaluationSource === "manual" ? "Manual" : "AI-scored";
+  const therapistScoreIsActive =
+    (attempt.evaluationSource === "pt" || attempt.evaluationSource === "manual") &&
+    attempt.ptScore != null;
+  const currentScore = attempt.currentScore ??
+    (therapistScoreIsActive ? attempt.ptScore ?? attempt.finalScore : attempt.aiScore ?? attempt.finalScore);
+  const currentSource = currentScore == null ? "ไม่มีคะแนน" : therapistScoreIsActive ? "นักกายภาพบำบัด" : "AI";
+  const hasTherapistReview = attempt.therapistReviewed ?? (attempt.ptScore != null || attempt.ptFeedback != null);
 
   // Stream the patient's recorded attempt video: the real attempt carries a
   // server files-row id (referenceVideoFileId) — fetch the bytes via the auth'd
@@ -320,33 +455,72 @@ function AttemptReview({
   const videoLabel = attempt.referenceVideo?.fileName
     ? attempt.referenceVideo.fileName
     : videoUrl
-      ? "Patient's recorded attempt"
+      ? "วิดีโอการฝึกของผู้ป่วย"
       : videoError
-        ? "Couldn't load the patient's recording"
-        : "No reference video attached yet";
+        ? "โหลดวิดีโอการฝึกของผู้ป่วยไม่สำเร็จ"
+        : "ยังไม่มีวิดีโอแนบ";
 
   return (
     <div className="srr-layout">
-      <div className="srr-video-col">
-        <p className="pd-record-attachments-label">Patient recording · วิดีโอของผู้ป่วย</p>
-        {videoUrl ? (
-          <PoseVideoPlayer src={videoUrl} />
-        ) : (
-          <div className="srr-video-placeholder">
-            {videoError ? null : <Video size={26} />}
+      <div className="srr-main-column">
+        <div className="srr-video-col">
+          <p className="pd-record-attachments-label">วิดีโอการฝึกของผู้ป่วย</p>
+          {videoUrl ? (
+            <PoseVideoPlayer
+              src={videoUrl}
+              className="srr-review-video"
+              trackingType={exercise.movementTracking}
+            />
+          ) : (
+            <div className="srr-video-placeholder">
+              {videoError ? null : <Video size={26} />}
+            </div>
+          )}
+          <p>{videoLabel}</p>
+        </div>
+
+        <section className="summary-card srr-exercise-info">
+          <div className="srr-exercise-info-heading">
+            <strong>ข้อมูลท่าบริหาร</strong>
+            {exercise.exerciseVersionLabel && <span>{exercise.exerciseVersionLabel}</span>}
           </div>
-        )}
-        <p>{videoLabel}</p>
+          {exercise.description && <p>{exercise.description}</p>}
+          <div className="srr-exercise-info-fields">
+            {exercise.difficultyLevel && (
+              <span>ระดับความยาก: <strong>{exerciseDifficultyLabel(exercise.difficultyLevel)}</strong></span>
+            )}
+            {exercise.movementTracking && (
+              <span>การติดตามการเคลื่อนไหว: <strong>{movementTrackingLabel(exercise.movementTracking)}</strong></span>
+            )}
+            {exercise.targetValueLabel && (
+              <span>เป้าหมาย: <strong>{exercise.targetValueLabel}</strong></span>
+            )}
+            {exercise.baseCriteria?.map((criterion) => (
+              <span key={criterion.label}>{criterionLabel(criterion.label)}: <strong>{criterion.value}</strong></span>
+            ))}
+          </div>
+          {exercise.therapistInstruction && (
+            <p><strong>คำแนะนำ:</strong> {exercise.therapistInstruction}</p>
+          )}
+        </section>
       </div>
 
-      <div>
+      <aside className="srr-sidebar">
+        <section className="summary-card srr-current-score">
+          <span>คะแนนปัจจุบัน</span>
+          <strong>{currentScore ?? "—"}</strong>
+          <span className={`pd-session-source ${therapistScoreIsActive ? "pt_reviewed" : "ai"}`}>
+            {currentScore == null ? "ไม่มีคะแนน" : currentSource}
+          </span>
+        </section>
+
         <div className="srr-score-grid">
-          <div className="srr-score-panel">
+          <div className="srr-score-panel srr-ai-panel">
             <div className="srr-score-panel-top">
-              <strong>AI score</strong>
+              <strong>คะแนนจาก AI</strong>
               <span className="srr-score-value">{attempt.aiScore ?? "—"}</span>
             </div>
-            {attempt.aiFeedback && <p>{attempt.aiFeedback}</p>}
+            <p>{attempt.aiFeedback || "ไม่มีข้อเสนอแนะจาก AI สำหรับการฝึกครั้งนี้"}</p>
             {attempt.aiMetrics && attempt.aiMetrics.length > 0 && (
               <div className="srr-metrics-list">
                 {attempt.aiMetrics.map((metric) => (
@@ -356,59 +530,71 @@ function AttemptReview({
                 ))}
               </div>
             )}
-            {attempt.aiEvaluatedAtLabel && <p className="small">Evaluated {attempt.aiEvaluatedAtLabel}</p>}
+            {attempt.aiEvaluatedAtLabel && <p className="small">AI ประเมินเมื่อ {attempt.aiEvaluatedAtLabel}</p>}
           </div>
 
-          <div className="srr-score-panel">
+          <div className="srr-score-panel srr-therapist-panel">
             <div className="srr-score-panel-top">
-              <strong>Your score (PT)</strong>
+              <strong>ผลประเมินจากนักกายภาพบำบัด {hasTherapistReview ? "· ตรวจสอบแล้ว" : "· รอตรวจสอบ"}</strong>
               <input
                 className="srr-score-input"
-                value={attempt.ptScore ?? ""}
-                onChange={(event) => {
-                  const raw = event.target.value;
-                  onUpdate({ ptScore: raw === "" ? undefined : Number(raw) });
-                }}
+                value={ptScoreDraft}
+                onChange={(event) => onPtScoreChange(event.target.value)}
                 inputMode="numeric"
+                min={0}
+                max={100}
+                type="number"
                 placeholder="—"
+                aria-label="คะแนนประเมินจากนักกายภาพบำบัดตั้งแต่ 0 ถึง 100"
+                disabled={saving || changingScoreSource}
               />
             </div>
             <textarea
-              value={attempt.ptFeedback ?? ""}
-              onChange={(event) => onUpdate({ ptFeedback: event.target.value })}
-              placeholder="Add your notes for this attempt..."
+              value={ptFeedbackDraft}
+              onChange={(event) => onPtFeedbackChange(event.target.value)}
+              placeholder="เพิ่มข้อเสนอแนะจากนักกายภาพบำบัดสำหรับการฝึกครั้งนี้..."
+              aria-label="ข้อเสนอแนะจากนักกายภาพบำบัด"
+              disabled={saving || changingScoreSource}
             />
           </div>
         </div>
 
         <div className="srr-decision-bar">
-          <span>Final score used for this attempt:</span>
-          <div className="srr-decision-actions">
-            <button
-              type="button"
-              className={`secondary-button ${attempt.evaluationSource === "ai" ? "active" : ""}`}
-              onClick={onUseAiScore}
-              disabled={attempt.aiScore == null}
-            >
-              Use AI score {attempt.aiScore != null ? `(${attempt.aiScore})` : ""}
-            </button>
-            <button
-              type="button"
-              className={`secondary-button ${attempt.evaluationSource === "pt" ? "active" : ""}`}
-              onClick={onUseMyScore}
-              disabled={attempt.ptScore == null}
-            >
-              Use my score {attempt.ptScore != null ? `(${attempt.ptScore})` : ""}
-            </button>
+          <strong>คะแนนที่ใช้ประเมิน</strong>
+          <div
+            className="srr-score-source-options"
+            data-selected={therapistScoreIsActive ? "pt" : "ai"}
+            role="radiogroup"
+            aria-label="คะแนนที่ใช้ประเมิน"
+          >
+            <label>
+              <input
+                type="radio"
+                name={`grading-score-${attempt.id}`}
+                value="ai"
+                checked={!therapistScoreIsActive}
+                onChange={() => onSelectGradingScore("ai")}
+                disabled={attempt.aiScore == null || saving || changingScoreSource}
+              />
+              <span>คะแนนจาก AI{attempt.aiScore != null ? ` (${attempt.aiScore})` : ""}</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name={`grading-score-${attempt.id}`}
+                value="pt"
+                checked={therapistScoreIsActive}
+                onChange={() => onSelectGradingScore("pt")}
+                disabled={attempt.ptScore == null || saving || changingScoreSource}
+              />
+              <span>คะแนนจากนักกายภาพบำบัด{attempt.ptScore != null ? ` (${attempt.ptScore})` : ""}</span>
+            </label>
           </div>
         </div>
-
-        {attempt.finalScore != null && (
-          <p className="srr-current-final">
-            Currently: <strong>{attempt.finalScore}</strong> &middot; {finalLabel}
-          </p>
-        )}
-      </div>
+        <button type="button" className="primary-button srr-save-review" onClick={onSave} disabled={saving || changingScoreSource}>
+          <Save size={14} /> {saving ? "กำลังบันทึก…" : hasTherapistReview ? "อัปเดตผลประเมิน" : "ส่งผลประเมิน"}
+        </button>
+      </aside>
     </div>
   );
 }

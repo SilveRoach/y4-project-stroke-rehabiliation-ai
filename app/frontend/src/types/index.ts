@@ -237,11 +237,18 @@ export interface ExerciseBaseCriteria {
 
 // One row in an exercise family's version history (newdb.txt's exercise_library,
 // grouped by parent_exercise_id). Lighter-weight than ExerciseLibraryItem — just
-// enough to render the History panel's version list.
+// enough to render the History panel's version list AND, on click, that old
+// version's own read-only detail view (name/description/tracking/demo video can
+// differ per version, so they come from the row itself).
 export interface ExerciseVersionSummary {
   id: string;
   versionNumber: number;
   status: ExerciseLibraryStatus;
+  name: string;
+  description: string;
+  movementTracking: ExerciseTrackingType;
+  difficultyLevel: ExerciseLibraryDifficulty;
+  demoVideoFileId: string | null;
   baseCriteria: ExerciseBaseCriteria;
   createdAtLabel: string;
 }
@@ -363,6 +370,20 @@ export interface TherapistSessionLogEntry extends SessionHistoryEntry {
   rehabilitationPlanId: string;
   rehabilitationPlanName: string;
   patientAvatarInitials: string;
+}
+
+export interface TherapistExerciseSessionEntry extends TherapistSessionLogEntry {
+  scheduledExerciseId: string;
+  exerciseLibraryId: string;
+  performanceResultId: string;
+  exerciseName: string;
+  exerciseVersionLabel: string;
+  dateIso: string;
+  completedAtIso: string;
+  aiScore: number | null;
+  currentScore: number | null;
+  currentScoreSource: EvaluationSource | null;
+  reviewed: boolean;
 }
 
 // Matches newdb.txt's patient_rehabilitation_plans_status enum exactly (draft/
@@ -519,6 +540,7 @@ export type EvaluationDecisionSource = "ai" | "pt" | "manual";
 export interface ExercisePerformanceAttempt {
   id: string;
   attemptNumber: number;
+  completedAtIso?: string | null;
   // Placeholder only for mock attempts — real attempts (from
   // GET /schedule-days/:id/results) carry the server files-row id here, which
   // the review page streams via GET /files/:fileId/content.
@@ -528,6 +550,9 @@ export interface ExercisePerformanceAttempt {
 
   aiScore?: number;
   aiFeedback?: string;
+  currentScore?: number | null;
+  currentScoreSource?: EvaluationDecisionSource | null;
+  therapistReviewed?: boolean;
   // Rendered as small key-value pairs, never raw JSON, matching the design
   // assumption already applied to MedicalHistoryRecord.details and
   // ExerciseLibraryItem.baseCriteria (UI_MOCKUP_PLAN_NEWDB.md §4).
@@ -548,6 +573,12 @@ export interface SessionExerciseReview {
   // exercise_library.id this scheduled_exercise points to, plus its version badge
   // for display (e.g. "v3") — links back to ExerciseLibraryItem.versionNumber.
   exerciseVersionLabel?: string;
+  description?: string | null;
+  difficultyLevel?: string;
+  movementTracking?: ExerciseTrackingType;
+  baseCriteria?: Array<{ label: string; value: string }> | null;
+  targetValueLabel?: string;
+  therapistInstruction?: string | null;
   scheduledExerciseId: string;
   // Newest attempt first, matching the mockup's default-selected-latest behavior.
   attempts: ExercisePerformanceAttempt[];
@@ -558,6 +589,8 @@ export interface SessionReviewData {
   patientName: string;
   dateLabel: string;
   dayLabel: string;
+  planName?: string;
+  scheduledDateIso?: string;
   exercises: SessionExerciseReview[];
 }
 
@@ -572,6 +605,7 @@ export interface PendingSessionAttempt {
   scheduledExerciseId: string;
   exerciseName: string;
   exerciseNameTh?: string;
+  trackingType: TrackingType;
   videoBlobUrl: string;
   // The real recording bytes — sent to POST /scheduled-exercises/:id/results on
   // Confirm and stored via the backend files module.

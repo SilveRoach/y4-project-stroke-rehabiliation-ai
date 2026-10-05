@@ -56,7 +56,8 @@ export function useOwnProfilePicture(): string | null {
 export function useProfilePictureUpload(
   token: string | null | undefined,
   userId: string | null | undefined,
-  onUpdated?: (profile: UserProfile) => void
+  onUpdated?: (profile: UserProfile) => void,
+  locale: "en" | "th" = "en"
 ) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -68,11 +69,11 @@ export function useProfilePictureUpload(
 
   async function uploadPicture(file: File) {
     if (!token || !userId) {
-      setUploadError("Please log in again to change your profile picture.");
+      setUploadError(locale === "th" ? "กรุณาเข้าสู่ระบบอีกครั้งเพื่อเปลี่ยนรูปโปรไฟล์" : "Please log in again to change your profile picture.");
       return;
     }
     if (!file.type.startsWith("image/")) {
-      setUploadError("Please choose an image file (JPG, PNG, etc.).");
+      setUploadError(locale === "th" ? "กรุณาเลือกไฟล์รูปภาพ (JPG, PNG เป็นต้น)" : "Please choose an image file (JPG, PNG, etc.).");
       return;
     }
 
@@ -81,7 +82,7 @@ export function useProfilePictureUpload(
     try {
       const { file: uploaded } = await uploadFile(token, file);
       if (uploaded.fileType !== "image") {
-        throw new Error("The selected file must be an image.");
+        throw new Error(locale === "th" ? "ไฟล์ที่เลือกต้องเป็นรูปภาพ" : "The selected file must be an image.");
       }
       const res = await updateUserProfile(token, userId, { profilePictureFileId: uploaded.id });
       onUpdated?.(res.user);
@@ -91,7 +92,9 @@ export function useProfilePictureUpload(
           ? err.message
           : err instanceof Error
             ? err.message
-            : "Failed to upload your profile picture. Please try again."
+            : locale === "th"
+              ? "อัปโหลดรูปโปรไฟล์ไม่สำเร็จ กรุณาลองอีกครั้ง"
+              : "Failed to upload your profile picture. Please try again."
       );
     } finally {
       setUploading(false);

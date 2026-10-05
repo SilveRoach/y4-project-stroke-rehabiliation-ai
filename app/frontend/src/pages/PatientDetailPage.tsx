@@ -106,11 +106,11 @@ interface PatientDetailPageProps {
 
 
 const heatmapLabels: Record<HeatmapDayStatus, string> = {
-  completed: "Completed",
-  in_progress: "In progress",
-  skipped: "Skipped",
-  pending: "Pending",
-  cancelled: "Cancelled"
+  completed: "เสร็จสิ้น",
+  in_progress: "กำลังดำเนินการ",
+  skipped: "ข้าม",
+  pending: "รอดำเนินการ",
+  cancelled: "ยกเลิก"
 };
 
 // Mismatch flagged, not changed: schema.prisma's PatientRehabilitationPlansStatus
@@ -120,14 +120,32 @@ const heatmapLabels: Record<HeatmapDayStatus, string> = {
 // the `plans` state above), so nothing here is persisted yet; whoever wires
 // POST /plans up will need to drop/remap this option then.
 const planStatusLabels: Record<RehabPlanStatus, string> = {
-  draft: "Draft",
-  active: "Active",
-  paused: "Paused",
-  completed: "Completed",
-  cancelled: "Cancelled"
+  draft: "ฉบับร่าง",
+  active: "กำลังใช้งาน",
+  paused: "พักไว้",
+  completed: "เสร็จสิ้น",
+  cancelled: "ยกเลิก"
 };
 
 const planFilterStatuses: RehabPlanStatus[] = ["active", "draft", "completed", "cancelled"];
+
+const patientGenderLabels: Record<string, string> = {
+  male: "ชาย",
+  female: "หญิง",
+  other: "อื่น ๆ"
+};
+
+const patientAccountStatusLabels: Record<string, string> = {
+  active: "Active",
+  inactive: "ไม่ได้ใช้งาน",
+  pending: "รอดำเนินการ",
+  suspended: "ระงับ"
+};
+
+function patientValueLabel(value: string | null | undefined, labels: Record<string, string>, emptyLabel = "—"): string {
+  if (!value) return emptyLabel;
+  return labels[value.toLowerCase()] ?? value;
+}
 
 // Exported so the patient-facing Progress page can render the same
 // month-navigable schedule calendar (previously private to this page).
@@ -148,6 +166,14 @@ function displayDateLabel(isoDate: string): string {
   if (!ISO_DATE_RE.test(isoDate)) return "";
   const [year, month, day] = isoDate.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function displayDayLabel(value: string): string {
+  return value.replace(/^day\s+(\d+)$/i, "วันที่ $1");
+}
+
+function displayDateValue(value: string): string {
+  return ISO_DATE_RE.test(value) ? displayDateLabel(value) : value;
 }
 
 function isoDateFromDisplay(value: string): string {
@@ -267,11 +293,11 @@ export function calendarPeriodLabel(plan: PatientRehabPlan): string {
   const start = new Date(`${plan.startDateLabel}T00:00:00`);
   const end = new Date(start);
   end.setDate(end.getDate() + plan.heatmap.length - 1);
-  const startLabel = start.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  const endLabel = end.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const startLabel = start.toLocaleDateString("th-TH", { month: "long", year: "numeric" });
+  const endLabel = end.toLocaleDateString("th-TH", { month: "long", year: "numeric" });
   return startLabel === endLabel
     ? startLabel
-    : `${start.toLocaleDateString("en-US", { month: "short" })} \u2013 ${endLabel}`;
+    : `${start.toLocaleDateString("th-TH", { month: "short" })} \u2013 ${endLabel}`;
 }
 
 // There's no "current day" column on patient_rehabilitation_plans — it's derived
@@ -296,23 +322,23 @@ function daysBetweenInclusive(startLabel: string, endLabel: string): number {
 // "Edit note" / "Add exercise" still hit the same real APIs the old inline
 // DayDetailPanel used (patchScheduleDay / createScheduledExercise).
 const trackingLabels: Record<ExerciseTrackingType, string> = {
-  pose: "Pose tracking",
-  virtual_grip: "Virtual grip",
-  none: "No tracking"
+  pose: "ติดตามท่าทาง",
+  virtual_grip: "วัดแรงบีบมือ",
+  none: "ไม่ติดตาม"
 };
 
 const exerciseStatusLabel: Record<ScheduledExerciseStatus, string> = {
-  pending: "Pending",
-  in_progress: "In progress",
-  completed: "Completed",
-  skipped: "Skipped",
-  cancelled: "Cancelled"
+  pending: "รอดำเนินการ",
+  in_progress: "กำลังดำเนินการ",
+  completed: "เสร็จสิ้น",
+  skipped: "ข้าม",
+  cancelled: "ยกเลิก"
 };
 
 const difficultyLabels: Record<ExerciseLibraryDifficulty, string> = {
-  easy: "Easy",
-  medium: "Medium",
-  hard: "Hard"
+  easy: "ง่าย",
+  medium: "ปานกลาง",
+  hard: "ยาก"
 };
 
 const difficultyBadgeClass: Record<ExerciseLibraryDifficulty, string> = {
@@ -323,9 +349,9 @@ const difficultyBadgeClass: Record<ExerciseLibraryDifficulty, string> = {
 
 function defaultTargetValueLabel(criteria: any, targetType?: string): string {
   if (!criteria || typeof criteria !== "object") return "";
-  if (targetType === "duration" && criteria.holdSeconds !== undefined) return `${criteria.holdSeconds} sec`;
-  if (criteria.repetitions !== undefined) return `${criteria.repetitions} reps`;
-  if (criteria.holdSeconds !== undefined) return `${criteria.holdSeconds} sec`;
+  if (targetType === "duration" && criteria.holdSeconds !== undefined) return `${criteria.holdSeconds} วินาที`;
+  if (criteria.repetitions !== undefined) return `${criteria.repetitions} ครั้ง`;
+  if (criteria.holdSeconds !== undefined) return `${criteria.holdSeconds} วินาที`;
   if (criteria.targetAngleDeg !== undefined) return `${criteria.targetAngleDeg}°`;
   if (criteria.targetGripStrength !== undefined) return String(criteria.targetGripStrength);
   return "";
@@ -334,6 +360,13 @@ function defaultTargetValueLabel(criteria: any, targetType?: string): string {
 function splitTargetValue(value: string): { amount: string; unit: string } {
   const match = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*(.*)$/);
   return match ? { amount: match[1], unit: match[2] } : { amount: "", unit: value.trim() };
+}
+
+function targetUnitLabel(unit: string): string {
+  const normalized = unit.trim().toLowerCase();
+  if (normalized === "reps" || normalized === "rep") return "ครั้ง";
+  if (normalized === "sec" || normalized === "secs" || normalized === "second" || normalized === "seconds") return "วินาที";
+  return unit;
 }
 
 function TargetValueControl({
@@ -358,7 +391,7 @@ function TargetValueControl({
 
   return (
     <div className="pd-ex-target-control">
-      <button type="button" onClick={() => save(String(Math.max(0, Number(parts.amount || 0) - 1)))} disabled={disabled} aria-label="Decrease target value">−</button>
+      <button type="button" onClick={() => save(String(Math.max(0, Number(parts.amount || 0) - 1)))} disabled={disabled} aria-label="ลดค่าเป้าหมาย">−</button>
       <input
         type="number"
         min="0"
@@ -371,10 +404,10 @@ function TargetValueControl({
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
         }}
-        aria-label="Target value"
+        aria-label="ค่าเป้าหมาย"
       />
-      <button type="button" onClick={() => save(String(Number(parts.amount || 0) + 1))} disabled={disabled} aria-label="Increase target value">+</button>
-      {parts.unit && <span>{parts.unit}</span>}
+      <button type="button" onClick={() => save(String(Number(parts.amount || 0) + 1))} disabled={disabled} aria-label="เพิ่มค่าเป้าหมาย">+</button>
+      {parts.unit && <span>{targetUnitLabel(parts.unit)}</span>}
     </div>
   );
 }
@@ -394,10 +427,10 @@ function defaultTargetForExercise(item: ExerciseLibraryItem): {
   targetValueLabel: string;
 } {
   if (item.baseCriteria.repetitions !== undefined) {
-    return { targetType: "repetitions", targetValueLabel: `${item.baseCriteria.repetitions} reps` };
+    return { targetType: "repetitions", targetValueLabel: `${item.baseCriteria.repetitions} ครั้ง` };
   }
   if (item.baseCriteria.holdSeconds !== undefined) {
-    return { targetType: "duration", targetValueLabel: `${item.baseCriteria.holdSeconds} sec` };
+    return { targetType: "duration", targetValueLabel: `${item.baseCriteria.holdSeconds} วินาที` };
   }
   if (item.baseCriteria.targetAngleDeg !== undefined) {
     return { targetType: "repetitions", targetValueLabel: `${item.baseCriteria.targetAngleDeg}°` };
@@ -405,7 +438,7 @@ function defaultTargetForExercise(item: ExerciseLibraryItem): {
   if (item.baseCriteria.targetGripStrength !== undefined) {
     return { targetType: "repetitions", targetValueLabel: String(item.baseCriteria.targetGripStrength) };
   }
-  return { targetType: "repetitions", targetValueLabel: "10 reps" };
+  return { targetType: "repetitions", targetValueLabel: "10 ครั้ง" };
 }
 
 // Compute the next calendar date to assign when "Add day" is pressed.
@@ -435,7 +468,7 @@ export function PatientDetailPage({
   onViewExercise
 }: PatientDetailPageProps) {
   const { token, user } = useAuth();
-  const therapistDisplayName = user?.displayName || user?.username || "Therapist";
+  const therapistDisplayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
   // Real profile picture for the patient-profile panel: the summary already
   // carries users.profile_picture_file_id — resolve it to a blob object URL via
   // the auth'd GET /files/:id/content endpoint (useProfilePicture). Falls back
@@ -443,7 +476,7 @@ export function PatientDetailPage({
   const patientAvatarUrl = useProfilePicture(token, patient.profilePictureFileId ?? null);
   const [assignedTherapist, setAssignedTherapist] = useState<{ id: string; displayName: string } | null | undefined>(
     patient.assignedTherapistId
-      ? { id: patient.assignedTherapistId, displayName: patient.assignedTherapistName || "Assigned therapist" }
+      ? { id: patient.assignedTherapistId, displayName: patient.assignedTherapistName || "นักกายภาพบำบัดที่ได้รับมอบหมาย" }
       : patient.assignedTherapistId === null
         ? null
         : undefined
@@ -660,7 +693,7 @@ export function PatientDetailPage({
       setAssignedTherapist(res.patient?.assignedTherapist ?? null);
       setSelectedPlanId((current) => (current && mapped.some((p) => p.id === current) ? current : (mapped.find((p) => p.status === "active")?.id ?? mapped[0]?.id ?? null)));
     } catch (err) {
-      setPlansError(err instanceof ApiError ? err.message : "Could not load plans");
+      setPlansError(err instanceof ApiError ? err.message : "โหลดแผนฟื้นฟูไม่สำเร็จ");
     } finally {
       setPlansLoading(false);
     }
@@ -712,7 +745,7 @@ export function PatientDetailPage({
       })
       .catch((err) => {
         if (!cancelled) {
-          setSessionsError(err instanceof ApiError ? err.message : "Couldn't load session history. Please try again.");
+          setSessionsError(err instanceof ApiError ? err.message : "โหลดประวัติการฝึกไม่สำเร็จ กรุณาลองอีกครั้ง");
         }
       })
       .finally(() => {
@@ -768,7 +801,7 @@ export function PatientDetailPage({
   const monthLabel = (() => {
     if (!effectiveMonthKey) return "";
     const [y, m] = effectiveMonthKey.split("-").map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    return new Date(y, m - 1, 1).toLocaleDateString("th-TH", { month: "long", year: "numeric" });
   })();
   const prevMonthKey = (() => {
     const [y, m] = effectiveMonthKey.split("-").map(Number);
@@ -801,7 +834,7 @@ export function PatientDetailPage({
     setPlansError(null);
     refreshPlans()
       .catch((err) => {
-        if (!cancelled) setPlansError(err instanceof ApiError ? err.message : "Could not load plans");
+        if (!cancelled) setPlansError(err instanceof ApiError ? err.message : "โหลดแผนฟื้นฟูไม่สำเร็จ");
       })
       .finally(() => {
         if (!cancelled) setPlansLoading(false);
@@ -822,11 +855,11 @@ export function PatientDetailPage({
     selectedAttachments?: Array<{ fileId: string; description?: string }>
   ) => {
     if (!canEditPlan) {
-      alert("Only the therapist assigned to this patient can edit rehabilitation plans.");
+      alert("เฉพาะนักกายภาพบำบัดที่ได้รับมอบหมายให้ดูแลผู้ป่วยรายนี้เท่านั้นที่แก้ไขแผนฟื้นฟูได้");
       return;
     }
     if (!token) {
-      alert("Not authenticated");
+      alert("ไม่พบข้อมูลการเข้าสู่ระบบ");
       return;
     }
 
@@ -894,7 +927,7 @@ export function PatientDetailPage({
     } catch (err) {
       // surface error to therapist; controllers throw ApiError via apiRequest
       const message = err instanceof ApiError ? err.message : String(err);
-      alert(`Could not save plan: ${message}`);
+      alert(`บันทึกแผนไม่สำเร็จ: ${message}`);
       return;
     } finally {
       setShowPlanModal(false);
@@ -908,9 +941,9 @@ export function PatientDetailPage({
   // when the plan previously ended at its last scheduled day), then
   // refreshPlans() re-fetches GET /patients/:id/plans.
   const handleAddScheduleDay = async () => {
-    if (!canEditPlan) return alert("Only the assigned therapist can edit this patient's schedule.");
-    if (!token) return alert("Not authenticated");
-    if (!selectedPlan) return alert("No plan selected");
+    if (!canEditPlan) return alert("เฉพาะนักกายภาพบำบัดที่ได้รับมอบหมายเท่านั้นที่แก้ไขตารางฝึกของผู้ป่วยรายนี้ได้");
+    if (!token) return alert("ไม่พบข้อมูลการเข้าสู่ระบบ");
+    if (!selectedPlan) return alert("ยังไม่ได้เลือกแผน");
     setAddDayLoading(true);
     setAddDayError(null);
     const scheduledDate = nextScheduledDate(selectedPlan.days ?? []);
@@ -926,7 +959,7 @@ export function PatientDetailPage({
       }
       await refreshPlans();
     } catch (err) {
-      setAddDayError(err instanceof ApiError ? err.message : "Could not add day. Please try again.");
+      setAddDayError(err instanceof ApiError ? err.message : "เพิ่มวันฝึกไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setAddDayLoading(false);
     }
@@ -951,9 +984,9 @@ export function PatientDetailPage({
   };
 
   const handleSaveDayNote = async () => {
-    if (!canEditPlan) return alert("Only the assigned therapist can edit this patient's schedule.");
-    if (!token) return alert("Not authenticated");
-    if (!selectedDay || !selectedDay.id) return alert("Selected day has no id");
+    if (!canEditPlan) return alert("เฉพาะนักกายภาพบำบัดที่ได้รับมอบหมายเท่านั้นที่แก้ไขตารางฝึกของผู้ป่วยรายนี้ได้");
+    if (!token) return alert("ไม่พบข้อมูลการเข้าสู่ระบบ");
+    if (!selectedDay || !selectedDay.id) return alert("วันที่เลือกยังไม่มีรหัส");
     setDayNoteSaving(true);
     try {
       await patchScheduleDay(token, selectedDay.id, {
@@ -974,17 +1007,17 @@ export function PatientDetailPage({
   // handlePickExercise once a library exercise is chosen and confirmed (the
   // picker's confirm popup also collects an optional therapist instruction).
   const handleAddExerciseToSelectedDay = async () => {
-    if (!canEditPlan) return alert("Only the assigned therapist can edit this patient's exercises.");
-    if (!selectedDay) return alert("Select a day first");
+    if (!canEditPlan) return alert("เฉพาะนักกายภาพบำบัดที่ได้รับมอบหมายเท่านั้นที่แก้ไขท่าบริหารของผู้ป่วยรายนี้ได้");
+    if (!selectedDay) return alert("กรุณาเลือกวันฝึกก่อน");
     setAddExerciseError(null);
     setShowExercisePicker(true);
   };
 
   const handlePickExercise = async (item: ExerciseLibraryItem, therapistInstruction?: string, targetValueLabel?: string) => {
     if (!canEditPlan) return;
-    if (!token) return alert("Not authenticated");
+    if (!token) return alert("ไม่พบข้อมูลการเข้าสู่ระบบ");
     if (!selectedDay || !selectedDay.id) {
-      setAddExerciseError("This day hasn't been saved to the server yet.");
+      setAddExerciseError("วันนี้ยังไม่ได้บันทึกลงในระบบ");
       return;
     }
     setAddExerciseLoading(true);
@@ -994,13 +1027,13 @@ export function PatientDetailPage({
         exerciseLibraryId: item.id,
         orderNumber: selectedDay.exercises.length + 1,
         targetType: "repetitions",
-        targetValue: targetValueLabel ?? `${defaultReps} reps`,
+        targetValue: targetValueLabel ?? `${defaultReps} ครั้ง`,
         therapistInstruction: therapistInstruction?.trim() ? therapistInstruction.trim() : undefined
       });
       await refreshPlans();
       setShowExercisePicker(false);
     } catch (err) {
-      setAddExerciseError(err instanceof ApiError ? err.message : "Could not add exercise. Please try again.");
+      setAddExerciseError(err instanceof ApiError ? err.message : "เพิ่มท่าบริหารไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
       setAddExerciseLoading(false);
     }
@@ -1008,7 +1041,7 @@ export function PatientDetailPage({
 
   const handleSaveExerciseTarget = async (exerciseId: string, targetValue: string) => {
     if (!canEditPlan) return;
-    if (!token) return alert("Not authenticated");
+    if (!token) return alert("ไม่พบข้อมูลการเข้าสู่ระบบ");
     setTargetSavingId(exerciseId);
     try {
       await patchScheduledExercise(token, exerciseId, {
@@ -1016,7 +1049,7 @@ export function PatientDetailPage({
       });
       await refreshPlans();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Could not save the exercise target.");
+      alert(err instanceof ApiError ? err.message : "บันทึกเป้าหมายการฝึกไม่สำเร็จ");
     } finally {
       setTargetSavingId(null);
     }
@@ -1030,7 +1063,7 @@ export function PatientDetailPage({
   const confirmRemoveExercise = async () => {
     if (!exercisePendingRemoval) return;
     if (!token) {
-      alert("Not authenticated");
+      alert("ไม่พบข้อมูลการเข้าสู่ระบบ");
       return;
     }
     try {
@@ -1038,7 +1071,7 @@ export function PatientDetailPage({
       setExercisePendingRemoval(null);
       await refreshPlans();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Could not remove the exercise.");
+      alert(err instanceof ApiError ? err.message : "นำท่าบริหารออกไม่สำเร็จ");
     }
   };
 
@@ -1064,7 +1097,7 @@ export function PatientDetailPage({
       previous?.dateLabel && ISO_DATE_RE.test(previous.dateLabel) ? previous.dateLabel : null;
     setDayPendingRemoval({
       id: last.id,
-      label: last.dateLabel || `Day ${days.length}`,
+      label: last.dateLabel || `วันที่ ${days.length}`,
       newEndDateLabel
     });
   };
@@ -1072,7 +1105,7 @@ export function PatientDetailPage({
   const confirmDeleteDay = async () => {
     if (!dayPendingRemoval || !selectedPlan) return;
     if (!token) {
-      alert("Not authenticated");
+      alert("ไม่พบข้อมูลการเข้าสู่ระบบ");
       return;
     }
     setDeleteDayLoading(true);
@@ -1089,7 +1122,7 @@ export function PatientDetailPage({
       setEditingDayNote(false);
       await refreshPlans();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Could not remove the day.");
+      alert(err instanceof ApiError ? err.message : "นำวันฝึกออกไม่สำเร็จ");
     } finally {
       setDeleteDayLoading(false);
     }
@@ -1116,7 +1149,7 @@ export function PatientDetailPage({
     try {
       await reorderScheduledExercises(token!, selectedDay.id, reordered.map((exercise) => exercise.id));
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Could not save the exercise order.");
+      alert(err instanceof ApiError ? err.message : "บันทึกลำดับท่าบริหารไม่สำเร็จ");
       await refreshPlans();
     }
   };
@@ -1128,14 +1161,14 @@ export function PatientDetailPage({
       <div className="therapist-workspace">
         <header className="therapist-topbar">
           <div>
-            <h1>Patient Detail</h1>
+            <h1>ข้อมูลผู้ป่วย</h1>
             <p>{patientCode}</p>
           </div>
           <div className="therapist-topbar-actions">
             <div className="therapist-topbar-profile">
               <div>
                 <strong>{therapistDisplayName}</strong>
-                <small>Physical Therapist</small>
+                <small>นักกายภาพบำบัด</small>
               </div>
               <span className="avatar-badge">{initialsFromName(therapistDisplayName)}</span>
             </div>
@@ -1144,16 +1177,16 @@ export function PatientDetailPage({
 
         <main className="therapist-main">
           <button type="button" className="text-action pd-back-link" onClick={onBack}>
-            <ArrowLeft size={14} /> All patients
+            <ArrowLeft size={14} /> รายชื่อผู้ป่วย
           </button>
 
           <div className="pd-patient-info-layout">
             <div
               className={`pd-patient-profile-avatar${patientAvatarUrl ? " with-photo" : ""}`}
-              aria-label={`Profile picture for ${patient.name}`}
+              aria-label={`รูปโปรไฟล์ของ ${patient.name}`}
             >
               {patientAvatarUrl ? (
-                <img src={patientAvatarUrl} alt={`${patient.name}'s profile picture`} />
+                <img src={patientAvatarUrl} alt={`รูปโปรไฟล์ของ ${patient.name}`} />
               ) : (
                 patient.avatarInitials
               )}
@@ -1161,27 +1194,27 @@ export function PatientDetailPage({
             <section className="summary-card pd-patient-info-card">
               <div className="pd-patient-info-columns">
                 <div className="pd-patient-info-group">
-                  <h3>Personal information</h3>
+                  <h3>ข้อมูลส่วนบุคคล</h3>
                   <div className="pd-patient-info-grid">
-                    <div><span>Full name</span><strong>{patient.name}</strong></div>
-                    <div><span>Username</span><strong>{patient.username || "—"}</strong></div>
-                    <div><span>Gender</span><strong>{patient.gender && patient.gender !== "unknown" ? patient.gender : "Not recorded"}</strong></div>
-                    <div><span>Date of birth</span><strong>{patient.dateOfBirth || "—"}</strong></div>
-                    <div><span>Height</span><strong>{patient.heightCm !== null ? `${patient.heightCm} cm` : "—"}</strong></div>
-                    <div><span>Weight</span><strong>{patient.weightKg !== null ? `${patient.weightKg} kg` : "—"}</strong></div>
-                    <div><span>Account status</span><strong>{patient.accountStatus || "—"}</strong></div>
-                    <div><span>Last login</span><strong>{patient.lastLoginLabel || "—"}</strong></div>
+                    <div><span>ชื่อ-นามสกุล</span><strong>{patient.name}</strong></div>
+                    <div><span>ชื่อผู้ใช้</span><strong>{patient.username || "—"}</strong></div>
+                    <div><span>เพศ</span><strong>{patient.gender?.toLowerCase() === "unknown" ? "ไม่มีข้อมูล" : patientValueLabel(patient.gender, patientGenderLabels, "ไม่มีข้อมูล")}</strong></div>
+                    <div><span>วันเกิด</span><strong>{patient.dateOfBirth ? displayDateValue(patient.dateOfBirth) : "—"}</strong></div>
+                    <div><span>ส่วนสูง</span><strong>{patient.heightCm !== null ? `${patient.heightCm} ซม.` : "—"}</strong></div>
+                    <div><span>น้ำหนัก</span><strong>{patient.weightKg !== null ? `${patient.weightKg} กก.` : "—"}</strong></div>
+                    <div><span>สถานะบัญชี</span><strong>{patientValueLabel(patient.accountStatus, patientAccountStatusLabels)}</strong></div>
+                    <div><span>เข้าสู่ระบบล่าสุด</span><strong>{patient.lastLoginLabel || "—"}</strong></div>
                   </div>
                 </div>
                 <div className="pd-patient-info-group">
-                  <h3>Contact information</h3>
+                  <h3>ข้อมูลติดต่อ</h3>
                   <div className="pd-patient-info-grid">
-                    <div><span>Email</span><strong>{patient.email || "—"}</strong></div>
-                    <div><span>Phone number</span><strong>{patient.phoneNumber || "—"}</strong></div>
-                    <div><span>Assigned therapist</span><strong>{assignedTherapist?.displayName || patient.assignedTherapistName || "Unassigned"}</strong></div>
-                    <div className="pd-patient-info-wide"><span>Address</span><strong>{patient.address || "—"}</strong></div>
-                    <div><span>Emergency contact</span><strong>{patient.emergencyContactName || "—"}</strong></div>
-                    <div><span>Emergency phone</span><strong>{patient.emergencyContactPhone || "—"}</strong></div>
+                    <div><span>อีเมล</span><strong>{patient.email || "—"}</strong></div>
+                    <div><span>หมายเลขโทรศัพท์</span><strong>{patient.phoneNumber || "—"}</strong></div>
+                    <div><span>นักกายภาพบำบัดผู้ดูแล</span><strong>{assignedTherapist?.displayName || patient.assignedTherapistName || "ยังไม่ได้มอบหมาย"}</strong></div>
+                    <div className="pd-patient-info-wide"><span>ที่อยู่</span><strong>{patient.address || "—"}</strong></div>
+                    <div><span>ผู้ติดต่อฉุกเฉิน</span><strong>{patient.emergencyContactName || "—"}</strong></div>
+                    <div><span>โทรศัพท์ฉุกเฉิน</span><strong>{patient.emergencyContactPhone || "—"}</strong></div>
                   </div>
                 </div>
               </div>
@@ -1189,12 +1222,12 @@ export function PatientDetailPage({
           </div>
           {!canEditPlan && assignedTherapist && (
             <div className="pd-read-only-notice" role="status">
-              This patient is assigned to <strong>{assignedTherapist.displayName}</strong>. You can view the plan manager, but only the assigned therapist can make changes.
+              ผู้ป่วยรายนี้อยู่ในความดูแลของ <strong>{assignedTherapist.displayName}</strong> คุณสามารถดูแผนได้ แต่มีเพียงนักกายภาพบำบัดที่ได้รับมอบหมายเท่านั้นที่แก้ไขได้
             </div>
           )}
           {!canEditPlan && assignedTherapist === null && (
             <div className="pd-read-only-notice" role="status">
-              This patient is not currently assigned to a therapist. You can view the plan manager, but plan editing is unavailable.
+              ผู้ป่วยรายนี้ยังไม่ได้รับมอบหมายนักกายภาพบำบัด คุณสามารถดูแผนได้ แต่ไม่สามารถแก้ไขแผนได้
             </div>
           )}
 
@@ -1212,7 +1245,7 @@ export function PatientDetailPage({
                   <div className="pd-ws-col-head">
                     <span className="pd-ws-step">1</span>
                     <div>
-                      <strong>Schedule</strong>
+                      <strong>ตารางฝึก</strong>
                       <small>{calendarPeriodLabel(selectedPlan)}</small>
                     </div>
                   </div>
@@ -1224,7 +1257,7 @@ export function PatientDetailPage({
                       type="button"
                       className="icon-button pd-calendar-nav"
                       onClick={() => setViewMonthKey(prevMonthKey)}
-                      aria-label="Previous month"
+                      aria-label="เดือนก่อนหน้า"
                     >
                       <ChevronLeft size={14} />
                     </button>
@@ -1233,13 +1266,13 @@ export function PatientDetailPage({
                       type="button"
                       className="icon-button pd-calendar-nav"
                       onClick={() => setViewMonthKey(nextMonthKey)}
-                      aria-label="Next month"
+                      aria-label="เดือนถัดไป"
                     >
                       <ChevronRight size={14} />
                     </button>
                   </div>
                   <div className="pd-calendar-weekdays">
-                    {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+                    {["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"].map((day, index) => (
                       <span key={index}>{day}</span>
                     ))}
                   </div>
@@ -1269,10 +1302,10 @@ export function PatientDetailPage({
                           className={className}
                           title={
                             hasPlanDay
-                              ? `${cell.iso} · ${heatmapLabels[cell.status!]}${cell.otherMonth ? " (next/prev month)" : ""}`
+                              ? `${cell.iso} · ${heatmapLabels[cell.status!]}${cell.otherMonth ? " (เดือนก่อนหน้าหรือถัดไป)" : ""}`
                               : cell.otherMonth
                                 ? undefined
-                                : `${cell.iso}${cell.outside ? " · No session scheduled" : ""}`
+                                : `${cell.iso}${cell.outside ? " · ไม่มีตารางฝึก" : ""}`
                           }
                           onClick={() => cell.dayIndex !== null && handleSelectDay(cell.dayIndex)}
                         >
@@ -1290,7 +1323,7 @@ export function PatientDetailPage({
                     ))}
                   </div>
                   <p className="pd-ws-footnote">
-                    Day {planProgress(selectedPlan).current} of {planProgress(selectedPlan).total} &middot;{" "}
+                    วันที่ {planProgress(selectedPlan).current} จาก {planProgress(selectedPlan).total} &middot;{" "}
                     {selectedPlan.name}
                   </p>
                 </div>
@@ -1301,7 +1334,7 @@ export function PatientDetailPage({
                     <span className="pd-ws-step">2</span>
                     <div>
                       <span className="pd-ws-title-row">
-                        <strong>Plan</strong>
+                        <strong>แผนฟื้นฟู</strong>
                         <span className="pd-ws-day-actions">
                           {/* Multi-select status filter: a button opening a
                               checkbox popover; picking several statuses narrows
@@ -1316,17 +1349,17 @@ export function PatientDetailPage({
                               aria-expanded={showStatusFilterMenu}
                               title={
                                 planStatusFilter.length === 0
-                                  ? "Filter plans by status"
-                                  : `Filtered by: ${planStatusFilter.map((s) => planStatusLabels[s]).join(", ")}`
+                                  ? "กรองแผนตามสถานะ"
+                                  : `กรองตามสถานะ: ${planStatusFilter.map((s) => planStatusLabels[s]).join(", ")}`
                               }
                             >
                               <Filter size={12} className="pd-filter-icon" />
                               <span className="pd-filter-btn-label">
                                 {planStatusFilter.length === 0
-                                  ? "Status"
+                                  ? "สถานะ"
                                   : planStatusFilter.length === 1
                                     ? planStatusLabels[planStatusFilter[0]]
-                                    : "Status"}
+                                    : "สถานะ"}
                               </span>
                               {planStatusFilter.length > 0 && (
                                 <span className="pd-filter-count-badge">{planStatusFilter.length}</span>
@@ -1334,16 +1367,16 @@ export function PatientDetailPage({
                               <ChevronDown size={11} className={`pd-filter-chevron ${showStatusFilterMenu ? "rotated" : ""}`} />
                             </button>
                             {showStatusFilterMenu && (
-                              <div className="pd-status-filter-menu" role="dialog" aria-label="Filter plans by status">
+                              <div className="pd-status-filter-menu" role="dialog" aria-label="กรองแผนตามสถานะ">
                                 <div className="pd-status-filter-header">
-                                  <span className="pd-status-filter-title">Filter by status</span>
+                                  <span className="pd-status-filter-title">กรองตามสถานะ</span>
                                   {planStatusFilter.length > 0 ? (
                                     <button
                                       type="button"
                                       className="pd-status-filter-quick-action"
                                       onClick={() => setPlanStatusFilter([])}
                                     >
-                                      Clear all
+                                      ล้างทั้งหมด
                                     </button>
                                   ) : (
                                     <button
@@ -1351,7 +1384,7 @@ export function PatientDetailPage({
                                       className="pd-status-filter-quick-action"
                                       onClick={() => setPlanStatusFilter([...planFilterStatuses])}
                                     >
-                                      Select all
+                                      เลือกทั้งหมด
                                     </button>
                                   )}
                                 </div>
@@ -1382,7 +1415,7 @@ export function PatientDetailPage({
                                   })}
                                 </div>
                                 <div className="pd-status-filter-footer">
-                                  <span>{visiblePlans.length} of {plans.length} plans visible</span>
+                                  <span>แสดง {visiblePlans.length} จาก {plans.length} แผน</span>
                                 </div>
                               </div>
                             )}
@@ -1390,8 +1423,8 @@ export function PatientDetailPage({
                           <button
                             type="button"
                             className="icon-button pd-ws-add"
-                            title="Create new plan"
-                            aria-label="Create new plan"
+                            title="สร้างแผนใหม่"
+                            aria-label="สร้างแผนใหม่"
                             onClick={handleCreatePlanClick}
                             disabled={!canEditPlan}
                           >
@@ -1401,8 +1434,8 @@ export function PatientDetailPage({
                       </span>
                       <small>
                         {planStatusFilter.length === 0
-                          ? `${plans.length} plan${plans.length === 1 ? "" : "s"}`
-                          : `${visiblePlans.length} of ${plans.length} plan${plans.length === 1 ? "" : "s"}`}
+                          ? `${plans.length} แผน`
+                          : `${visiblePlans.length} จาก ${plans.length} แผน`}
                       </small>
                     </div>
                   </div>
@@ -1417,8 +1450,8 @@ export function PatientDetailPage({
                               type="button"
                               className="pd-active-filter-remove"
                               onClick={() => setPlanStatusFilter((current) => current.filter((s) => s !== status))}
-                              title={`Remove ${planStatusLabels[status]} filter`}
-                              aria-label={`Remove ${planStatusLabels[status]} filter`}
+                              title={`นำตัวกรอง ${planStatusLabels[status]} ออก`}
+                              aria-label={`นำตัวกรอง ${planStatusLabels[status]} ออก`}
                             >
                               <X size={10} />
                             </button>
@@ -1428,9 +1461,9 @@ export function PatientDetailPage({
                           type="button"
                           className="pd-active-filter-clear-link"
                           onClick={() => setPlanStatusFilter([])}
-                          title="Clear all filters"
+                          title="ล้างตัวกรองทั้งหมด"
                         >
-                          Clear
+                          ล้าง
                         </button>
                       </div>
                     </div>
@@ -1452,14 +1485,14 @@ export function PatientDetailPage({
                             <span className={`pd-program-status ${plan.status}`}>{planStatusLabels[plan.status]}</span>
                           </span>
                           <small className="pd-plan-row-dates">
-                            {plan.startDateLabel || "No start date"}
-                            {plan.endDateLabel ? ` \u2192 ${plan.endDateLabel}` : ""}
+                            {plan.startDateLabel ? displayDateValue(plan.startDateLabel) : "ไม่มีวันที่เริ่มต้น"}
+                            {plan.endDateLabel ? ` \u2192 ${displayDateValue(plan.endDateLabel)}` : ""}
                           </small>
                           <span className="pd-progress-track" aria-hidden="true">
                             <span className="pd-progress-fill" style={{ width: `${pct}%` }} />
                           </span>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <small>Day {progress.current} of {progress.total} &middot; {pct}%</small>
+                            <small>วันที่ {progress.current} จาก {progress.total} &middot; {pct}%</small>
                             {plan.attachments && plan.attachments.length > 0 && (
                               <small style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "var(--text-secondary)", fontWeight: 500 }}>
                                 <Paperclip size={10} /> {plan.attachments.length}
@@ -1473,14 +1506,14 @@ export function PatientDetailPage({
                   ) : (
                     <div className="pd-ws-empty">
                       <ClipboardList size={22} />
-                      <strong>No matching plans</strong>
-                      <p>No plan matches the selected status filter.</p>
+                      <strong>ไม่พบแผนที่ตรงกัน</strong>
+                      <p>ไม่มีแผนที่ตรงกับสถานะที่เลือก</p>
                       <button
                         type="button"
                         className="secondary-button pd-empty-clear-btn"
                         onClick={() => setPlanStatusFilter([])}
                       >
-                        Clear status filter
+                        ล้างตัวกรองสถานะ
                       </button>
                     </div>
                   )}
@@ -1503,7 +1536,7 @@ export function PatientDetailPage({
                         setShowPlanModal(true);
                       }}
                     >
-                      <ClipboardList size={14} /> {canEditPlan ? (plans.length === 0 ? "Create a plan" : "Edit plan") : "Plan details (read-only)"}
+                      <ClipboardList size={14} /> {canEditPlan ? (plans.length === 0 ? "สร้างแผน" : "แก้ไขแผน") : "รายละเอียดแผน (ดูอย่างเดียว)"}
                     </button>
                   </div>
                 </div>
@@ -1514,15 +1547,15 @@ export function PatientDetailPage({
                     <span className="pd-ws-step">3</span>
                     <div>
                       <span className="pd-ws-title-row">
-                        <strong>Days</strong>
+                        <strong>วันฝึก</strong>
                         {/* [ − ] / [ + ] grouped together — remove/add a day at
                             the plan's end, kept visually as one tight pair. */}
                         <span className="pd-ws-day-actions">
                           <button
                             type="button"
                             className="icon-button pd-ws-add"
-                            title="Remove last day (moves the plan's end date back one day)"
-                            aria-label="Remove last day"
+                            title="นำวันสุดท้ายออก (เลื่อนวันสิ้นสุดแผนกลับหนึ่งวัน)"
+                            aria-label="นำวันสุดท้ายออก"
                             onClick={handleRemoveLastDay}
                             disabled={!canRemoveLastDay || deleteDayLoading}
                           >
@@ -1531,8 +1564,8 @@ export function PatientDetailPage({
                           <button
                             type="button"
                             className="icon-button pd-ws-add"
-                            title="Add schedule day (extends the plan's end date by one day)"
-                            aria-label="Add schedule day"
+                            title="เพิ่มวันฝึก (ขยายวันสิ้นสุดแผนออกไปหนึ่งวัน)"
+                            aria-label="เพิ่มวันฝึก"
                             onClick={handleAddScheduleDay}
                             disabled={!canEditPlan || addDayLoading}
                           >
@@ -1542,8 +1575,8 @@ export function PatientDetailPage({
                       </span>
                       <small>
                         {selectedPlan.days && selectedPlan.days.length > 0
-                          ? `${selectedPlan.days.length} day${selectedPlan.days.length === 1 ? "" : "s"} scheduled`
-                          : "No days scheduled"}
+                          ? `กำหนดไว้ ${selectedPlan.days.length} วัน`
+                          : "ยังไม่ได้กำหนดวันฝึก"}
                       </small>
                     </div>
                   </div>
@@ -1557,12 +1590,12 @@ export function PatientDetailPage({
                           onClick={() => setSelectedDayIndex(idx)}
                         >
                           <span className="pd-day-row-top">
-                            <strong>{day.dateLabel ?? `Day ${idx + 1}`}</strong>
+                            <strong>{day.dateLabel ?? `วันที่ ${idx + 1}`}</strong>
                             <span className={`pd-day-status ${day.status}`}>{heatmapLabels[day.status]}</span>
                           </span>
                           <small>
-                            {day.exercises.length} exercise{day.exercises.length === 1 ? "" : "s"}
-                            {day.therapistNote ? " \u00b7 has note" : ""}
+                            {day.exercises.length} ท่าบริหาร
+                            {day.therapistNote ? " \u00b7 มีบันทึก" : ""}
                           </small>
                         </button>
                       ))}
@@ -1570,8 +1603,8 @@ export function PatientDetailPage({
                   ) : (
                     <div className="pd-ws-empty">
                       <Calendar size={22} />
-                      <strong>No rehab days yet</strong>
-                      <p>Add a schedule day to this plan to start assigning exercises.</p>
+                      <strong>ยังไม่มีวันฝึก</strong>
+                      <p>เพิ่มวันฝึกในแผนนี้เพื่อเริ่มกำหนดท่าบริหาร</p>
                     </div>
                   )}
                 </div>
@@ -1582,22 +1615,22 @@ export function PatientDetailPage({
                     <span className="pd-ws-step">4</span>
                     <div>
                       <span className="pd-ws-title-row">
-                        <strong>Exercises</strong>
+                        <strong>ท่าบริหาร</strong>
                         <button
                           type="button"
                           className="secondary-button pd-ws-add-exercise"
-                          title="Add exercise from library"
-                          aria-label="Add exercise from library"
+                          title="เพิ่มท่าบริหารจากคลัง"
+                          aria-label="เพิ่มท่าบริหารจากคลัง"
                           onClick={handleAddExerciseToSelectedDay}
                           disabled={!canEditPlan || !selectedDay}
                         >
-                          <Plus size={14} /> Add exercise
+                          <Plus size={14} /> เพิ่มท่าบริหาร
                         </button>
                       </span>
                       <small>
                         {selectedDay
-                          ? (selectedDay.dateLabel ?? `Day ${(selectedDayIndex ?? 0) + 1}`) + ` \u00b7 ${heatmapLabels[selectedDay.status]}`
-                          : "Select a day"}
+                          ? (selectedDay.dateLabel ?? `วันที่ ${(selectedDayIndex ?? 0) + 1}`) + ` \u00b7 ${heatmapLabels[selectedDay.status]}`
+                          : "เลือกวันฝึก"}
                       </small>
                     </div>
                   </div>
@@ -1611,22 +1644,22 @@ export function PatientDetailPage({
                             className="pd-day-note-editor"
                             value={dayNoteDraft}
                             onChange={(event) => setDayNoteDraft(event.target.value)}
-                            placeholder="Enter a therapist note for this day."
+                            placeholder="เพิ่มบันทึกสำหรับวันฝึกนี้"
                             rows={3}
                             disabled={!canEditPlan || dayNoteSaving}
                           />
                         ) : selectedDay.therapistNote ? (
                           <p className="pd-day-note">{selectedDay.therapistNote}</p>
                         ) : (
-                          <p className="pd-day-note pd-day-note-empty">No therapist note for this day.</p>
+                          <p className="pd-day-note pd-day-note-empty">ไม่มีบันทึกสำหรับวันฝึกนี้</p>
                         )}
                         <div className="pd-day-context-actions">
                           <button type="button" className="text-action" onClick={handleEditDayNote} disabled={!canEditPlan}>
-                            <Save size={13} /> Edit note
+                            <Save size={13} /> แก้ไขบันทึก
                           </button>
                           {editingDayNote && (
                             <button type="button" className="text-action" onClick={handleSaveDayNote} disabled={!canEditPlan || dayNoteSaving}>
-                              <Save size={13} /> {dayNoteSaving ? "Saving\u2026" : "Save"}
+                              <Save size={13} /> {dayNoteSaving ? "กำลังบันทึก…" : "บันทึก"}
                             </button>
                           )}
                         </div>
@@ -1650,7 +1683,7 @@ export function PatientDetailPage({
                                 onDrop={() => void handleDropExercise(ex.id)}
                                 onDragEnd={() => setDraggedExerciseId(null)}
                               >
-                                <span className="pd-ex-drag-handle" title={canEditPlan ? "Drag to reorder" : undefined} aria-hidden="true">
+                                <span className="pd-ex-drag-handle" title={canEditPlan ? "ลากเพื่อจัดลำดับใหม่" : undefined} aria-hidden="true">
                                   <GripVertical size={15} />
                                 </span>
                                 <div className="pd-ex-content">
@@ -1671,8 +1704,8 @@ export function PatientDetailPage({
                                         className="pd-ex-remove"
                                         onClick={() => void handleRemoveExercise(ex.id, ex.exerciseName)}
                                         disabled={!canEditPlan}
-                                        title="Remove exercise from this day"
-                                        aria-label={`Remove ${ex.exerciseName} from this day`}
+                                        title="นำท่าบริหารออกจากวันนี้"
+                                        aria-label={`นำ ${ex.exerciseName} ออกจากวันนี้`}
                                       >
                                         <X size={13} />
                                       </button>
@@ -1707,16 +1740,16 @@ export function PatientDetailPage({
                                               {
                                                 id: selectedDay.id,
                                                 dateLabel: selectedDay.dateLabel ?? selectedPlan?.startDateLabel ?? "",
-                                                dayLabel: dayIndex >= 0 ? `Day ${dayIndex + 1}` : "Session",
+                                                dayLabel: dayIndex >= 0 ? `วันที่ ${dayIndex + 1}` : "รอบฝึก",
                                                 exercisesAttempted: completed.length,
                                                 outcome: selectedDay.status === "skipped" ? "skipped" : "completed"
                                               },
                                               ex.id
                                             );
                                           }}
-                                          title="Review this exercise's recorded attempts"
+                                          title="ตรวจสอบผลการฝึกท่านี้"
                                         >
-                                          Review
+                                          ตรวจสอบผล
                                         </button>
                                       )}
                                     </div>
@@ -1730,10 +1763,10 @@ export function PatientDetailPage({
                       ) : (
                         <div className="pd-ws-empty">
                           <Dumbbell size={22} />
-                          <strong>No exercises assigned</strong>
-                          <p>This day has no exercises yet — add one from the exercise library.</p>
+                          <strong>ยังไม่ได้กำหนดท่าบริหาร</strong>
+                          <p>วันนี้ยังไม่มีท่าบริหาร — เพิ่มท่าจากคลังท่าบริหาร</p>
                           <button type="button" className="secondary-button" onClick={handleAddExerciseToSelectedDay} disabled={!canEditPlan}>
-                            <Plus size={14} /> Add exercise
+                            <Plus size={14} /> เพิ่มท่าบริหาร
                           </button>
                         </div>
                       )}
@@ -1741,8 +1774,8 @@ export function PatientDetailPage({
                   ) : (
                     <div className="pd-ws-empty">
                       <Eye size={22} />
-                      <strong>No day selected</strong>
-                      <p>Pick a rehab day from the Day column (or a date on the calendar) to see its exercises.</p>
+                      <strong>ยังไม่ได้เลือกวันฝึก</strong>
+                      <p>เลือกวันฝึกจากคอลัมน์วันฝึกหรือจากปฏิทินเพื่อดูท่าบริหาร</p>
                     </div>
                   )}
                 </div>
@@ -1750,11 +1783,11 @@ export function PatientDetailPage({
             ) : (
               <div className="pd-ws-empty pd-ws-empty-plan">
                 <ClipboardList size={24} />
-                <strong>This patient has no rehabilitation plan yet</strong>
-                <p>{canEditPlan ? "Create a plan to start scheduling rehab days and exercises." : "No plan has been created yet."}</p>
+                <strong>ผู้ป่วยรายนี้ยังไม่มีแผนฟื้นฟู</strong>
+                <p>{canEditPlan ? "สร้างแผนเพื่อเริ่มกำหนดวันฝึกและท่าบริหาร" : "ยังไม่มีการสร้างแผน"}</p>
                 {canEditPlan && (
                   <button type="button" className="secondary-button" onClick={handleCreatePlanClick}>
-                    <ClipboardList size={14} /> Create plan
+                    <ClipboardList size={14} /> สร้างแผน
                   </button>
                 )}
               </div>
@@ -1769,11 +1802,11 @@ export function PatientDetailPage({
           <div className="summary-card pd-session-card">
               <div className="therapist-chart-heading">
                 <div>
-                  <strong>Session history</strong>
+                  <strong>ประวัติการฝึก</strong>
                   <p>
                     {sessionsLoading
-                      ? "Loading\u2026"
-                      : `${sessionHistory.length} session${sessionHistory.length === 1 ? "" : "s"} recorded`}
+                      ? "กำลังโหลด…"
+                      : `บันทึกการฝึกแล้ว ${sessionHistory.length} ครั้ง`}
                   </p>
                 </div>
               </div>
@@ -1785,9 +1818,9 @@ export function PatientDetailPage({
               )}
 
               {sessionsLoading ? (
-                <p className="pd-empty-note">Loading session history\u2026</p>
+                <p className="pd-empty-note">กำลังโหลดประวัติการฝึก…</p>
               ) : sessionHistory.length === 0 ? (
-                <p className="pd-empty-note">No sessions recorded yet.</p>
+                <p className="pd-empty-note">ยังไม่มีประวัติการฝึก</p>
               ) : (
                 <>
                   <div className="pd-session-list">
@@ -1795,26 +1828,26 @@ export function PatientDetailPage({
                       <div key={session.id} className="pd-session-row">
                         <div>
                           <span>
-                            {session.dateLabel} &middot; {session.dayLabel}
+                            {displayDateValue(session.dateLabel)} &middot; {displayDayLabel(session.dayLabel)}
                           </span>
-                          <small>{session.exercisesAttempted} exercises attempted</small>
+                          <small>ฝึกท่าบริหารแล้ว {session.exercisesAttempted} ท่า</small>
                         </div>
                         <div className="pd-session-actions">
                           {session.outcome === "skipped" ? (
-                            <span className="pd-session-skipped">Skipped</span>
+                            <span className="pd-session-skipped">ข้าม</span>
                           ) : (
-                            <span className="pd-session-score">Avg {session.avgScore}</span>
+                            <span className="pd-session-score">คะแนนเฉลี่ย {session.avgScore}</span>
                           )}
                           {session.evaluationSource && (
                             <span className={`pd-session-source ${session.evaluationSource}`}>
-                              {session.evaluationSource === "ai" ? "AI-scored" : "PT-reviewed"}
+                              {session.evaluationSource === "ai" ? "ประเมินโดย AI" : "ประเมินโดยนักกายภาพบำบัด"}
                             </span>
                           )}
                           {/* Real: routes to SessionResultReviewPage (§2.7), which
                               was only a static mockup (session-result-review.html)
                               until now. */}
                           <button type="button" className="text-action" onClick={() => onReviewSession(session)}>
-                            Review <ChevronRight size={12} />
+                            ตรวจสอบผล <ChevronRight size={12} />
                           </button>
                         </div>
                       </div>
@@ -1823,7 +1856,7 @@ export function PatientDetailPage({
                   {/* Stub: no earlier-session pagination endpoint exists yet — kept
                       as inert text matching the mockup rather than a toggle with
                       nothing to reveal. */}
-                  {hasEarlierSessions && <p className="pd-show-more">Show earlier sessions</p>}
+                  {hasEarlierSessions && <p className="pd-show-more">แสดงประวัติการฝึกก่อนหน้า</p>}
                 </>
               )}
           </div>
@@ -1834,6 +1867,9 @@ export function PatientDetailPage({
         <PlanModal
           selectedPlan={planModalIntent === "create" || plans.length === 0 ? null : selectedPlan}
           mode={planModalIntent === "create" || plans.length === 0 ? "create" : "edit"}
+          // A therapist who is not assigned to this patient may open the popup
+          // to READ the plan, but every control inside stays disabled.
+          readOnly={!canEditPlan}
           availableAttachments={availableAttachments}
           availableFiles={availableFiles}
           token={token ?? null}
@@ -1855,7 +1891,7 @@ export function PatientDetailPage({
           onView={onViewExercise}
           dayLabel={
             selectedDayIndex !== null
-              ? `Day ${selectedDayIndex + 1}${selectedDay.dateLabel ? ` (${displayDateLabel(selectedDay.dateLabel)})` : ""}`
+              ? `วันที่ ${selectedDayIndex + 1}${selectedDay.dateLabel ? ` (${displayDateLabel(selectedDay.dateLabel)})` : ""}`
               : selectedDay.dateLabel
                 ? displayDateLabel(selectedDay.dateLabel)
                 : undefined
@@ -1866,24 +1902,23 @@ export function PatientDetailPage({
         <div className="therapist-panel-scrim" onClick={() => setDayPendingRemoval(null)}>
           <div className="pd-modal pd-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="remove-day-title" onClick={(event) => event.stopPropagation()}>
             <div className="therapist-detail-header">
-              <strong id="remove-day-title">Remove day?</strong>
-              <button type="button" className="icon-button" onClick={() => setDayPendingRemoval(null)} aria-label="Close">
+              <strong id="remove-day-title">นำวันฝึกออก?</strong>
+              <button type="button" className="icon-button" onClick={() => setDayPendingRemoval(null)} aria-label="ปิด">
                 <X size={16} />
               </button>
             </div>
             <p className="pd-confirm-message">
-              Remove the last day <strong>{dayPendingRemoval.label}</strong> from this plan? Its exercises and any
-              recorded results for that day are deleted with it
+              ต้องการนำวันสุดท้าย <strong>{displayDayLabel(dayPendingRemoval.label)}</strong> ออกจากแผนนี้หรือไม่? ท่าบริหารและผลการฝึกที่บันทึกไว้ของวันดังกล่าวจะถูกลบด้วย
               {dayPendingRemoval.newEndDateLabel ? (
                 <>
-                  {" "}and the plan's end date moves to <strong>{dayPendingRemoval.newEndDateLabel}</strong>
+                  {" "}และวันสิ้นสุดของแผนจะเปลี่ยนเป็น <strong>{dayPendingRemoval.newEndDateLabel}</strong>
                 </>
               ) : null}
               .
             </p>
             <div className="pd-confirm-actions">
               <button type="button" className="secondary-button" onClick={() => setDayPendingRemoval(null)}>
-                Cancel
+                ยกเลิก
               </button>
               <button
                 type="button"
@@ -1892,7 +1927,7 @@ export function PatientDetailPage({
                 disabled={deleteDayLoading}
                 onClick={() => void confirmDeleteDay()}
               >
-                {deleteDayLoading ? "Removing…" : "Remove day"}
+                {deleteDayLoading ? "กำลังนำออก…" : "นำวันฝึกออก"}
               </button>
             </div>
           </div>
@@ -1902,20 +1937,20 @@ export function PatientDetailPage({
         <div className="therapist-panel-scrim" onClick={() => setExercisePendingRemoval(null)}>
           <div className="pd-modal pd-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="remove-exercise-title" onClick={(event) => event.stopPropagation()}>
             <div className="therapist-detail-header">
-              <strong id="remove-exercise-title">Remove exercise?</strong>
-              <button type="button" className="icon-button" onClick={() => setExercisePendingRemoval(null)} aria-label="Close">
+              <strong id="remove-exercise-title">นำท่าบริหารออก?</strong>
+              <button type="button" className="icon-button" onClick={() => setExercisePendingRemoval(null)} aria-label="ปิด">
                 <X size={16} />
               </button>
             </div>
             <p className="pd-confirm-message">
-              Remove <strong>{exercisePendingRemoval.name}</strong> from this rehabilitation day?
+              ต้องการนำ <strong>{exercisePendingRemoval.name}</strong> ออกจากวันฝึกนี้หรือไม่?
             </p>
             <div className="pd-confirm-actions">
               <button type="button" className="secondary-button" onClick={() => setExercisePendingRemoval(null)}>
-                Cancel
+                ยกเลิก
               </button>
               <button type="button" className="primary-button" onClick={() => void confirmRemoveExercise()}>
-                Remove exercise
+                นำท่าบริหารออก
               </button>
             </div>
           </div>
@@ -1973,7 +2008,7 @@ function ExercisePickerModal({
     setPendingPick(exercise);
     setPendingInstruction("");
     const reps = exercise.baseCriteria?.repetitions ?? 10;
-    setPendingTarget(`${reps} reps`);
+    setPendingTarget(`${reps} ครั้ง`);
   };
 
   useEffect(() => {
@@ -1999,7 +2034,7 @@ function ExercisePickerModal({
 
   useEffect(() => {
     if (!token) {
-      setFetchError("Not authenticated.");
+      setFetchError("ไม่พบข้อมูลการเข้าสู่ระบบ");
       setFetchLoading(false);
       return;
     }
@@ -2027,7 +2062,7 @@ function ExercisePickerModal({
       })
       .catch((err) => {
         if (!cancelled) {
-          setFetchError(err instanceof ApiError ? err.message : "Could not load exercises. Please try again.");
+          setFetchError(err instanceof ApiError ? err.message : "โหลดท่าบริหารไม่สำเร็จ กรุณาลองอีกครั้ง");
         }
       })
       .finally(() => {
@@ -2050,7 +2085,7 @@ function ExercisePickerModal({
         exercise.name,
         trackingLabels[exercise.movementTracking],
         exercise.movementTracking,
-        exercise.createdByName || "Therapist"
+        exercise.createdByName || "นักกายภาพบำบัด"
       ]
         .join(" ")
         .toLocaleLowerCase();
@@ -2066,12 +2101,12 @@ function ExercisePickerModal({
         className="pd-modal pd-library-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Add exercise from library"
+        aria-label="เพิ่มท่าบริหารจากคลัง"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="therapist-detail-header">
-          <strong>Add exercise from library</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <strong>เพิ่มท่าบริหารจากคลัง</strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </header>
@@ -2084,34 +2119,34 @@ function ExercisePickerModal({
                 type="search"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search by name, type, or creator"
-                aria-label="Search exercises by name, type, or creator"
+                placeholder="ค้นหาตามชื่อ ประเภท หรือผู้สร้าง"
+                aria-label="ค้นหาท่าบริหารตามชื่อ ประเภท หรือผู้สร้าง"
               />
             </label>
             <label className="library-status-filter">
-              <span>Status</span>
+              <span>สถานะ</span>
               <select
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value as "all" | ExerciseLibraryItem["status"])}
-                aria-label="Filter exercises by status"
+                aria-label="กรองท่าบริหารตามสถานะ"
               >
-                <option value="all">All</option>
-                <option value="active">Active</option>
-                <option value="draft">Draft</option>
-                <option value="archived">Archived</option>
+                <option value="all">ทั้งหมด</option>
+                <option value="active">กำลังใช้งาน</option>
+                <option value="draft">ฉบับร่าง</option>
+                <option value="archived">เก็บถาวร</option>
               </select>
             </label>
             <label className="library-status-filter">
-              <span>Tracking</span>
+              <span>การติดตาม</span>
               <select
                 value={trackingFilter}
                 onChange={(event) => setTrackingFilter(event.target.value as "all" | ExerciseTrackingType)}
-                aria-label="Filter exercises by tracking type"
+                aria-label="กรองท่าบริหารตามประเภทการติดตาม"
               >
-                <option value="all">All</option>
-                <option value="pose">Pose tracking</option>
-                <option value="virtual_grip">Virtual grip</option>
-                <option value="none">No AI tracking</option>
+                <option value="all">ทั้งหมด</option>
+                <option value="pose">ติดตามท่าทาง</option>
+                <option value="virtual_grip">วัดแรงบีบมือ</option>
+                <option value="none">ไม่ใช้ AI ติดตาม</option>
               </select>
             </label>
           </div>
@@ -2119,7 +2154,7 @@ function ExercisePickerModal({
 
         <div className="pd-library-modal-body">
           {fetchLoading ? (
-            <p className="pd-empty-note">Loading exercises{"\u2026"}</p>
+            <p className="pd-empty-note">กำลังโหลดท่าบริหาร…</p>
           ) : fetchError ? (
             <p className="pd-empty-note" role="alert" style={{ color: "var(--error, #c0392b)" }}>
               {fetchError}
@@ -2127,10 +2162,10 @@ function ExercisePickerModal({
           ) : filteredExercises.length === 0 ? (
             <p className="pd-empty-note">
               {exercises.length === 0
-                ? "No exercises have been created yet."
+                ? "ยังไม่มีท่าบริหารในคลัง"
                 : searchQuery.trim()
-                  ? "No exercises match your search."
-                  : "No exercises match this filter."}
+                  ? "ไม่พบท่าบริหารที่ตรงกับคำค้นหา"
+                  : "ไม่พบท่าบริหารที่ตรงกับตัวกรองนี้"}
             </p>
           ) : (
             <div className="library-grid">
@@ -2156,10 +2191,10 @@ function ExercisePickerModal({
                     }}
                     title={
                       alreadyAdded
-                        ? "Already assigned to this day"
+                        ? "กำหนดท่าบริหารนี้ในวันนี้แล้ว"
                         : exercise.status !== "active"
-                          ? "Only Active exercises can be assigned"
-                          : "Add to the selected day"
+                          ? "กำหนดได้เฉพาะท่าบริหารที่กำลังใช้งาน"
+                          : "เพิ่มท่าบริหารในวันที่เลือก"
                     }
                   >
                     <div className="library-card-media">
@@ -2167,12 +2202,12 @@ function ExercisePickerModal({
                         <img
                           className="library-card-thumbnail library-card-video-thumbnail"
                           src={thumbnailUrls[exercise.id]}
-                          alt={`${exercise.name} demo video thumbnail`}
+                          alt={`ภาพตัวอย่างวิดีโอสาธิต ${exercise.name}`}
                         />
                       ) : (
                         <div className="library-card-thumbnail">
                           <Icon size={30} />
-                          <span>{exercise.hasDemoVideo ? "Demo video" : "No demo video"}</span>
+                          <span>{exercise.hasDemoVideo ? "วิดีโอสาธิต" : "ไม่มีวิดีโอสาธิต"}</span>
                         </div>
                       )}
                       <span className={`library-card-type tracking-${exercise.movementTracking}`}>
@@ -2185,9 +2220,9 @@ function ExercisePickerModal({
                         {exercise.name}{" "}
                         <small style={{ color: "var(--text-secondary)" }}>v{exercise.versionNumber}</small>
                       </strong>
-                      <span>Created by {exercise.createdByName || "Therapist"}</span>
+                      <span>สร้างโดย {exercise.createdByName || "นักกายภาพบำบัด"}</span>
                       <span className={`library-status-badge ${exercise.status}`}>
-                        {alreadyAdded ? "Added" : exercise.status === "active" ? "Active" : exercise.status === "draft" ? "Draft" : "Archived"}
+                        {alreadyAdded ? "เพิ่มแล้ว" : exercise.status === "active" ? "กำลังใช้งาน" : exercise.status === "draft" ? "ฉบับร่าง" : "เก็บถาวร"}
                       </span>
                       {onView && (
                         <button
@@ -2198,9 +2233,9 @@ function ExercisePickerModal({
                             event.stopPropagation();
                             onView(exercise);
                           }}
-                          title="Open this exercise in the editor"
+                          title="เปิดท่าบริหารนี้ในหน้าแก้ไข"
                         >
-                          <Eye size={13} /> View
+                          <Eye size={13} /> ดู
                         </button>
                       )}
                     </div>
@@ -2222,21 +2257,21 @@ function ExercisePickerModal({
         const targetParts = splitTargetValue(pendingTarget);
         const currentReps = Math.max(1, parseInt(targetParts.amount, 10) || defaultReps);
         const isCustomTarget = Boolean(
-          pendingTarget.trim() && pendingTarget.trim() !== `${defaultReps} reps`
+          pendingTarget.trim() && pendingTarget.trim() !== `${defaultReps} ครั้ง`
         );
         const Icon = trackingIcon[pendingPick.movementTracking];
 
         const handleStep = (delta: number) => {
           const nextReps = Math.max(1, currentReps + delta);
-          setPendingTarget(`${nextReps} reps`);
+          setPendingTarget(`${nextReps} ครั้ง`);
         };
 
         const handleAmountChange = (rawAmount: string) => {
-          setPendingTarget(`${rawAmount} reps`);
+          setPendingTarget(`${rawAmount} ครั้ง`);
         };
 
         const handlePresetClick = (val: number) => {
-          setPendingTarget(`${val} reps`);
+          setPendingTarget(`${val} ครั้ง`);
         };
 
         const handleConfirmPick = () => {
@@ -2249,7 +2284,7 @@ function ExercisePickerModal({
           void onPick(
             item,
             instruction.trim() ? instruction.trim() : undefined,
-            target.trim() ? target.trim() : `${defaultReps} reps`
+            target.trim() ? target.trim() : `${defaultReps} ครั้ง`
           );
         };
 
@@ -2266,13 +2301,13 @@ function ExercisePickerModal({
               className="pd-modal pd-picker-confirm-dialog"
               role="dialog"
               aria-modal="true"
-              aria-label="Add exercise to schedule"
+              aria-label="เพิ่มท่าบริหารลงในตารางฝึก"
               style={{ zIndex: 321 }}
               onClick={(event) => event.stopPropagation()}
             >
               <div className="therapist-detail-header pd-picker-confirm-header">
                 <div className="pd-picker-confirm-title-wrap">
-                  <strong>Add exercise to schedule</strong>
+                  <strong>เพิ่มท่าบริหารลงในตารางฝึก</strong>
                   {dayLabel && (
                     <span className="pd-picker-confirm-day-badge">{dayLabel}</span>
                   )}
@@ -2281,7 +2316,7 @@ function ExercisePickerModal({
                   type="button"
                   className="icon-button"
                   onClick={() => setPendingPick(null)}
-                  aria-label="Close"
+                  aria-label="ปิด"
                   disabled={parentLoading}
                 >
                   <X size={16} />
@@ -2297,16 +2332,16 @@ function ExercisePickerModal({
                         <img
                           className="pd-picker-confirm-thumb"
                           src={thumbnailUrls[pendingPick.id]}
-                          alt={`${pendingPick.name} thumbnail`}
+                          alt={`ภาพตัวอย่าง ${pendingPick.name}`}
                         />
                         <span className="pd-picker-confirm-badge-overlay">
-                          <FileVideo size={10} /> Video
+                          <FileVideo size={10} /> วิดีโอ
                         </span>
                       </>
                     ) : (
                       <div className="pd-picker-confirm-placeholder">
                         <Icon size={24} />
-                        <span>{pendingPick.hasDemoVideo ? "Demo video" : "Exercise"}</span>
+                        <span>{pendingPick.hasDemoVideo ? "วิดีโอสาธิต" : "ท่าบริหาร"}</span>
                       </div>
                     )}
                   </div>
@@ -2329,10 +2364,10 @@ function ExercisePickerModal({
                           pendingPick.difficultyLevel === "medium" ? "moderate" : pendingPick.difficultyLevel
                         }`}
                       >
-                        {pendingPick.difficultyLevel.charAt(0).toUpperCase() + pendingPick.difficultyLevel.slice(1)}
+                        {difficultyLabels[pendingPick.difficultyLevel]}
                       </span>
                       <span className="pd-picker-confirm-chip author">
-                        By {pendingPick.createdByName || "Therapist"}
+                        สร้างโดย {pendingPick.createdByName || "นักกายภาพบำบัด"}
                       </span>
                     </div>
                     {pendingPick.description && (
@@ -2346,17 +2381,17 @@ function ExercisePickerModal({
                   <div className="pd-picker-confirm-section-header">
                     <div className="pd-picker-confirm-section-title">
                       <Target size={15} />
-                      <span>Target repetitions</span>
+                      <span>จำนวนครั้งเป้าหมาย</span>
                     </div>
                     {isCustomTarget && (
                       <button
                         type="button"
                         className="pd-picker-confirm-reset-btn"
-                        onClick={() => setPendingTarget(`${defaultReps} reps`)}
-                        title="Reset to default repetitions"
+                        onClick={() => setPendingTarget(`${defaultReps} ครั้ง`)}
+                        title="คืนค่าเป็นจำนวนครั้งเริ่มต้น"
                         disabled={parentLoading}
                       >
-                        <RotateCcw size={11} /> Reset ({defaultReps} reps)
+                        <RotateCcw size={11} /> คืนค่า ({defaultReps} ครั้ง)
                       </button>
                     )}
                   </div>
@@ -2368,7 +2403,7 @@ function ExercisePickerModal({
                         className="pd-picker-confirm-step-btn"
                         onClick={() => handleStep(-1)}
                         disabled={parentLoading || currentReps <= 1}
-                        aria-label="Decrease repetitions"
+                        aria-label="ลดจำนวนครั้ง"
                       >
                         <Minus size={16} />
                       </button>
@@ -2382,9 +2417,9 @@ function ExercisePickerModal({
                           value={targetParts.amount || ""}
                           onChange={(e) => handleAmountChange(e.target.value)}
                           disabled={parentLoading}
-                          aria-label="Target repetitions amount"
+                          aria-label="จำนวนครั้งเป้าหมาย"
                         />
-                        <span className="pd-picker-confirm-stepper-unit">reps</span>
+                        <span className="pd-picker-confirm-stepper-unit">ครั้ง</span>
                       </div>
 
                       <button
@@ -2392,14 +2427,14 @@ function ExercisePickerModal({
                         className="pd-picker-confirm-step-btn"
                         onClick={() => handleStep(1)}
                         disabled={parentLoading}
-                        aria-label="Increase repetitions"
+                        aria-label="เพิ่มจำนวนครั้ง"
                       >
                         <Plus size={16} />
                       </button>
                     </div>
 
                     <div className="pd-picker-confirm-presets">
-                      <span className="pd-picker-confirm-presets-label">Quick select:</span>
+                      <span className="pd-picker-confirm-presets-label">เลือกด่วน:</span>
                       <div className="pd-picker-confirm-presets-list">
                         {[5, 8, 10, 12, 15, 20].map((preset) => {
                           const isSelected = currentReps === preset;
@@ -2411,7 +2446,7 @@ function ExercisePickerModal({
                               onClick={() => handlePresetClick(preset)}
                               disabled={parentLoading}
                             >
-                              {preset} reps
+                              {preset} ครั้ง
                             </button>
                           );
                         })}
@@ -2425,9 +2460,9 @@ function ExercisePickerModal({
                   <div className="pd-picker-confirm-section-header">
                     <div className="pd-picker-confirm-section-title">
                       <ClipboardList size={15} />
-                      <span>Therapist instruction</span>
+                      <span>คำแนะนำจากนักกายภาพบำบัด</span>
                     </div>
-                    <span className="pd-optional-badge">Optional</span>
+                    <span className="pd-optional-badge">ไม่บังคับ</span>
                   </div>
 
                   <textarea
@@ -2435,13 +2470,13 @@ function ExercisePickerModal({
                     value={pendingInstruction}
                     onChange={(event) => setPendingInstruction(event.target.value)}
                     rows={3}
-                    placeholder="e.g. Focus on steady control, keep elbow stable, rest 30s between reps (เคลื่อนไหวช้า ๆ อย่างระมัดระวัง)"
+                    placeholder="เช่น ควบคุมการเคลื่อนไหวให้มั่นคง รักษาข้อศอกให้นิ่ง และพัก 30 วินาทีระหว่างครั้ง"
                     disabled={parentLoading}
                   />
 
                   <p className="pd-modal-hint pd-picker-confirm-hint">
                     <Info size={13} className="pd-picker-confirm-hint-icon" />
-                    <span>This instruction is shown to the patient alongside this exercise to guide correct technique.</span>
+                    <span>คำแนะนำนี้จะแสดงให้ผู้ป่วยเห็นพร้อมกับท่าบริหาร เพื่อช่วยให้ฝึกได้อย่างถูกต้อง</span>
                   </p>
                 </div>
 
@@ -2453,7 +2488,7 @@ function ExercisePickerModal({
                     onClick={() => setPendingPick(null)}
                     disabled={parentLoading}
                   >
-                    Cancel
+                    ยกเลิก
                   </button>
                   <button
                     type="button"
@@ -2464,12 +2499,12 @@ function ExercisePickerModal({
                     {parentLoading ? (
                       <>
                         <Loader2 size={16} className="spin-icon" />
-                        <span>Adding…</span>
+                        <span>กำลังเพิ่ม…</span>
                       </>
                     ) : (
                       <>
                         <Plus size={16} />
-                        <span>Add to schedule</span>
+                        <span>เพิ่มลงในตารางฝึก</span>
                       </>
                     )}
                   </button>
@@ -2513,15 +2548,16 @@ function fileTypeBadge(file: AvailableFileItem): string {
   const parts = file.originalName.split(".");
   const ext = parts.length > 1 ? parts.pop()?.toUpperCase() : null;
   if (ext && ext.length <= 5) return ext;
-  if (file.fileType === "image") return "IMAGE";
-  if (file.fileType === "video") return "VIDEO";
-  if (file.fileType === "document") return "DOC";
-  return file.fileType.toUpperCase();
+  if (file.fileType === "image") return "รูปภาพ";
+  if (file.fileType === "video") return "วิดีโอ";
+  if (file.fileType === "document") return "เอกสาร";
+  return "ไฟล์";
 }
 
 function PlanModal({
   selectedPlan,
   mode,
+  readOnly = false,
   availableAttachments,
   availableFiles,
   token,
@@ -2533,6 +2569,12 @@ function PlanModal({
   // Fixed mode: the "+" button opens this modal in "create", the bottom
   // "Edit plan" button in "edit" — there is no in-modal switcher anymore.
   mode: "edit" | "create";
+  // True when the opener may VIEW but not edit this plan — the signed-in
+  // therapist is not assigned to the patient (PatientDetailPage's canEditPlan
+  // === false). Every field, the attachment tools and the submit button are
+  // then disabled so the popup can never look editable while being un-saveable;
+  // Close and file preview remain available.
+  readOnly?: boolean;
   availableAttachments: PlanAttachment[];
   availableFiles: PlanAttachmentFile[];
   // Auth token for the real POST /files upload behind "Attach medical file".
@@ -2613,7 +2655,6 @@ function PlanModal({
   const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [filterTab, setFilterTab] = useState<"all" | "selected">("all");
   const [previewFile, setPreviewFile] = useState<{ file: AvailableFileItem; url: string; mime: string } | null>(null);
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
   const [previewingFileId, setPreviewingFileId] = useState<string | null>(null);
@@ -2622,7 +2663,7 @@ function PlanModal({
 
   const handleUploadPickedFile = async (file: File) => {
     if (!token) {
-      setUploadError("Please log in again to attach files.");
+      setUploadError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อแนบไฟล์");
       return;
     }
     setUploadingFile(true);
@@ -2644,7 +2685,7 @@ function PlanModal({
       setUploadError(
         err instanceof ApiError
           ? err.message
-          : "Could not upload the file. Please try again."
+          : "อัปโหลดไฟล์ไม่สำเร็จ กรุณาลองอีกครั้ง"
       );
     } finally {
       setUploadingFile(false);
@@ -2668,7 +2709,7 @@ function PlanModal({
 
   const handlePreviewFile = async (file: AvailableFileItem) => {
     if (!token) {
-      setUploadError("Please log in to preview files.");
+      setUploadError("กรุณาเข้าสู่ระบบเพื่อดูตัวอย่างไฟล์");
       return;
     }
     setPreviewingFileId(file.fileId);
@@ -2688,7 +2729,7 @@ function PlanModal({
       const url = URL.createObjectURL(typedBlob);
       setPreviewFile({ file, url, mime });
     } catch (err) {
-      setPreviewError(err instanceof ApiError ? err.message : "Could not load file preview.");
+      setPreviewError(err instanceof ApiError ? err.message : "โหลดตัวอย่างไฟล์ไม่สำเร็จ");
     } finally {
       setPreviewingFileId(null);
     }
@@ -2711,6 +2752,7 @@ function PlanModal({
   }, [previewFile]);
 
   const toggleAttachment = (fileId: string, defaultDesc = "") => {
+    if (readOnly) return;
     setSelectedAttachmentsMap((current) => {
       const next = { ...current };
       if (fileId in next) {
@@ -2723,6 +2765,7 @@ function PlanModal({
   };
 
   const updateAttachmentDescription = (fileId: string, desc: string) => {
+    if (readOnly) return;
     setSelectedAttachmentsMap((current) => ({
       ...current,
       [fileId]: desc
@@ -2730,12 +2773,13 @@ function PlanModal({
   };
 
   const selectedCount = Object.keys(selectedAttachmentsMap).length;
-  const displayedFiles = useMemo(() => {
-    if (filterTab === "selected") {
-      return uniqueAvailableFiles.filter((f) => f.fileId in selectedAttachmentsMap);
-    }
-    return uniqueAvailableFiles;
-  }, [uniqueAvailableFiles, filterTab, selectedAttachmentsMap]);
+  // The "All" tab was removed — this list ALWAYS shows only the files attached
+  // to this plan (a fresh upload auto-attaches, and each card's checkbox/×
+  // still unlinks it).
+  const displayedFiles = useMemo(
+    () => uniqueAvailableFiles.filter((f) => f.fileId in selectedAttachmentsMap),
+    [uniqueAvailableFiles, selectedAttachmentsMap]
+  );
 
   // The modal is mounted fresh each open with a fixed mode (create via the
   // column's "+" button, edit via the bottom "Edit plan" button) — no
@@ -2743,6 +2787,9 @@ function PlanModal({
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
+    // Read-only popup (therapist not assigned) — never saves, even if a key
+    // press somehow re-enables the form.
+    if (readOnly) return;
     if (!name.trim() || !startDateLabel || !endDateLabel) return;
 
     const attachmentPayload = Object.entries(selectedAttachmentsMap).map(([fileId, desc]) => ({
@@ -2787,36 +2834,44 @@ function PlanModal({
   return (
     <>
       <div className="therapist-panel-scrim" onClick={onClose} />
-      <div className="pd-modal" role="dialog" aria-label="Manage rehabilitation plan" style={{ width: "min(100%, 580px)" }}>
+      <div className="pd-modal" role="dialog" aria-label="จัดการแผนฟื้นฟู" style={{ width: "min(100%, 580px)" }}>
         <div className="therapist-detail-header">
-          <strong>{mode === "create" ? "New rehabilitation plan" : "Edit rehabilitation plan"}</strong>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+          <strong>
+            {readOnly
+              ? "แผนฟื้นฟู (ดูอย่างเดียว)"
+              : mode === "create"
+                ? "สร้างแผนฟื้นฟูใหม่"
+                : "แก้ไขแผนฟื้นฟู"}
+          </strong>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="ปิด">
             <X size={16} />
           </button>
         </div>
 
         <form className="pd-modal-form" onSubmit={handleSubmit}>
           <label>
-            Plan name
+            ชื่อแผน
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Initial Stroke Recovery Plan"
+              placeholder="เช่น แผนฟื้นฟูระยะเริ่มต้นหลังโรคหลอดเลือดสมอง"
+              disabled={readOnly}
               required
             />
           </label>
 
           <label>
-            Description (optional)
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
+            คำอธิบาย (ไม่บังคับ)
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} disabled={readOnly} />
           </label>
 
           <label>
-            Status
+            สถานะ
             <select
               className="admin-role-select"
               value={status}
               onChange={(event) => setStatus(event.target.value as RehabPlanStatus)}
+              disabled={readOnly}
             >
               {(["draft", "active", "completed", "cancelled"] as RehabPlanStatus[]).map((value) => (
                 <option key={value} value={value}>
@@ -2828,9 +2883,9 @@ function PlanModal({
 
           <div className="library-toggle-row">
             <label>
-              Start date
+              วันที่เริ่มต้น
               <div className="date-input-with-calendar">
-                <input type="text" inputMode="numeric" placeholder="dd/mm/yyyy" value={startDateInput} onChange={(event) => {
+                <input type="text" inputMode="numeric" placeholder="วัน/เดือน/ปี" disabled={readOnly} value={startDateInput} onChange={(event) => {
                   const value = isoDateFromDisplay(event.target.value);
                   setStartDateInput(event.target.value);
                   if (value) {
@@ -2842,7 +2897,7 @@ function PlanModal({
                   }
                 }} required />
                 <span className="date-calendar-icon" aria-hidden="true"><Calendar size={16} /></span>
-                <input className="native-calendar-trigger" type="date" value={startDateLabel} min={mode === "create" ? todayDateLabel : undefined} aria-label="Choose start date" onChange={(event) => {
+                <input className="native-calendar-trigger" type="date" disabled={readOnly} value={startDateLabel} min={mode === "create" ? todayDateLabel : undefined} aria-label="เลือกวันที่เริ่มต้น" onChange={(event) => {
                   const value = event.target.value;
                   setStartDateLabel(value);
                   setStartDateInput(displayDateLabel(value));
@@ -2854,15 +2909,15 @@ function PlanModal({
               </div>
             </label>
             <label>
-              End date
+              วันที่สิ้นสุด
               <div className="date-input-with-calendar">
-                <input type="text" inputMode="numeric" placeholder="dd/mm/yyyy" value={endDateInput} onChange={(event) => {
+                <input type="text" inputMode="numeric" placeholder="วัน/เดือน/ปี" disabled={readOnly} value={endDateInput} onChange={(event) => {
                   const value = isoDateFromDisplay(event.target.value);
                   setEndDateInput(event.target.value);
                   if (value) setEndDateLabel(value);
                 }} required />
                 <span className="date-calendar-icon" aria-hidden="true"><Calendar size={16} /></span>
-                <input className="native-calendar-trigger" type="date" value={endDateLabel} min={startDateLabel || todayDateLabel} aria-label="Choose end date" onChange={(event) => {
+                <input className="native-calendar-trigger" type="date" disabled={readOnly} value={endDateLabel} min={startDateLabel || todayDateLabel} aria-label="เลือกวันที่สิ้นสุด" onChange={(event) => {
                   const value = event.target.value;
                   setEndDateLabel(value);
                   setEndDateInput(displayDateLabel(value));
@@ -2875,32 +2930,13 @@ function PlanModal({
           <div className="pd-attachments-container">
             <div className="pd-attachments-header-row">
               <label className="pd-attachments-title">
-                <Paperclip size={15} /> Medical Attachments
+                <Paperclip size={15} /> ไฟล์ทางการแพทย์
                 {selectedCount > 0 && (
                   <span className="pd-attachments-count-badge">
-                    <Check size={11} strokeWidth={3} /> {selectedCount} attached
+                    <Check size={11} strokeWidth={3} /> แนบแล้ว {selectedCount} ไฟล์
                   </span>
                 )}
               </label>
-
-              {uniqueAvailableFiles.length > 0 && (
-                <div className="pd-attachments-tabs">
-                  <button
-                    type="button"
-                    className={`pd-attachments-tab-btn ${filterTab === "all" ? "active" : ""}`}
-                    onClick={() => setFilterTab("all")}
-                  >
-                    All ({uniqueAvailableFiles.length})
-                  </button>
-                  <button
-                    type="button"
-                    className={`pd-attachments-tab-btn ${filterTab === "selected" ? "active" : ""}`}
-                    onClick={() => setFilterTab("selected")}
-                  >
-                    Attached ({selectedCount})
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Hidden file input */}
@@ -2909,39 +2945,47 @@ function PlanModal({
               type="file"
               style={{ display: "none" }}
               onChange={handleMedicalFilePicked}
-              aria-label="Choose medical file to upload"
+              aria-label="เลือกไฟล์ทางการแพทย์เพื่ออัปโหลด"
             />
 
-            {/* Dropzone & Upload trigger */}
+            {/* Dropzone & Upload trigger — inert in read-only mode (no click,
+                no drag-and-drop) so a non-assigned therapist can't upload. */}
             <div
-              className={`pd-attachments-dropzone ${isDragOver ? "drag-over" : ""}`}
-              onClick={() => medicalFileInputRef.current?.click()}
+              className={`pd-attachments-dropzone ${isDragOver ? "drag-over" : ""}${readOnly ? " read-only" : ""}`}
+              onClick={() => {
+                if (!readOnly) medicalFileInputRef.current?.click();
+              }}
               onDragOver={(e) => {
+                if (readOnly) return;
                 e.preventDefault();
                 setIsDragOver(true);
               }}
               onDragLeave={() => setIsDragOver(false)}
-              onDrop={handleDrop}
+              onDrop={readOnly ? undefined : handleDrop}
             >
               <div className="pd-attachments-dropzone-left">
                 <span className="pd-attachments-dropzone-icon">
                   <UploadCloud size={18} />
                 </span>
                 <div className="pd-attachments-dropzone-text">
-                  <strong>{uploadingFile ? "Uploading medical file…" : "Attach medical file"}</strong>
-                  <small>Drag & drop or click to attach MRI scans, reports, or history</small>
+                  <strong>{uploadingFile ? "กำลังอัปโหลดไฟล์ทางการแพทย์…" : readOnly ? "ไม่สามารถอัปโหลดไฟล์ทางการแพทย์ได้" : "แนบไฟล์ทางการแพทย์"}</strong>
+                  <small>
+                    {readOnly
+                      ? "เฉพาะนักกายภาพบำบัดที่ได้รับมอบหมายให้ดูแลผู้ป่วยรายนี้เท่านั้นที่แนบไฟล์ได้"
+                      : "ลากและวางหรือคลิกเพื่อแนบภาพ MRI รายงาน หรือประวัติการรักษา"}
+                  </small>
                 </div>
               </div>
               <button
                 type="button"
                 className="pd-attachments-browse-btn"
-                disabled={uploadingFile || !token}
+                disabled={uploadingFile || !token || readOnly}
                 onClick={(e) => {
                   e.stopPropagation();
                   medicalFileInputRef.current?.click();
                 }}
               >
-                {uploadingFile ? "Uploading…" : "Browse"}
+                {uploadingFile ? "กำลังอัปโหลด…" : "เลือกไฟล์"}
               </button>
             </div>
 
@@ -2950,7 +2994,7 @@ function PlanModal({
                 <Loader2 size={16} className="filepicker-spin" style={{ color: "var(--primary)" }} />
                 <div className="pd-attachments-uploading-info">
                   <p className="pd-attachments-uploading-filename">
-                    {uploadingFileName || "Uploading file…"}
+                    {uploadingFileName || "กำลังอัปโหลดไฟล์…"}
                   </p>
                   <div className="filepicker-progress-track">
                     <div className="filepicker-progress-fill" style={{ width: "100%" }} />
@@ -2972,11 +3016,11 @@ function PlanModal({
 
             {uniqueAvailableFiles.length === 0 ? (
               <p className="pd-empty-note" style={{ margin: 0, padding: "12px 0", fontSize: "0.82rem" }}>
-                No medical files or attachments recorded for this patient yet. Use the button above to upload.
+                ยังไม่มีไฟล์ทางการแพทย์หรือไฟล์แนบของผู้ป่วยรายนี้ คลิกปุ่มด้านบนเพื่ออัปโหลด
               </p>
             ) : displayedFiles.length === 0 ? (
               <p className="pd-empty-note" style={{ margin: 0, padding: "12px 0", fontSize: "0.82rem" }}>
-                No files are currently attached to this plan. Switch to &ldquo;All&rdquo; to select available records.
+                ยังไม่มีไฟล์แนบในแผนนี้ คลิกปุ่มด้านบนเพื่ออัปโหลดและแนบไฟล์
               </p>
             ) : (
               <div className="pd-attachments-list">
@@ -2991,13 +3035,14 @@ function PlanModal({
                       <div className="pd-attachment-card-header">
                         <label
                           className="pd-attachment-checkbox-label"
-                          title={isChecked ? "Unlink from plan" : "Link to plan"}
+                          title={isChecked ? "นำออกจากแผน" : "แนบกับแผน"}
                           onClick={(e) => e.stopPropagation()}
                         >
                           <input
                             type="checkbox"
                             className="pd-attachment-checkbox"
                             checked={isChecked}
+                            disabled={readOnly}
                             onChange={() => toggleAttachment(file.fileId, file.defaultDescription ?? "")}
                           />
                           <span className="pd-attachment-custom-check" aria-hidden="true">
@@ -3020,18 +3065,18 @@ function PlanModal({
                             <div className="pd-attachment-badges">
                               {isChecked && (
                                 <span className="pd-attachment-pill attached">
-                                  <CheckCircle2 size={10} /> Attached
+                                  <CheckCircle2 size={10} /> แนบแล้ว
                                 </span>
                               )}
                               {isOriginallyAttached && mode === "edit" && (
-                                <span className="pd-attachment-pill saved">Saved</span>
+                                <span className="pd-attachment-pill saved">บันทึกแล้ว</span>
                               )}
                             </div>
                           </div>
                           <div className="pd-attachment-meta-row">
                             <span className="pd-attachment-type-tag">{fileTypeBadge(file)}</span>
                             {file.fileSize != null && <span>{formatFileSize(file.fileSize)}</span>}
-                            {file.uploadedAtLabel && <span>Uploaded {file.uploadedAtLabel}</span>}
+                            {file.uploadedAtLabel && <span>อัปโหลดเมื่อ {file.uploadedAtLabel}</span>}
                           </div>
                         </div>
 
@@ -3039,7 +3084,7 @@ function PlanModal({
                           <button
                             type="button"
                             className="pd-attachment-action-btn view-btn"
-                            title="Preview file"
+                            title="ดูตัวอย่างไฟล์"
                             onClick={() => void handlePreviewFile(file)}
                             disabled={previewingFileId === file.fileId}
                           >
@@ -3048,13 +3093,14 @@ function PlanModal({
                             ) : (
                               <Eye size={12} />
                             )}
-                            <span>{previewingFileId === file.fileId ? "Loading…" : "View"}</span>
+                            <span>{previewingFileId === file.fileId ? "กำลังโหลด…" : "ดู"}</span>
                           </button>
                           {isChecked && (
                             <button
                               type="button"
                               className="pd-attachment-action-btn remove-btn"
-                              title="Deselect this attachment"
+                              title="นำไฟล์แนบนี้ออก"
+                              disabled={readOnly}
                               onClick={() => toggleAttachment(file.fileId)}
                             >
                               <X size={14} />
@@ -3067,21 +3113,23 @@ function PlanModal({
                         <div className="pd-attachment-note-section">
                           <div className="pd-attachment-note-header">
                             <FileText size={12} className="pd-attachment-note-icon" />
-                            <span>Clinical note / plan context</span>
+                            <span>บันทึกทางคลินิก / บริบทของแผน</span>
                           </div>
                           <div className="pd-attachment-note-input-wrap">
                             <input
                               type="text"
                               className="pd-attachment-note-input"
-                              placeholder="e.g. Baseline MRI scan, discharge summary, CT findings..."
+                              placeholder="เช่น ภาพ MRI เริ่มต้น สรุปการจำหน่าย หรือผล CT"
                               value={selectedAttachmentsMap[file.fileId] ?? ""}
+                              disabled={readOnly}
                               onChange={(e) => updateAttachmentDescription(file.fileId, e.target.value)}
                             />
                             {selectedAttachmentsMap[file.fileId] && (
                               <button
                                 type="button"
                                 className="pd-attachment-note-clear"
-                                title="Clear note"
+                                title="ล้างบันทึก"
+                                disabled={readOnly}
                                 onClick={() => updateAttachmentDescription(file.fileId, "")}
                               >
                                 <X size={12} />
@@ -3099,14 +3147,24 @@ function PlanModal({
 
           <p className="pd-modal-hint">
             <Calendar size={12} />{" "}
-            {mode === "create"
-              ? "Creates a fresh day-by-day schedule matching patient_rehabilitation_plans and links any selected medical attachments."
-              : "Editing updates plan metadata and synchronizes associated medical attachments."}
+            {readOnly
+              ? "ดูอย่างเดียว — เฉพาะนักกายภาพบำบัดที่ได้รับมอบหมายให้ดูแลผู้ป่วยรายนี้เท่านั้นที่แก้ไขแผนได้"
+              : mode === "create"
+                ? "สร้างตารางฝึกรายวันใหม่และเชื่อมโยงไฟล์ทางการแพทย์ที่เลือก"
+                : "การแก้ไขจะอัปเดตข้อมูลแผนและซิงก์ไฟล์ทางการแพทย์ที่แนบไว้"}
           </p>
 
-          <button type="submit" className="primary-button full-width">
-            {mode === "create" ? "Create plan" : "Save changes"}
-          </button>
+          {/* Read-only viewers get Close instead of a submit button — there is
+              nothing they can change, and handleSavePlan would reject it anyway. */}
+          {readOnly ? (
+            <button type="button" className="primary-button full-width" onClick={onClose}>
+              ปิด
+            </button>
+          ) : (
+            <button type="submit" className="primary-button full-width">
+              {mode === "create" ? "สร้างแผน" : "บันทึกการเปลี่ยนแปลง"}
+            </button>
+          )}
         </form>
       </div>
 
@@ -3116,7 +3174,7 @@ function PlanModal({
           <div
             className={`pd-attachment-preview-modal ${isPreviewMaximized ? "maximized" : ""}`}
             role="dialog"
-            aria-label={`Preview of ${previewFile.file.originalName}`}
+            aria-label={`ตัวอย่างไฟล์ ${previewFile.file.originalName}`}
           >
             <div className="pd-attachment-preview-header">
               <div className="pd-attachment-preview-title" title={previewFile.file.originalName}>
@@ -3131,8 +3189,8 @@ function PlanModal({
                   type="button"
                   className="icon-button"
                   onClick={() => setIsPreviewMaximized(!isPreviewMaximized)}
-                  title={isPreviewMaximized ? "Restore size" : "Maximize"}
-                  aria-label={isPreviewMaximized ? "Restore size" : "Maximize"}
+                  title={isPreviewMaximized ? "คืนค่าขนาดเดิม" : "ขยายเต็มหน้าจอ"}
+                  aria-label={isPreviewMaximized ? "คืนค่าขนาดเดิม" : "ขยายเต็มหน้าจอ"}
                 >
                   {isPreviewMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                 </button>
@@ -3140,7 +3198,7 @@ function PlanModal({
                   type="button"
                   className="icon-button"
                   onClick={handleClosePreview}
-                  aria-label="Close preview"
+                  aria-label="ปิดตัวอย่างไฟล์"
                 >
                   <X size={16} />
                 </button>
@@ -3174,7 +3232,7 @@ function PlanModal({
                     {previewFile.file.originalName}
                   </p>
                   <p style={{ margin: 0, fontSize: "0.78rem", opacity: 0.7 }}>
-                    Preview for this file type is best viewed in a separate browser tab or viewer.
+                    ไฟล์ประเภทนี้ควรเปิดดูในแท็บเบราว์เซอร์หรือโปรแกรมดูไฟล์แยกต่างหาก
                   </p>
                 </div>
               )}
@@ -3188,10 +3246,10 @@ function PlanModal({
                 className="secondary-button"
                 style={{ display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none" }}
               >
-                <ExternalLink size={14} /> Open in new window
+                <ExternalLink size={14} /> เปิดในหน้าต่างใหม่
               </a>
               <button type="button" className="primary-button" onClick={handleClosePreview}>
-                Close
+                ปิด
               </button>
             </div>
           </div>

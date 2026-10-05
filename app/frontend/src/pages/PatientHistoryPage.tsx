@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, Dumbbell, Hand, Ban, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Dumbbell, Hand, Ban, CheckCircle2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
 import { PatientSidebar } from "../components/PatientSidebar";
@@ -18,6 +18,17 @@ export interface HistoryExercise {
   targetValueLabel: string;
   status: string;
   score?: number;
+  result?: HistoryExerciseResult;
+}
+
+export interface HistoryExerciseResult {
+  completedAtIso: string | null;
+  aiScore: number | null;
+  aiFeedback: string | null;
+  therapistScore: number | null;
+  therapistFeedback: string | null;
+  currentScore: number | null;
+  currentScoreSource: "ai" | "therapist" | null;
 }
 
 export interface HistoryDay {
@@ -107,15 +118,32 @@ function mapServerPlansToHistory(serverPlans: any[]): HistoryPlan[] {
 
       const exercises: HistoryExercise[] = (sd.scheduledExercises || []).map((ex: any) => {
         const results = ex.performanceResults || [];
-        let score: number | undefined = undefined;
+        let result: HistoryExerciseResult | undefined;
         if (results.length > 0) {
           const sorted = [...results].sort((a, b) => (b.attemptNumber || 0) - (a.attemptNumber || 0));
           const latest = sorted[0];
-          const rawScore = latest?.finalScore ?? latest?.ptScore ?? latest?.aiScore;
-          if (rawScore !== null && rawScore !== undefined) {
-            const num = typeof rawScore === "number" ? rawScore : Number(rawScore);
-            if (!Number.isNaN(num)) score = Math.round(num);
-          }
+          const toScore = (value: unknown): number | null => {
+            if (value === null || value === undefined) return null;
+            const number = typeof value === "number" ? value : Number(value);
+            return Number.isFinite(number) ? number : null;
+          };
+          const therapistScore = toScore(latest?.ptScore);
+          const therapistScoreIsActive =
+            (latest?.evaluationSource === "pt" || latest?.evaluationSource === "manual") &&
+            therapistScore !== null;
+          const currentScore = therapistScoreIsActive
+            ? therapistScore ?? toScore(latest?.finalScore) ?? toScore(latest?.aiScore)
+            : toScore(latest?.aiScore) ?? toScore(latest?.finalScore) ?? therapistScore;
+          const currentScoreSource = currentScore === null ? null : therapistScoreIsActive ? "therapist" : "ai";
+          result = {
+            completedAtIso: latest?.completedAt ? new Date(latest.completedAt).toISOString() : null,
+            aiScore: toScore(latest?.aiScore),
+            aiFeedback: latest?.aiFeedback ?? null,
+            therapistScore,
+            therapistFeedback: latest?.ptFeedback ?? null,
+            currentScore,
+            currentScoreSource
+          };
         }
 
         return {
@@ -125,7 +153,8 @@ function mapServerPlansToHistory(serverPlans: any[]): HistoryPlan[] {
           difficultyLevel: ex.exerciseLibrary?.difficultyLevel ?? ex.difficultyLevel,
           targetValueLabel: formatTargetValue(ex.targetValue),
           status: ex.status,
-          score
+          score: result?.currentScore ?? undefined,
+          result
         };
       });
 
@@ -265,6 +294,7 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
 
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
+  const [resultExercise, setResultExercise] = useState<HistoryExercise | null>(null);
   const [viewedMonth, setViewedMonth] = useState<ViewedMonth>(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
@@ -354,6 +384,15 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
       return { year: Math.floor(total / 12), month: ((total % 12) + 12) % 12 };
     });
   };
+
+  useEffect(() => {
+    if (!resultExercise) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setResultExercise(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [resultExercise]);
 
   return (
     <section className="therapist-shell">
@@ -480,8 +519,22 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                     <div className="pd-session-list">
                       {selectedDay.exercises.map((exercise) => {
                         const Icon = trackingIcons[exercise.trackingType] || Dumbbell;
+                        const canOpenResult = exercise.status === "completed" && exercise.result !== undefined;
                         return (
-                          <div className="pd-session-row" key={exercise.id}>
+                          <div
+                            className={`pd-session-row ${canOpenResult ? "pp-clickable-row" : ""}`}
+                            key={exercise.id}
+                            role={canOpenResult ? "button" : undefined}
+                            tabIndex={canOpenResult ? 0 : undefined}
+                            aria-label={canOpenResult ? `ดูผลการฝึกท่า${exercise.name}` : undefined}
+                            onClick={canOpenResult ? () => setResultExercise(exercise) : undefined}
+                            onKeyDown={canOpenResult ? (event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                setResultExercise(exercise);
+                              }
+                            } : undefined}
+                          >
                             <div className="pp-history-row-label">
                               <strong>{exercise.name}</strong>
                               <small>
@@ -492,11 +545,22 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
                             </div>
                             <div className="pd-session-actions">
                               {exercise.score !== undefined ? (
-                                <span className="pd-session-score">คะแนน {exercise.score}</span>
+                                <>
+                                  <span className="pd-session-score">คะแนน {exercise.score}</span>
+                                  {exercise.result?.currentScoreSource && (
+                                    <span className={`pd-session-source ${exercise.result.currentScoreSource === "ai" ? "ai" : "pt_reviewed"}`}>
+                                      {exercise.result.currentScoreSource === "ai" ? "AI" : "นักกายภาพบำบัด"}
+                                    </span>
+                                  )}
+                                  {canOpenResult && <span className="text-action">ดูผล <ChevronRight size={12} /></span>}
+                                </>
                               ) : (
-                                <span className="pd-session-skipped">
-                                  {exercise.status === "completed" ? "เสร็จสิ้น" : "ยังไม่มีคะแนน"}
-                                </span>
+                                <>
+                                  <span className="pd-session-skipped">
+                                    {exercise.status === "completed" ? "เสร็จสิ้น" : "ยังไม่มีคะแนน"}
+                                  </span>
+                                  {canOpenResult && <span className="text-action">ดูผล <ChevronRight size={12} /></span>}
+                                </>
                               )}
                             </div>
                           </div>
@@ -585,6 +649,63 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
           )}
         </main>
       </div>
+
+      {resultExercise?.result && selectedDay && (
+        <div
+          className="therapist-panel-scrim"
+          onClick={() => setResultExercise(null)}
+        >
+          <div
+            className="pd-modal ph-result-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="patient-session-result-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="therapist-detail-header">
+              <div>
+                <strong id="patient-session-result-title">{resultExercise.name}</strong>
+                <small>
+                  {resultExercise.result.completedAtIso
+                    ? new Date(resultExercise.result.completedAtIso).toLocaleString()
+                    : dayDateLabel(selectedDay, selectedDayIndex ?? 0)}
+                </small>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setResultExercise(null)} aria-label="ปิดผลการฝึก">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="ph-current-result">
+              <span>คะแนนปัจจุบัน</span>
+              <strong>{resultExercise.result.currentScore ?? "—"}</strong>
+              {resultExercise.result.currentScoreSource ? (
+                <span className={`pd-session-source ${resultExercise.result.currentScoreSource === "ai" ? "ai" : "pt_reviewed"}`}>
+                  {resultExercise.result.currentScoreSource === "ai" ? "คะแนนจาก AI" : "คะแนนจากนักกายภาพบำบัด"}
+                </span>
+              ) : <span className="pd-session-source">ยังไม่มีคะแนนปัจจุบัน</span>}
+            </div>
+
+            <section className="ph-result-section">
+              <h3>ผลการประเมินจาก AI</h3>
+              <p className="ph-result-score">คะแนน AI: <strong>{resultExercise.result.aiScore ?? "—"}</strong></p>
+              <p>{resultExercise.result.aiFeedback || "ยังไม่มีคำแนะนำจาก AI"}</p>
+            </section>
+
+            <section className="ph-result-section">
+              <h3>ผลการประเมินจากนักกายภาพบำบัด</h3>
+              {resultExercise.result.therapistScore !== null || resultExercise.result.therapistFeedback ? (
+                <>
+                  <p className="ph-result-score">คะแนนนักกายภาพบำบัด: <strong>{resultExercise.result.therapistScore ?? "—"}</strong></p>
+                  <p>{resultExercise.result.therapistFeedback || "ไม่มีความคิดเห็นเพิ่มเติม"}</p>
+                </>
+              ) : (
+                <p>ยังไม่มีผลการประเมินหรือความคิดเห็นจากนักกายภาพบำบัด</p>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
 
       <PatientBottomNav activeLabel="History" onNavigate={onNavigate} />
     </section>
