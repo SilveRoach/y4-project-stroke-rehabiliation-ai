@@ -75,7 +75,6 @@ import type {
   SessionHistoryEntry,
   TherapistPatientSummary
 } from "../types";
-import { initialsFromName } from "../utils/displayName";
 import { formatTargetValue } from "../utils/targetValue";
 
 interface PatientDetailPageProps {
@@ -468,7 +467,6 @@ export function PatientDetailPage({
   onViewExercise
 }: PatientDetailPageProps) {
   const { token, user } = useAuth();
-  const therapistDisplayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
   // Real profile picture for the patient-profile panel: the summary already
   // carries users.profile_picture_file_id — resolve it to a blob object URL via
   // the auth'd GET /files/:id/content endpoint (useProfilePicture). Falls back
@@ -1163,15 +1161,6 @@ export function PatientDetailPage({
           <div>
             <h1>ข้อมูลผู้ป่วย</h1>
             <p>{patientCode}</p>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{therapistDisplayName}</strong>
-                <small>นักกายภาพบำบัด</small>
-              </div>
-              <span className="avatar-badge">{initialsFromName(therapistDisplayName)}</span>
-            </div>
           </div>
         </header>
 

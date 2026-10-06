@@ -16,7 +16,6 @@ import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
 import { useAuth } from "../store/authStore";
-import { initialsFromName } from "../utils/displayName";
 import { drawSkeleton } from "../ai/poseDetection";
 import {
   DEFAULT_FSM_MARGIN_SCALE,
@@ -208,7 +207,6 @@ export function ExerciseAiPage({
   isVersionView = false
 }: ExerciseAiPageProps) {
   const { token, user } = useAuth();
-  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
 
   // Exercise identity / payload fields.
   const [exerciseName, setExerciseName] = useState(exercise?.name ?? initialName);
@@ -309,7 +307,11 @@ export function ExerciseAiPage({
   // authoring workspace is showing. Unlike a patient's session there is no
   // upload/confirmation step: finishing (or exiting) comes straight back here
   // and the take is discarded.
-  const [testSession, setTestSession] = useState<{ exercise: PatientExercise; testConfig: SessionTestConfig } | null>(null);
+  const [testSession, setTestSession] = useState<{
+    exercise: PatientExercise;
+    testConfig: SessionTestConfig;
+    ownsDemoVideoUrl: boolean;
+  } | null>(null);
   const [testPaused, setTestPaused] = useState(false);
   const [testNote, setTestNote] = useState<string | null>(null);
 
@@ -987,6 +989,10 @@ export function ExerciseAiPage({
       ? "ท่าบริหารนี้ดูได้อย่างเดียว จึงไม่สามารถทดสอบได้"
       : scanBusy
           ? "รอให้สแกนคลิปปัจจุบันเสร็จก่อนเริ่มทดสอบ"
+        : targetExercise?.demoVideoFileId && savedDemoState === "loading"
+          ? "กำลังโหลดวิดีโอสาธิตที่บันทึกไว้ กรุณารอสักครู่"
+        : targetExercise?.demoVideoFileId && savedDemoState === "error"
+          ? "โหลดวิดีโอสาธิตที่บันทึกไว้ไม่สำเร็จ กรุณาลองใหม่ก่อนทดสอบ"
         : movementTracking === "none"
             ? "ท่าบริหารนี้ไม่ได้ใช้ AI ติดตาม จึงไม่สามารถทดสอบได้"
           : isPoseExercise && !hasTestablePoseReference
@@ -1013,7 +1019,7 @@ export function ExerciseAiPage({
         ? (calibration ? buildPoseReference() : null) ?? storedPoseReference ?? null
         : null
     ) as unknown as PoseReferencePublic | null;
-    const demoVideoUrl = baseClip ? URL.createObjectURL(baseClip) : null;
+    const demoVideoUrl = baseClip ? URL.createObjectURL(baseClip) : savedDemoUrl;
     setTestSession({
       exercise: {
         // Library id when editing an existing row (harmless in a test — no
@@ -1030,7 +1036,8 @@ export function ExerciseAiPage({
         reps: Number(repetitions) || 0,
         difficulty: difficulty === "easy" ? "Easy" : difficulty === "medium" ? "Moderate" : "Hard"
       },
-      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl }
+      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl },
+      ownsDemoVideoUrl: Boolean(baseClip)
     });
     setTestPaused(false);
     setTestNote(null);
@@ -1041,8 +1048,9 @@ export function ExerciseAiPage({
   // object URL and returns to the authoring workspace; the RecordingResult and
   // pose summary are deliberately dropped, since a test never uploads anything.
   const closeTest = (note: string | null) => {
-    const demoVideoUrl = testSession?.testConfig.demoVideoUrl;
-    if (demoVideoUrl) URL.revokeObjectURL(demoVideoUrl);
+    if (testSession?.ownsDemoVideoUrl && testSession.testConfig.demoVideoUrl) {
+      URL.revokeObjectURL(testSession.testConfig.demoVideoUrl);
+    }
     setTestSession(null);
     setTestPaused(false);
     setTestNote(note);
@@ -1085,10 +1093,6 @@ export function ExerciseAiPage({
               <strong>พื้นที่สร้างท่าบริหารด้วย AI</strong>
               <span>สร้างข้อมูลอ้างอิงท่าทางจากวิดีโอสาธิต</span>
             </div>
-          </div>
-          <div className="therapist-topbar-profile">
-            <div><strong>{displayName}</strong><small>นักกายภาพบำบัด</small></div>
-            <span className="avatar-badge">{initialsFromName(displayName)}</span>
           </div>
         </header>
 

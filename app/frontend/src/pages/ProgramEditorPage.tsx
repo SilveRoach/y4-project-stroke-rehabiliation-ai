@@ -19,7 +19,6 @@ import type {
   ScheduledExercise,
   ScheduledExerciseTargetType
 } from "../types";
-import { initialsFromName } from "../utils/displayName";
 
 // Program Editor — wired to the real backend (rehabilitation-plans module).
 //
@@ -160,8 +159,7 @@ export function ProgramEditorPage({
   onLogout,
   onNavigate
 }: ProgramEditorPageProps) {
-  const { token, user } = useAuth();
-  const therapistDisplayName = user?.displayName ?? user?.username ?? "Therapist";
+  const { token } = useAuth();
 
   const [days, setDays] = useState<ScheduleDay[]>(
     plan.days.length > 0 ? plan.days : [{ status: "pending", exercises: [] }]
@@ -364,15 +362,6 @@ export function ProgramEditorPage({
             <p>
               {patientName} &middot; {plan.name}
             </p>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{therapistDisplayName}</strong>
-                <small>Physical Therapist</small>
-              </div>
-              <span className="avatar-badge">{initialsFromName(therapistDisplayName)}</span>
-            </div>
           </div>
         </header>
 

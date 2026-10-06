@@ -216,17 +216,6 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
             <h1>ตั้งค่า</h1>
             <p>ข้อมูลส่วนตัว ใบอนุญาต และข้อมูลติดต่อ</p>
           </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{displayName}</strong>
-                <small>นักกายภาพบำบัด</small>
-              </div>
-              <span className={`avatar-badge${avatarUrl ? " with-photo" : ""}`}>
-                {avatarUrl ? <img src={avatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : initialsFromName(displayName)}
-              </span>
-            </div>
-          </div>
         </header>
 
         <main className="therapist-main settings-main ps-main">

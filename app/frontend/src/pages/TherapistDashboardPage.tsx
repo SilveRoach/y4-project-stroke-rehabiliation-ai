@@ -19,7 +19,7 @@ import {
   type TherapistDashboardData
 } from "../services/api";
 import { useAuth } from "../store/authStore";
-import { useProfilePicture, useOwnProfilePicture } from "../hooks/useProfilePicture";
+import { useProfilePicture } from "../hooks/useProfilePicture";
 import type { PatientProgressTrend, TherapistPatientSummary } from "../types";
 import { initialsFromName } from "../utils/displayName";
 import { ISO_DATE_RE } from "../utils/rehabPlan";
@@ -440,8 +440,6 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
       ? trend.points[trend.points.length - 1].score - trend.points[0].score
       : null;
 
-  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
-  const ownAvatarUrl = useOwnProfilePicture();
   const today = new Date();
 
   return (
@@ -455,17 +453,6 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
               <p>
                 {WEEKDAY_FORMATTER.format(today)}ที่ {DATE_FORMATTER.format(today)}
             </p>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{displayName}</strong>
-                <small>นักกายภาพบำบัด</small>
-              </div>
-              <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
-                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
-              </span>
-            </div>
           </div>
         </header>
 

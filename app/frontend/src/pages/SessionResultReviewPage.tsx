@@ -15,7 +15,6 @@ import type {
   SessionReviewData
 } from "../types";
 import type { ScheduleDayReviewData } from "../services/api";
-import { initialsFromName } from "../utils/displayName";
 
 // Maps the real GET /schedule-days/:id/results payload onto the page's
 // SessionExerciseReview/attempt shape. The video comes through as a server
@@ -110,7 +109,7 @@ interface SessionResultReviewPageProps {
 }
 
 export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, focusExerciseId }: SessionResultReviewPageProps) {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const [exercises, setExercises] = useState<SessionExerciseReview[]>([]);
   const [sessionDetails, setSessionDetails] = useState({
     planName: review.planName ?? "",
@@ -273,15 +272,6 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
           <div>
             <h1>ตรวจสอบผลการฝึก</h1>
             <p>{review.patientName} &middot; {sessionDetails.planName || reviewDayLabel(review.dayLabel)}</p>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{user?.displayName || user?.username || "นักกายภาพบำบัด"}</strong>
-                <small>นักกายภาพบำบัด</small>
-              </div>
-              <span className="avatar-badge">{initialsFromName(user?.displayName || user?.username || "นักกายภาพบำบัด")}</span>
-            </div>
           </div>
         </header>
 

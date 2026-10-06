@@ -191,17 +191,6 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
             <h1>ตั้งค่า</h1>
             <p>โปรไฟล์ รหัสพนักงาน และข้อมูลติดต่อ</p>
           </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{form.displayName}</strong>
-                <small>ผู้ดูแลระบบ</small>
-              </div>
-              <span className={`avatar-badge admin-avatar${avatarUrl ? " with-photo" : ""}`}>
-                {avatarUrl ? <img src={avatarUrl} alt={`รูปโปรไฟล์ของ ${form.displayName}`} /> : initialsFromName(form.displayName)}
-              </span>
-            </div>
-          </div>
         </header>
 
         <main className="therapist-main settings-main ps-main">

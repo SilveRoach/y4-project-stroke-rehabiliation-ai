@@ -4,10 +4,9 @@ import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { ApiError, getAllPatients } from "../services/api";
 import { useAuth } from "../store/authStore";
-import { useOwnProfilePicture, useProfilePicture } from "../hooks/useProfilePicture";
+import { useProfilePicture } from "../hooks/useProfilePicture";
 import type { AllPatientListItem } from "../services/api";
 import type { TherapistPatientSummary } from "../types";
-import { initialsFromName } from "../utils/displayName";
 
 // Sidebar "Patients" page — a full, searchable/filterable caseload directory.
 // Distinct from Therapist Dashboard (frontend-design.md §8, which pairs a
@@ -151,9 +150,6 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
     });
   }, [search, accountFilter, patients, user?.id]);
 
-  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
-  const ownAvatarUrl = useOwnProfilePicture();
-
   return (
     <section className="therapist-shell">
       <TherapistSidebar activeLabel="Patients" onNavigate={onNavigate} onLogout={onLogout} />
@@ -163,17 +159,6 @@ export function TherapistPatientsPage({ onLogout, onNavigate, onViewPatient }: T
           <div>
             <h1>ผู้ป่วย</h1>
             <p>{loading ? "กำลังโหลดรายชื่อผู้ป่วย…" : `ผู้ป่วยในระบบ ${patients.length} ราย`}</p>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{displayName}</strong>
-                <small>นักกายภาพบำบัด</small>
-              </div>
-              <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
-                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
-              </span>
-            </div>
           </div>
         </header>
 

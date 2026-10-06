@@ -7865,8 +7865,8 @@ div.exercise-card:hover {
   display: grid;
   place-items: center;
   width: 100%;
-  height: min(38vh, 360px);
-  min-height: 220px;
+  height: min(calc(38vh + 80px), 440px);
+  min-height: 300px;
   border-radius: 12px;
   background: #000000;
   color: #ffffff;
@@ -7874,8 +7874,8 @@ div.exercise-card:hover {
 
 .srr-video-col .pose-video-player {
   width: 100%;
-  height: min(38vh, 360px);
-  min-height: 220px;
+  height: min(calc(38vh + 80px), 440px);
+  min-height: 300px;
   aspect-ratio: auto;
   overflow: hidden;
   border-radius: 12px;
@@ -8268,8 +8268,8 @@ div.exercise-card:hover {
 
   .srr-video-placeholder,
   .srr-video-col .pose-video-player {
-    height: min(42vh, 300px);
-    min-height: 180px;
+    height: min(calc(42vh + 80px), 380px);
+    min-height: 260px;
   }
 }
 

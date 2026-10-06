@@ -220,7 +220,7 @@ function ReferenceThumb({ trackingType }: { trackingType: TrackingType }) {
 function ExerciseDemoMedia({ exercise, overrideUrl }: { exercise: PatientExercise; overrideUrl?: string | null }) {
   // A test run plays the therapist's own (possibly still unsaved) base clip —
   // there is no scheduled exercise whose demo video could be fetched.
-  const fetchedUrl = useDemoVideoUrl(overrideUrl ? null : exercise.id);
+  const fetchedUrl = useDemoVideoUrl(overrideUrl !== undefined ? null : exercise.id);
   const demoUrl = overrideUrl ?? fetchedUrl;
   if (demoUrl) {
     return (
@@ -677,7 +677,7 @@ export function PatientSessionPage({
     setPoseStatusText(countedStatus);
 
     if (total > 0 && demoDoneRef.current >= total) {
-      if (!testConfig && !completionNotifiedRef.current) {
+      if (!completionNotifiedRef.current) {
         completionNotifiedRef.current = true;
         setSessionCompleteNotice(true);
       }
@@ -864,7 +864,7 @@ export function PatientSessionPage({
     // SessionUploadConfirmPage), same as the pose flow. The repCycle guard
     // drops this if the session was restarted meanwhile.
     if (total > 0 && next >= total) {
-      if (!testConfig && !completionNotifiedRef.current) {
+      if (!completionNotifiedRef.current) {
         completionNotifiedRef.current = true;
         setSessionCompleteNotice(true);
       }
