@@ -528,6 +528,12 @@ function AppShell() {
             setSelectedExercise(null);
             setView(exerciseCreationReturn);
           }}
+          onCreated={(name) => {
+            setSelectedExercise(null);
+            setExerciseVersionView(false);
+            setView("therapist-library");
+            showToast(`สร้างท่าบริหาร “${name}” เป็นฉบับร่างแล้ว`);
+          }}
           onLogout={() => {
             logout();
             setView("login");

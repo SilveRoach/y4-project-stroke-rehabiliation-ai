@@ -1,4 +1,4 @@
-import { ArrowUp, Check, Dumbbell, Hand, LogOut, Play, RotateCcw, Signal, SignalZero, Square, TimerReset, Video, VideoOff, X } from "lucide-react";
+import { ArrowUp, Check, Dumbbell, Hand, LogOut, Play, RotateCcw, Signal, SignalZero, Smile, Square, TimerReset, Video, VideoOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useCamera } from "../hooks/useCamera";
 import { useSessionRecording } from "../hooks/useSessionRecording";
@@ -102,7 +102,7 @@ const GRIP_RESUME_GAP_MS = 500;
 
 // Pause between the last repetition and handing the session to the
 // upload-confirmation screen.
-const SESSION_END_DELAY_MS = 2000;
+const SESSION_END_DELAY_MS = 3500;
 
 // Parses the two target formats used by PatientExercise:
 //   - legacy/mock progress: "X of Y"
@@ -469,6 +469,8 @@ export function PatientSessionPage({
   // session UI. Pure client-side UI state; resets whenever a different exercise's
   // session is opened (App.tsx swaps `exercise`, not this page).
   const [sessionStarted, setSessionStarted] = useState(false);
+  const [sessionCompleteNotice, setSessionCompleteNotice] = useState(false);
+  const completionNotifiedRef = useRef(false);
   // §10 (responsive redesign) — the demo/reference thumbnail collapses into a
   // small floating "Demo" button on camera-centric layouts; tapping it expands
   // the existing reference panel. Purely display state.
@@ -574,6 +576,8 @@ export function PatientSessionPage({
 
   useEffect(() => {
     setSessionStarted(false);
+    setSessionCompleteNotice(false);
+    completionNotifiedRef.current = false;
     setReferenceOpen(false);
     const parsed = parseProgress(exercise.progressLabel);
     setDemoDone(parsed.done);
@@ -673,6 +677,10 @@ export function PatientSessionPage({
     setPoseStatusText(countedStatus);
 
     if (total > 0 && demoDoneRef.current >= total) {
+      if (!testConfig && !completionNotifiedRef.current) {
+        completionNotifiedRef.current = true;
+        setSessionCompleteNotice(true);
+      }
       // All prescribed reps done → transition into the existing
       // session-completion flow (STOP → SessionUploadConfirmPage for a real
       // session; straight back to the authoring page for a test run).
@@ -856,6 +864,10 @@ export function PatientSessionPage({
     // SessionUploadConfirmPage), same as the pose flow. The repCycle guard
     // drops this if the session was restarted meanwhile.
     if (total > 0 && next >= total) {
+      if (!testConfig && !completionNotifiedRef.current) {
+        completionNotifiedRef.current = true;
+        setSessionCompleteNotice(true);
+      }
       const cycle = repCycleRef.current;
       gripFinishedRef.current = true;
       lastGripCaptionRef.current = "ครบทุกรอบแล้ว กำลังจบเซสชัน…";
@@ -928,6 +940,7 @@ export function PatientSessionPage({
   };
 
   const handleStart = () => {
+    setSessionCompleteNotice(false);
     setSessionStarted(true);
     recording.start();
     // Pose rep tracking begins fresh: cancel any in-flight rep cycle, clear
@@ -984,7 +997,9 @@ export function PatientSessionPage({
   };
 
   const handleRestart = () => {
+    setSessionCompleteNotice(false);
     setDemoDone(initialDone);
+    completionNotifiedRef.current = false;
     setDemoScore(null);
     setFeedbackIndex(0);
     // §6.4 — Restart discards the current recording and begins a fresh one (same
@@ -1210,6 +1225,13 @@ export function PatientSessionPage({
               </div>
             </>
           )}
+          {sessionCompleteNotice && (
+            <div className="session-complete-notice" role="status" aria-live="assertive">
+              <Smile size={88} strokeWidth={1.8} aria-hidden="true" />
+              <strong>จบเซสชันแล้ว!</strong>
+              <span>ทำได้ดีมาก</span>
+            </div>
+          )}
         </div>
 
         {/* Desktop-only session dashboard (CSS hides this below 1100px). All
@@ -1311,8 +1333,13 @@ export function PatientSessionPage({
               <RotateCcw size={16} />
               เริ่มใหม่
             </button>
-            <button type="button" className="primary-button full-width finish-button" onClick={handleStop}>
-              จบเซสชัน
+            <button
+              type="button"
+              className="primary-button full-width finish-button"
+              onClick={sessionStarted ? handleStop : handleStart}
+              disabled={!sessionStarted && camera.status !== "streaming"}
+            >
+              {sessionStarted ? "จบเซสชัน" : "เริ่ม"}
             </button>
           </div>
         </aside>
