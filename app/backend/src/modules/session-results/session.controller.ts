@@ -129,11 +129,26 @@ export async function submitExerciseResultHandler(req: Request, res: Response, n
     const aiScore = typeof aiScoreRaw === "number" && Number.isFinite(aiScoreRaw) ? aiScoreRaw : undefined;
     const aiFeedback = typeof req.body?.aiFeedback === "string" && req.body.aiFeedback.trim().length > 0 ? req.body.aiFeedback.trim() : undefined;
 
+    // aiMetrics / performanceData arrive as JSON strings inside the multipart
+    // body (label -> value chips shown in the review page, and the structured
+    // per-session numbers such as repsCompleted/targetReps/repScores).
+    const parseJsonObject = (raw: unknown): Record<string, unknown> | undefined => {
+      if (typeof raw !== "string" || raw.trim().length === 0) return undefined;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+      } catch {
+        throw new ValidationError("aiMetrics/performanceData must be valid JSON objects.");
+      }
+    };
+    const aiMetrics = parseJsonObject(req.body?.aiMetrics);
+    const performanceData = parseJsonObject(req.body?.performanceData);
+
     const submission = await sessionService.submitExerciseResult(
       callerId,
       scheduledExerciseId,
       req.file,
-      { aiScore, aiFeedback },
+      { aiScore, aiFeedback, aiMetrics, performanceData },
       req.user?.role === "admin"
     );
     res.status(201).json(submission);

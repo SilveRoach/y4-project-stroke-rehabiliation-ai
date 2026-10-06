@@ -320,6 +320,14 @@ export function ExerciseLibraryPage({
                       <strong className="library-card-title">{exercise.name}</strong>
                       <span>สร้างโดย {exercise.createdByName || "นักกายภาพบำบัด"}</span>
                       <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
+                      {exercise.movementTracking === "pose" && !exercise.baseCriteria.poseReference && (
+                        <span
+                          className="library-status-badge draft"
+                          title="ท่านี้ยังไม่ได้สแกนวิดีโอสาธิตใน AI workspace จึงยังติดตาม/ให้คะแนนในเซสชันไม่ได้"
+                        >
+                          ยังไม่มีข้อมูล AI
+                        </span>
+                      )}
                       {exercise.versions.length > 1 ? (
                         <button
                           type="button"

@@ -39,6 +39,7 @@
 
 import { displayName, initialsFromName, relativeDateLabel } from "../../common/formatting";
 import { ForbiddenError, NotFoundError, ValidationError } from "../../common/errors";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import * as fileService from "../files/file.service";
 
@@ -338,7 +339,12 @@ export async function submitExerciseResult(
   patientId: string,
   scheduledExerciseId: string,
   uploadedFile: Express.Multer.File,
-  input: { aiScore?: number | null; aiFeedback?: string | null },
+  input: {
+    aiScore?: number | null;
+    aiFeedback?: string | null;
+    aiMetrics?: Record<string, unknown>;
+    performanceData?: Record<string, unknown>;
+  },
   isAdmin = false
 ): Promise<SubmittedExerciseResultDto> {
   const scheduledExercise = await findPatientScheduledExercise(patientId, scheduledExerciseId, isAdmin);
@@ -371,6 +377,10 @@ export async function submitExerciseResult(
         completedAt: new Date(),
         aiScore,
         aiFeedback: input.aiFeedback ?? null,
+        // Rep count & friends — without these the row only knew the score, so a
+        // 3-of-10-reps session looked identical to a complete one.
+        ...(input.aiMetrics ? { aiMetrics: input.aiMetrics as Prisma.InputJsonObject } : {}),
+        ...(input.performanceData ? { performanceData: input.performanceData as Prisma.InputJsonObject } : {}),
         aiEvaluatedAt: new Date(),
         evaluationSource: "ai"
       }

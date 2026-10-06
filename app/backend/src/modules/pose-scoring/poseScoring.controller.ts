@@ -48,7 +48,10 @@ export async function scorePoseRepHandler(req: Request, res: Response, next: Nex
         baseTrunkPoint: body.baseTrunkPoint,
         // Forwarded so the torso-twist penalty gets its rep-start baseline —
         // without it computePeakTorsoTwist falls back to frame 0's ratio.
-        baseShoulderWidthNorm: body.baseShoulderWidthNorm
+        baseShoulderWidthNorm: body.baseShoulderWidthNorm,
+        baseRawTrunkPoint: body.baseRawTrunkPoint,
+        baseTrunkLength: body.baseTrunkLength,
+        baseWristDistanceNorm: body.baseWristDistanceNorm
       })
     );
   } catch (err) {
@@ -73,7 +76,10 @@ export async function scoreTestPoseRepHandler(req: Request, res: Response, next:
         frames: body.frames,
         peakRom: body.peakRom,
         baseTrunkPoint: body.baseTrunkPoint,
-        baseShoulderWidthNorm: body.baseShoulderWidthNorm
+        baseShoulderWidthNorm: body.baseShoulderWidthNorm,
+        baseRawTrunkPoint: body.baseRawTrunkPoint,
+        baseTrunkLength: body.baseTrunkLength,
+        baseWristDistanceNorm: body.baseWristDistanceNorm
       })
     );
   } catch (err) {

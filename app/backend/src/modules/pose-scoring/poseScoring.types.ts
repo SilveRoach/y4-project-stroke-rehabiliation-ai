@@ -27,6 +27,28 @@ export interface FrameFeature {
    *  that need the torso-twist penalty; absent on master-sample frames seeded
    *  before this field existed. */
   shoulderWidthNorm?: number;
+  /** Trunk centroid from the RAW (un-normalized) landmarks. With
+   *  baseRawTrunkPoint + baseTrunkLength on the request it yields
+   *  meanTrunkDrift — whole-body sway measured in torso lengths (see
+   *  RepResult.meanTrunkDrift). Optional: absent => drift 0. */
+  rawTrunkCentroid?: { x: number; y: number };
+  /** Left-right wrist distance divided by that frame's torso length. Used for
+   *  peakHandSeparation on exercises with checksHandProximity. Optional:
+   *  absent => hand separation 0. */
+  wristDistanceNorm?: number;
+  /** Capture time of this frame in ms (client clock). When present on every frame
+   *  the backend resamples the rep to the reference clips' 30 fps before scoring
+   *  (see frameResample.ts). */
+  timestampMs?: number;
+}
+
+/** One per-rep, per-body-part coaching item (see detailedFeedback.ts). */
+export interface DetailedFeedbackItem {
+  /** Body part the item is about, e.g. "ข้อศอก", "ลำตัว", "แขนซ้าย". */
+  part: string;
+  /** Thai message telling the patient what to adjust. */
+  message: string;
+  severity: "info" | "warn" | "critical";
 }
 
 export type AngleComparator = "greaterThan" | "lessThan";
@@ -47,6 +69,11 @@ export interface ExerciseFSMConfig {
   minRepFrames: number;
   /** ROM reference: peakRom = |romReferenceAngle - extreme angle in rep|. */
   romReferenceAngle?: number;
+  /** Optional start-pose gate on the secondary angle (client FSM): "ready" only
+   *  when the secondary angle is within readySecondaryAngleTolerance (default
+   *  40 deg) of this target. Unset = no gate. */
+  readySecondaryAngleTarget?: number;
+  readySecondaryAngleTolerance?: number;
 }
 
 export interface JointLandmarkTriplet {
@@ -93,6 +120,11 @@ export interface RepResult {
   peakRom: number;
   romScore: number;
   meanBve: number;
+  /** Whole-body trunk drift: RMS distance of rawTrunkCentroid from the rep's
+   *  base raw point, divided by the base torso length (scale-invariant). Catches
+   *  rigid whole-body swaying that the shape-based meanBve does not. 0 when the
+   *  client did not send raw trunk data. */
+  meanTrunkDrift: number;
   bvePenalty: number;
   /** Peak "shoulder-width shrink" ratio during the rep (0 = still facing the
    *  camera throughout, closer to 1 = twisted near sideways). See
@@ -103,6 +135,15 @@ export interface RepResult {
   /** Penalty derived from peakTorsoTwist — a separate, additive penalty from
    *  bvePenalty (different compensation mechanism: twisting vs. leaning). */
   torsoTwistPenalty: number;
+  /** Peak widening of the wrist distance over the rep's baseline (in torso
+   *  lengths). Penalized only when the reference has checksHandProximity. */
+  peakHandSeparation: number;
+  handSeparationPenalty: number;
+  /** |range(left angle) - range(right angle)| in degrees over the rep, for
+   *  exercises whose primary angle is bilateral (frames carry both
+   *  leftElbowAngle and rightElbowAngle); 0 otherwise. */
+  peakAsymmetryDeg: number;
+  bilateralAsymmetryPenalty: number;
   isKnnPass: boolean;
   finalRepScore: number;
   feedbackText: string;
@@ -131,6 +172,11 @@ export interface PoseReferencePublic {
    *  specifically, even when angleDefinition is 'vector'. Not set = defaults
    *  to false (penalty enabled per the vector-type rule). */
   allowsTorsoMovement?: boolean;
+  /** true = this exercise requires keeping both hands together (e.g. Shoulder
+   *  Rotation with one hand guiding the other) — enables the backend's
+   *  handSeparationPenalty. Not set = false (no penalty, the previous
+   *  behavior): exercises where the hands naturally part must not be penalized. */
+  checksHandProximity?: boolean;
 }
 
 /** What the backend scoring engine consumes per repetition request. */
@@ -145,6 +191,16 @@ export interface PoseRepScoringRequest {
    *  peakTorsoTwist measures shrinkage against. Optional/null for exercises
    *  that don't send shoulderWidthNorm per frame. */
   baseShoulderWidthNorm?: number | null;
+  /** Raw (un-normalized) trunk centroid captured when the rep started — the
+   *  baseline for meanTrunkDrift. Optional: falls back to frames[0].rawTrunkCentroid. */
+  baseRawTrunkPoint?: { x: number; y: number } | null;
+  /** Torso length (mean shoulder-midpoint -> hip distance, image units) captured
+   *  when the rep started — scales meanTrunkDrift. Optional: without it
+   *  meanTrunkDrift is 0. */
+  baseTrunkLength?: number | null;
+  /** wristDistanceNorm captured when the rep started — the baseline for
+   *  peakHandSeparation. Optional: falls back to frames[0].wristDistanceNorm. */
+  baseWristDistanceNorm?: number | null;
 }
 
 /** Therapist AI-exercise test scoring request (ExerciseAiPage's "Test
@@ -165,6 +221,16 @@ export interface TestPoseRepScoringRequest extends PoseRepScoringRequest {
 
 /** Full reference payload — ExerciseLibrary.baseCriteria.poseReference shape. */
 export interface PoseReference extends PoseReferencePublic {
+  /** Authoring label of the primary angle (e.g. "Elbow flexion/extension
+   *  angle"); only used to word detailedFeedback. Server-side only. */
+  targetJoint?: string;
+  /** Subset of the authoring auto-analysis metadata — only the ranked
+   *  candidates' id/label and the chosen secondary id are kept, to name the
+   *  secondary joint in detailedFeedback. Server-side only. */
+  autoAnalysis?: {
+    secondaryCandidateId: string;
+    rankedCandidates: { id: string; label: string }[];
+  };
   masterSamples: MasterSample[];
   wrongFormSamples?: MasterSample[];
 }

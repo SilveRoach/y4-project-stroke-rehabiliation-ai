@@ -712,6 +712,11 @@ export function scorePoseRep(
     peakRom: number;
     baseTrunkPoint: { x: number; y: number } | null;
     baseShoulderWidthNorm?: number | null;
+    // Optional extras for meanTrunkDrift / peakHandSeparation (callers that
+    // omit them get 0 for those signals on the backend).
+    baseRawTrunkPoint?: { x: number; y: number } | null;
+    baseTrunkLength?: number | null;
+    baseWristDistanceNorm?: number | null;
   }
 ): Promise<{ rep: PoseRepScoringResult }> {
   return apiRequest<{ rep: PoseRepScoringResult }>(`/scheduled-exercises/${scheduledExerciseId}/pose-rep-score`, {
@@ -740,6 +745,9 @@ export function scoreExerciseTestRep(
     peakRom: number;
     baseTrunkPoint: { x: number; y: number } | null;
     baseShoulderWidthNorm?: number | null;
+    baseRawTrunkPoint?: { x: number; y: number } | null;
+    baseTrunkLength?: number | null;
+    baseWristDistanceNorm?: number | null;
   }
 ): Promise<{ rep: PoseRepScoringResult }> {
   return apiRequest<{ rep: PoseRepScoringResult }>("/exercises/test-pose-rep-score", {
@@ -809,7 +817,14 @@ export async function submitExerciseResult(
   video: Blob,
   fileName: string,
   mimeType: string,
-  payload: { aiScore?: number; aiFeedback?: string }
+  payload: {
+    aiScore?: number;
+    aiFeedback?: string;
+    /** label -> value chips (shown in the review page), e.g. { "จำนวนครั้งที่ทำ": "8/10" }. */
+    aiMetrics?: Record<string, string>;
+    /** Structured per-session numbers: repsCompleted, targetReps, repScores. */
+    performanceData?: Record<string, unknown>;
+  }
 ): Promise<{
   result: { id: string; attemptNumber: number; aiScore: number | null; aiFeedback: string | null; referenceVideoFileId: string | null };
   scheduledExerciseStatus: string;
@@ -819,6 +834,8 @@ export async function submitExerciseResult(
   body.append("file", video, fileName);
   if (payload.aiScore !== undefined) body.append("aiScore", String(payload.aiScore));
   if (payload.aiFeedback !== undefined) body.append("aiFeedback", payload.aiFeedback);
+  if (payload.aiMetrics !== undefined) body.append("aiMetrics", JSON.stringify(payload.aiMetrics));
+  if (payload.performanceData !== undefined) body.append("performanceData", JSON.stringify(payload.performanceData));
 
   let response: Response;
   try {

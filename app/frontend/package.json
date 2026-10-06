@@ -11,6 +11,8 @@
     },
     "dependencies": {
         "@mediapipe/tasks-vision": "^0.10.3",
+        "@tensorflow-models/speech-commands": "^0.5.4",
+        "@tensorflow/tfjs": "^4.22.0",
         "lucide-react": "^1.28.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",

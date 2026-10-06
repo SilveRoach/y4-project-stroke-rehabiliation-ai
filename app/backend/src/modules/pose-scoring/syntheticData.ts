@@ -17,18 +17,42 @@ function cloneFrames(frames: FrameFeature[]): FrameFeature[] {
   return frames.map((f) => ({ ...f, trunkCentroid: { ...f.trunkCentroid } }));
 }
 
-function jitterFrames(frames: FrameFeature[], rng: () => number, magnitudeDeg = 2.5): FrameFeature[] {
+// Seeded PRNG (mulberry32) instead of Math.random(): keeps the k-NN training
+// set — and therefore a rep's pass/fail verdict — identical between requests
+// (the training set is rebuilt per request, so unseeded noise made the same
+// rep flip between pass and fail).
+function createSeededRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// "Correct form" variation: a constant random offset per copy (simulating
+// camera angle/calibration differences between sessions) plus small per-frame
+// noise, instead of independent per-frame noise — independent noise made the
+// copies unrealistically close to the master (and distorted peakRom/jerk).
+function jitterFrames(frames: FrameFeature[], rng: () => number, maxOffsetDeg = 18, smallNoiseDeg = 1.5): FrameFeature[] {
+  const elbowOffset = (rng() * 2 - 1) * maxOffsetDeg;
+  const shoulderOffset = (rng() * 2 - 1) * maxOffsetDeg * 0.4;
+  const leftOffset = elbowOffset + (rng() * 2 - 1) * smallNoiseDeg * 0.5;
+  const rightOffset = elbowOffset + (rng() * 2 - 1) * smallNoiseDeg * 0.5;
+
   return frames.map((f) => {
-    const noise = () => (rng() * 2 - 1) * magnitudeDeg;
+    const noise = () => (rng() * 2 - 1) * smallNoiseDeg;
     return {
       ...f,
-      elbowAngle: f.elbowAngle + noise(),
-      shoulderAngle: f.shoulderAngle + noise() * 0.5,
-      leftElbowAngle: f.leftElbowAngle !== undefined ? f.leftElbowAngle + noise() : undefined,
-      rightElbowAngle: f.rightElbowAngle !== undefined ? f.rightElbowAngle + noise() : undefined,
+      elbowAngle: f.elbowAngle + elbowOffset + noise(),
+      shoulderAngle: f.shoulderAngle + shoulderOffset + noise() * 0.5,
+      leftElbowAngle: f.leftElbowAngle !== undefined ? f.leftElbowAngle + leftOffset + noise() : undefined,
+      rightElbowAngle: f.rightElbowAngle !== undefined ? f.rightElbowAngle + rightOffset + noise() : undefined,
       trunkCentroid: {
-        x: f.trunkCentroid.x + (rng() * 2 - 1) * 0.005,
-        y: f.trunkCentroid.y + (rng() * 2 - 1) * 0.005
+        x: f.trunkCentroid.x + (rng() * 2 - 1) * 0.008,
+        y: f.trunkCentroid.y + (rng() * 2 - 1) * 0.008
       }
     };
   });
@@ -97,7 +121,7 @@ function computeDtwDistance(sequence: FrameFeature[], allMasterFrameArrays: Fram
 /** Entry point: builds the k-NN training set from an exercise's master samples. */
 export function generateSyntheticTrainingSet(
   masterSamples: MasterSample[],
-  rng: () => number = Math.random
+  rng: () => number = createSeededRng(7)
 ): LabeledExample[] {
   const validSamples = masterSamples.filter((s) => s.frames.length >= 6);
   if (validSamples.length === 0) return [];

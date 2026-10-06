@@ -45,7 +45,17 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
     try {
       await submitExerciseResult(token, attempt.scheduledExerciseId, attempt.videoBlob, attempt.videoFileName, attempt.videoMimeType, {
         aiScore: attempt.aiScore,
-        aiFeedback: attempt.aiFeedback
+        aiFeedback: attempt.aiFeedback,
+        aiMetrics: Object.fromEntries(attempt.aiMetrics.map((metric) => [metric.label, metric.value])),
+        ...(attempt.repsCompleted !== undefined
+          ? {
+              performanceData: {
+                repsCompleted: attempt.repsCompleted,
+                targetReps: attempt.targetReps ?? null,
+                repScores: attempt.repScores ?? []
+              }
+            }
+          : {})
       });
       setUploaded(true);
       window.setTimeout(onConfirm, 500);
@@ -78,7 +88,7 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
             <div className="srr-score-panel">
               <div className="srr-score-panel-top">
                 <strong className="sud-ai-title">
-                  <Sparkles size={14} /> การประเมินจาก AI
+                  <Sparkles size={14} /> ความเห็นจาก AI
                 </strong>
                 <span className="srr-score-value">{attempt.aiScore}</span>
               </div>

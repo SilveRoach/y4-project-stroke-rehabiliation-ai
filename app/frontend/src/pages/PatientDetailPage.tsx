@@ -1981,7 +1981,7 @@ function ExercisePickerModal({
   onClose: () => void;
   // Called once the therapist confirms the pick in the detail popup. The second
   // argument is the optional therapist instruction typed in that popup; the
-  // third is an optional target value label (e.g. "12 reps") overriding the
+  // third is an optional target value label (e.g. "12 ครั้ง") overriding the
   // exercise's default when the therapist edited it.
   onPick: (item: ExerciseLibraryItem, therapistInstruction?: string, targetValueLabel?: string) => Promise<void>;
   alreadyAddedIds: string[];
@@ -2000,7 +2000,7 @@ function ExercisePickerModal({
   // actual POST happens. null = no popup open.
   const [pendingPick, setPendingPick] = useState<ExerciseLibraryItem | null>(null);
   const [pendingInstruction, setPendingInstruction] = useState("");
-  // Editable target value (e.g. "10 reps") shown in the confirm popup —
+  // Editable target value (e.g. "10 ครั้ง") shown in the confirm popup —
   // pre-filled from the exercise's default and overridable before the POST.
   const [pendingTarget, setPendingTarget] = useState("");
 

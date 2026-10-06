@@ -150,6 +150,29 @@ function toBaseCriteria(value: Prisma.JsonValue | null): ExerciseBaseCriteria {
   return value as ExerciseBaseCriteria;
 }
 
+// create/PATCH/version all REPLACE base_criteria wholesale, and several client
+// forms only know the manual criteria fields. A pose exercise's AI reference
+// (base_criteria.poseReference) is what makes its sessions detect/score reps at
+// all — losing it silently makes the session fall back to unrelated default
+// criteria — so when an incoming pose payload carries no poseReference, keep the
+// one from the row being edited (or, failing that, the newest sibling version
+// that has one). Sending an explicit poseReference always wins.
+function withInheritedPoseReference(
+  input: ExerciseInput,
+  candidates: Array<{ baseCriteria: Prisma.JsonValue | null }>
+): ExerciseInput {
+  if (input.movementTracking !== "pose") return input;
+  const incoming = (input.baseCriteria ?? {}) as Record<string, unknown>;
+  if (incoming.poseReference !== undefined) return input;
+  for (const candidate of candidates) {
+    const stored = toBaseCriteria(candidate.baseCriteria) as Record<string, unknown>;
+    if (stored.poseReference) {
+      return { ...input, baseCriteria: { ...incoming, poseReference: stored.poseReference } as ExerciseBaseCriteria };
+    }
+  }
+  return input;
+}
+
 function buildItem(familyRows: NonNullable<ExerciseRow>[]): ExerciseLibraryItemDto {
   const sorted = [...familyRows].sort((a, b) => b.versionNumber - a.versionNumber);
   const latest = sorted[0];
@@ -308,7 +331,7 @@ export async function updateExerciseDraft(
     throw new ConflictError("Only a draft version can be edited in place — publish or version it instead.");
   }
 
-  const clean = sanitizeInput(input);
+  const clean = sanitizeInput(withInheritedPoseReference(input, [row]));
   await validateDemoVideoFile(therapistId, clean.demoVideoFileId ?? null);
   const updated = await prisma.exerciseLibrary.update({
     where: { id },
@@ -347,10 +370,12 @@ export async function createExerciseVersion(
     throw new ForbiddenError("You can only version your own exercises.");
   }
 
-  const clean = sanitizeInput(input);
-  await validateDemoVideoFile(therapistId, clean.demoVideoFileId ?? null);
   const rootId = familyRootId(row);
   const family = await fetchFamily(rootId);
+  const clean = sanitizeInput(
+    withInheritedPoseReference(input, [row, ...[...family].sort((a, b) => b.versionNumber - a.versionNumber)])
+  );
+  await validateDemoVideoFile(therapistId, clean.demoVideoFileId ?? null);
   const nextVersionNumber = Math.max(...family.map((v) => v.versionNumber)) + 1;
   const activeSiblingIds = family.filter((v) => v.status === "active").map((v) => v.id);
 
@@ -393,6 +418,13 @@ export async function publishExercise(therapistId: string, id: string): Promise<
   }
   if (row.status !== "draft") {
     throw new ConflictError("Only a draft version can be published.");
+  }
+  // A pose exercise without its AI reference cannot detect or score reps in a
+  // patient session, so it must not go live in that state.
+  if (row.movementTracking === "pose" && !(toBaseCriteria(row.baseCriteria) as Record<string, unknown>).poseReference) {
+    throw new ConflictError(
+      "This pose exercise has no AI reference yet — scan its demo video in the AI exercise workspace (and save) before publishing."
+    );
   }
 
   const updated = await prisma.exerciseLibrary.update({ where: { id }, data: { status: "active" }, include: WITH_CREATOR });

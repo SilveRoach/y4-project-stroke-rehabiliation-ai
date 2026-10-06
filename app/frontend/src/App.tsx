@@ -30,6 +30,7 @@ import { TherapistSessionsPage } from "./pages/TherapistSessionsPage";
 import { TherapistSettingsPage } from "./pages/TherapistSettingsPage";
 import { AuthProvider, useAuth } from "./store/authStore";
 import { getExerciseLibrary } from "./services/api";
+import { buildSessionComment } from "./utils/sessionFeedback";
 import type { PatientTodayExercise } from "./services/api";
 import {
   markScheduledExerciseCompleted
@@ -185,8 +186,9 @@ function AppShell() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  // PatientSessionPage's STOP hands off the recording plus, for pose sessions,
-  // the average of the successful server-scored repetitions. Other tracking
+  // PatientSessionPage's STOP hands off the recording plus, for scored sessions
+  // (pose reps or virtual-grip rounds), the per-rep results; utils/
+  // sessionFeedback.ts turns them into the end-of-session AI comment. Other tracking
   // modes retain the existing preview fallback until they have real scoring.
   const handleFinishRecording = (result: RecordingResult, poseSummary?: PoseSessionSummary) => {
     const extension = result.mimeType.includes("mp4") ? "mp4" : "webm";
@@ -203,15 +205,17 @@ function AppShell() {
       videoMimeType: result.mimeType,
       scoreSource: poseSummary ? "pose_average" : "preview",
       ...(poseSummary
-        ? {
-            aiScore: poseSummary.averageScore,
-            aiFeedback: `คะแนนเฉลี่ยจากการทำท่าบริหาร ${poseSummary.repScores.length} ครั้งที่ AI ประเมินผลสำเร็จ`,
-            aiMetrics: [
-              { label: "จำนวนครั้งที่ประเมินผล", value: String(poseSummary.repScores.length) },
-              { label: "ช่วงคะแนน", value: `${Math.min(...poseSummary.repScores)}–${Math.max(...poseSummary.repScores)}` },
-              { label: "คะแนนเฉลี่ย", value: String(poseSummary.averageScore) }
-            ]
-          }
+        ? (() => {
+            const comment = buildSessionComment(poseSummary);
+            return {
+              aiScore: poseSummary.averageScore,
+              aiFeedback: comment.feedback,
+              aiMetrics: comment.metrics,
+              repsCompleted: poseSummary.repScores.length,
+              targetReps: poseSummary.targetReps,
+              repScores: poseSummary.repScores
+            };
+          })()
         : mockAiEvaluation())
     });
     setView("session-upload-confirm");

@@ -79,15 +79,15 @@ function isNewExercise(exercise: ScheduledExercise): boolean {
 
 // Sensible starting target per target_type — matches the library item's own
 // base_criteria when it has a relevant field, so a freshly-added exercise
-// doesn't start at an arbitrary "10 reps" if the exercise says otherwise.
+// doesn't start at an arbitrary "10 ครั้ง" if the exercise says otherwise.
 function defaultTargetForExercise(item: ExerciseLibraryItem): {
   targetType: ScheduledExerciseTargetType;
   targetValueLabel: string;
 } {
   if (item.baseCriteria.repetitions !== undefined) {
-    return { targetType: "repetitions", targetValueLabel: `${item.baseCriteria.repetitions} reps` };
+    return { targetType: "repetitions", targetValueLabel: `${item.baseCriteria.repetitions} ครั้ง` };
   }
-  return { targetType: "repetitions", targetValueLabel: "10 reps" };
+  return { targetType: "repetitions", targetValueLabel: "10 ครั้ง" };
 }
 
 function daysToHeatmap(days: ScheduleDay[]): HeatmapDayStatus[] {

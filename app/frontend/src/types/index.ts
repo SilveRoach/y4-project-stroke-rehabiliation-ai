@@ -619,4 +619,8 @@ export interface PendingSessionAttempt {
   aiScore: number;
   aiFeedback: string;
   aiMetrics: Array<{ label: string; value: string }>;
+  /** Rep counts for scored sessions (pose reps / grip rounds), saved with the result. */
+  repsCompleted?: number;
+  targetReps?: number;
+  repScores?: number[];
 }

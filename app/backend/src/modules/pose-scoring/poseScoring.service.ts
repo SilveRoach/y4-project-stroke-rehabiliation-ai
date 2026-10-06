@@ -2,11 +2,20 @@ import { ForbiddenError, NotFoundError, ValidationError } from "../../common/err
 import { prisma } from "../../config/prisma";
 import { calculateBVE } from "./bveEvaluator";
 import { classifyRep, extractRepFeatures, trainKnnModel } from "./binaryKNN";
+import { computeDetailedFeedback, rangeOf } from "./detailedFeedback";
 import { evaluateDTW } from "./dtwEvaluator";
 import { resolvePoseReference, toPublicReference } from "./poseReference";
+import { resampleFramesToRate } from "./frameResample";
 import { computeRepScore } from "./scoreEngine";
 import { buildRealWrongFormExamples, generateSyntheticTrainingSet } from "./syntheticData";
-import { FrameFeature, PoseReference, PoseReferencePublic, PoseRepScoringRequest, TestPoseRepScoringRequest } from "./poseScoring.types";
+import {
+  DetailedFeedbackItem,
+  FrameFeature,
+  PoseReference,
+  PoseReferencePublic,
+  PoseRepScoringRequest,
+  TestPoseRepScoringRequest
+} from "./poseScoring.types";
 
 export interface PoseRepScoreResult {
   repNumber: number;
@@ -19,12 +28,19 @@ export interface PoseRepScoreResult {
     targetRom: number;
     romScore: number;
     meanBve: number;
+    meanTrunkDrift: number;
     bveThreshold: number;
     bvePenalty: number;
     peakTorsoTwist: number;
     torsoTwistPenalty: number;
+    peakHandSeparation: number;
+    handSeparationPenalty: number;
+    peakAsymmetryDeg: number;
+    bilateralAsymmetryPenalty: number;
     isKnnPass: boolean;
   };
+  /** Per-body-part coaching items for this rep (see detailedFeedback.ts). */
+  detailedFeedback: DetailedFeedbackItem[];
 }
 
 interface ScheduledExerciseWithReference {
@@ -93,6 +109,12 @@ function normalizeFrame(raw: unknown): FrameFeature {
   if (isFiniteNumber(f.leftElbowAngle)) frame.leftElbowAngle = f.leftElbowAngle;
   if (isFiniteNumber(f.rightElbowAngle)) frame.rightElbowAngle = f.rightElbowAngle;
   if (isFiniteNumber(f.shoulderWidthNorm)) frame.shoulderWidthNorm = f.shoulderWidthNorm;
+  const rawCentroid = f.rawTrunkCentroid as { x?: unknown; y?: unknown } | undefined;
+  if (rawCentroid && isFiniteNumber(rawCentroid.x) && isFiniteNumber(rawCentroid.y)) {
+    frame.rawTrunkCentroid = { x: rawCentroid.x, y: rawCentroid.y };
+  }
+  if (isFiniteNumber(f.wristDistanceNorm)) frame.wristDistanceNorm = f.wristDistanceNorm;
+  if (isFiniteNumber(f.timestampMs)) frame.timestampMs = f.timestampMs;
   return frame;
 }
 
@@ -112,6 +134,33 @@ function computePeakTorsoTwist(frames: FrameFeature[], baseShoulderWidthNorm: nu
       : frames[0]?.shoulderWidthNorm || 1;
   const twistRatios = frames.map((f) => Math.max(0, 1 - (f.shoulderWidthNorm ?? baseline) / baseline));
   return twistRatios.length > 0 ? Math.max(...twistRatios) : 0;
+}
+
+// meanTrunkDrift = RMS distance of the raw trunk centroid from the rep's base
+// raw point, divided by the base torso length (scale-invariant). Unlike
+// meanBve it needs the client's raw-trunk fields; without them (older client,
+// or no base torso length) it is 0 so the previous scoring is unchanged.
+function computeMeanTrunkDrift(frames: FrameFeature[], request: PoseRepScoringRequest): number {
+  const points = frames.map((f) => f.rawTrunkCentroid).filter((p): p is { x: number; y: number } => p !== undefined);
+  if (points.length === 0) return 0;
+  const trunkLength = request.baseTrunkLength;
+  if (!isFiniteNumber(trunkLength) || trunkLength <= 0) return 0;
+  const base =
+    request.baseRawTrunkPoint && isFiniteNumber(request.baseRawTrunkPoint.x) && isFiniteNumber(request.baseRawTrunkPoint.y)
+      ? request.baseRawTrunkPoint
+      : points[0];
+  return calculateBVE(points, base) / trunkLength;
+}
+
+// peakHandSeparation = the largest widening of the wrist distance over the
+// rep's starting baseline (0 = hands as close as at the start). Peak, not
+// mean, for the same reason as peakTorsoTwist (letting go is brief, at the
+// extreme of the movement). 0 when frames carry no wristDistanceNorm.
+function computePeakHandSeparation(frames: FrameFeature[], baseWristDistanceNorm: number | null | undefined): number {
+  const distances = frames.map((f) => f.wristDistanceNorm).filter(isFiniteNumber);
+  if (distances.length === 0) return 0;
+  const baseline = isFiniteNumber(baseWristDistanceNorm) ? baseWristDistanceNorm : distances[0];
+  return Math.max(0, ...distances.map((d) => d - baseline));
 }
 
 // GET /scheduled-exercises/:id/pose-reference — the client-visible FSM/angle
@@ -154,8 +203,12 @@ function validateRepRequest(request: PoseRepScoringRequest): FrameFeature[] {
 function scoreRepAgainstReference(
   reference: PoseReference,
   request: PoseRepScoringRequest,
-  frames: FrameFeature[]
+  capturedFrames: FrameFeature[]
 ): { rep: PoseRepScoreResult } {
+  // Live capture runs at ~15 fps but the reference clips are 30 fps: compare
+  // like-for-like (see frameResample.ts) so the K-NN jerk/length features and
+  // DTW alignment are not penalized for the lower sampling rate.
+  const frames = resampleFramesToRate(capturedFrames);
 
   // BVE: trunk-sway penalty, measured from the rep's baseline trunk point
   // (captured when the FSM entered IN_REP_ACTIVE) — same baseline the import
@@ -194,7 +247,22 @@ function scoreRepAgainstReference(
   const isVectorAngleExercise = reference.angleDefinition?.type === "vector" && !reference.allowsTorsoMovement;
   const peakTorsoTwist = computePeakTorsoTwist(frames, request.baseShoulderWidthNorm);
 
-  // Final combination — the import project's exact scoring formula.
+  const meanTrunkDrift = computeMeanTrunkDrift(frames, request);
+
+  // Hand separation only counts for exercises the therapist flagged with
+  // checksHandProximity (hands naturally part in most other exercises).
+  const isHandProximityExercise = reference.checksHandProximity === true;
+  const peakHandSeparation = computePeakHandSeparation(frames, request.baseWristDistanceNorm);
+
+  // Bilateral asymmetry is auto-detected: the primary angle is bilateral iff
+  // frames carry both left and right angles (extractConfiguredAngle only
+  // returns them for bilateral definitions), so no authoring flag is needed.
+  const leftVals = frames.map((f) => f.leftElbowAngle).filter(isFiniteNumber);
+  const rightVals = frames.map((f) => f.rightElbowAngle).filter(isFiniteNumber);
+  const isBilateralExercise = leftVals.length > 0 && rightVals.length > 0;
+  const peakAsymmetryDeg = isBilateralExercise ? Math.abs(rangeOf(leftVals) - rangeOf(rightVals)) : 0;
+
+  // Final combination — the import project's scoring formula.
   const result = computeRepScore(
     request.repNumber,
     dtwScore,
@@ -202,11 +270,30 @@ function scoreRepAgainstReference(
     request.peakRom,
     reference.targetRom,
     meanBve,
+    meanTrunkDrift,
     reference.bveThreshold,
     peakTorsoTwist,
+    peakHandSeparation,
+    peakAsymmetryDeg,
     knnResult.isPass,
     reference.enableTrunkBve,
-    isVectorAngleExercise
+    isVectorAngleExercise,
+    isHandProximityExercise,
+    isBilateralExercise
+  );
+
+  const detailedFeedback = computeDetailedFeedback(
+    frames,
+    baseTrunkPoint,
+    request.peakRom,
+    reference.targetRom,
+    meanBve,
+    meanTrunkDrift,
+    reference.bveThreshold,
+    reference.enableTrunkBve,
+    reference,
+    dtwScore,
+    knnResult.isPass
   );
 
   return {
@@ -221,12 +308,18 @@ function scoreRepAgainstReference(
         targetRom: reference.targetRom,
         romScore: result.romScore,
         meanBve: result.meanBve,
+        meanTrunkDrift: result.meanTrunkDrift,
         bveThreshold: reference.bveThreshold,
         bvePenalty: result.bvePenalty,
         peakTorsoTwist: result.peakTorsoTwist,
         torsoTwistPenalty: result.torsoTwistPenalty,
+        peakHandSeparation: result.peakHandSeparation,
+        handSeparationPenalty: result.handSeparationPenalty,
+        peakAsymmetryDeg: result.peakAsymmetryDeg,
+        bilateralAsymmetryPenalty: result.bilateralAsymmetryPenalty,
         isKnnPass: result.isKnnPass
-      }
+      },
+      detailedFeedback
     }
   };
 }

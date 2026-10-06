@@ -64,7 +64,10 @@ function normalizeFSMConfig(raw: unknown): ExerciseFSMConfig {
     returnThreshold: isFiniteNumber(cfg.returnThreshold) ? cfg.returnThreshold : DEFAULT_FSM_CONFIG.returnThreshold,
     returnComparator: cfg.returnComparator === "lessThan" ? "lessThan" : "greaterThan",
     minRepFrames: isFiniteNumber(cfg.minRepFrames) ? Math.max(1, Math.round(cfg.minRepFrames)) : DEFAULT_FSM_CONFIG.minRepFrames,
-    romReferenceAngle: isFiniteNumber(cfg.romReferenceAngle) ? cfg.romReferenceAngle : DEFAULT_FSM_CONFIG.romReferenceAngle
+    romReferenceAngle: isFiniteNumber(cfg.romReferenceAngle) ? cfg.romReferenceAngle : DEFAULT_FSM_CONFIG.romReferenceAngle,
+    // Optional start-pose orientation gate — only present when authored.
+    ...(isFiniteNumber(cfg.readySecondaryAngleTarget) ? { readySecondaryAngleTarget: cfg.readySecondaryAngleTarget } : {}),
+    ...(isFiniteNumber(cfg.readySecondaryAngleTolerance) ? { readySecondaryAngleTolerance: cfg.readySecondaryAngleTolerance } : {})
   };
 }
 
@@ -91,6 +94,21 @@ function normalizeMasterSamples(raw: unknown): MasterSample[] {
     .filter((s) => s.frames.length > 0);
 }
 
+// Keeps only what detailedFeedback needs from the authoring autoAnalysis block
+// (secondary candidate id + ranked candidates' id/label); anything malformed =>
+// undefined, which makes the secondary-joint feedback axis skip itself.
+function normalizeAutoAnalysis(raw: unknown): PoseReference["autoAnalysis"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const a = raw as Record<string, unknown>;
+  if (typeof a.secondaryCandidateId !== "string" || !Array.isArray(a.rankedCandidates)) return undefined;
+  const rankedCandidates = a.rankedCandidates
+    .filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === "object")
+    .filter((c) => typeof c.id === "string" && typeof c.label === "string")
+    .map((c) => ({ id: c.id as string, label: c.label as string }));
+  if (rankedCandidates.length === 0) return undefined;
+  return { secondaryCandidateId: a.secondaryCandidateId, rankedCandidates };
+}
+
 /**
  * Reads the pose reference out of one exercise_library row's base_criteria.
  * Returns null when the exercise has no poseReference block at all.
@@ -114,6 +132,11 @@ export function resolvePoseReference(baseCriteria: unknown): PoseReference | nul
     // Not set = false (penalty enabled per the vector-type rule) — see comment
     // on PoseReferencePublic.allowsTorsoMovement in poseScoring.types.ts.
     allowsTorsoMovement: typeof ref.allowsTorsoMovement === "boolean" ? ref.allowsTorsoMovement : false,
+    // Not set = false (no hand-separation penalty, the previous behavior) —
+    // see comment on PoseReferencePublic.checksHandProximity.
+    checksHandProximity: typeof ref.checksHandProximity === "boolean" ? ref.checksHandProximity : false,
+    targetJoint: typeof ref.targetJoint === "string" ? ref.targetJoint : undefined,
+    autoAnalysis: normalizeAutoAnalysis(ref.autoAnalysis),
     masterSamples,
     wrongFormSamples: wrongFormSamples.length > 0 ? wrongFormSamples : undefined
   };
@@ -128,6 +151,7 @@ export function toPublicReference(reference: PoseReference): PoseReferencePublic
     targetRom: reference.targetRom,
     bveThreshold: reference.bveThreshold,
     enableTrunkBve: reference.enableTrunkBve,
-    allowsTorsoMovement: reference.allowsTorsoMovement
+    allowsTorsoMovement: reference.allowsTorsoMovement,
+    checksHandProximity: reference.checksHandProximity
   };
 }

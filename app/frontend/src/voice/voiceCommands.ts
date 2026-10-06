@@ -1,3 +1,7 @@
-// TODO: Vosk offline voice command recognition (Thai acoustic model) — per ADR-005
-// On-device DSP (STFT/spectral subtraction) + MFCC feature extraction pipeline.
-// Fully local, no internet dependency; supersedes the originally-planned Web Speech API.
+// Barrel for the standalone voice-command module:
+//   voiceCommandService.ts  framework-agnostic listener + pure decideFrame()
+//   useVoiceCommands.ts     React hook (latest-handler refs, persisted on/off preference)
+//   ../components/VoiceControl.tsx  ready-made UI (mic toggle, status, hints, optional debug panel)
+// The TF.js model code is lazy-loaded on start(), so importing this barrel is cheap.
+export * from './voiceCommandService';
+export * from './useVoiceCommands';

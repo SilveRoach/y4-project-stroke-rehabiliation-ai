@@ -14,10 +14,13 @@ import {
   calculateTrunkCentroid,
   type CompletedRep
 } from "../ai/poseScoring/posePipeline";
-import type { PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
+import type { PoseReferencePublic, PoseRepScoringResult } from "../ai/poseScoring/poseScoringTypes";
 import { OneEuroFilter } from "../ai/poseScoring/oneEuroFilter";
-import { GripMinigame, computeGripVisibleFrame } from "../ai/grip/gripMinigame";
-import { drawGripMinigame } from "../ai/grip/gripMinigameRenderer";
+import { VirtualBallGripFSM, type GripState } from "../ai/grip/ballGripFSM";
+import { classifyGripState, computeGripVisibleFrame, computeHandOpenness, computeMirroredPalmCenter, mirrorVisibleFrame } from "../ai/grip/ballGripInput";
+import { drawBallGrip } from "../ai/grip/ballGripRenderer";
+import type { BallGripRepResult } from "../ai/grip/ballGripScoring";
+import { VoiceControl } from "../components/VoiceControl";
 import { useAuth } from "../store/authStore";
 import {
   getPatientScheduledExerciseDemoVideo,
@@ -72,6 +75,13 @@ interface PatientSessionPageProps {
 export interface PoseSessionSummary {
   averageScore: number;
   repScores: number[];
+  /** Prescribed repetitions (rounds) for this exercise; 0 when unknown. */
+  targetReps: number;
+  /** Present for virtual-grip sessions: every finished round, for the
+   * end-of-session comment (utils/sessionFeedback.ts). */
+  gripRounds?: BallGripRepResult[];
+  /** Present for pose sessions: the server's full per-rep results. */
+  poseReps?: PoseRepScoringResult[];
 }
 
 const trackingCopy = {
@@ -86,6 +96,14 @@ const trackingCopy = {
 // 15fps); the skeleton redraws every frame from the cached landmarks.
 const HAND_DETECT_INTERVAL_MS = 66;
 
+// A gap this long between two grip-game ticks can only mean the session was
+// paused (ticks are ~66ms apart) — the round clock is restarted on resume.
+const GRIP_RESUME_GAP_MS = 500;
+
+// Pause between the last repetition and handing the session to the
+// upload-confirmation screen.
+const SESSION_END_DELAY_MS = 2000;
+
 // Parses the two target formats used by PatientExercise:
 //   - legacy/mock progress: "X of Y"
 //   - scheduled exercise target: "Y reps" / "Y repetitions"
@@ -97,7 +115,10 @@ function parseProgress(progressLabel: string) {
     return { done: Number(progressMatch[1]), total: Number(progressMatch[2]) };
   }
 
-  const repsMatch = progressLabel.match(/(\d+)\s*(?:reps?|repetitions?)\b/i);
+  // English ("10 reps") and Thai ("10 ครั้ง") labels — the target text is whatever
+  // was entered when the exercise was scheduled. \b does not work after Thai
+  // letters, hence the separate alternative.
+  const repsMatch = progressLabel.match(/(\d+)\s*(?:(?:reps?|repetitions?)\b|ครั้ง)/i);
   if (repsMatch) {
     return { done: 0, total: Number(repsMatch[1]) };
   }
@@ -285,10 +306,10 @@ export function PatientSessionPage({
     runningRef.current = true;
     let cancelled = false;
     setTrackingLoadState("loading");
-    // One grip minigame per session flow; reset()s happen on Start/Restart/
+    // One grip ball game per session flow; reset()s happen on Start/Restart/
     // exercise change (time discontinuity), matching the landmark filters.
     if (handTrackingEnabled && !gripGameRef.current) {
-      gripGameRef.current = new GripMinigame();
+      gripGameRef.current = new VirtualBallGripFSM();
     }
 
     const loop = () => {
@@ -309,34 +330,48 @@ export function PatientSessionPage({
           if (handTracker) {
             lastHandLandmarksRef.current = handTracker.detect(video, now);
             setHandDetected(lastHandLandmarksRef.current !== null);
-            // Virtual-grip minigame tick (grab/follow/drop state machine +
-            // rep completion). Wrapped so a bug here can never take down the
-            // rAF loop that draws the skeleton overlay.
+            // Virtual-grip ball game tick (grab → drag → open-hand release per
+            // timed round). Wrapped so a bug here can never take down the rAF
+            // loop that draws the skeleton overlay. Gated on an active session
+            // (like the pose FSM) so rounds cannot be played or timed during
+            // the pre-roll or while paused.
             if (gripGameRef.current && sessionStartedRef.current && !pausedRef.current) {
               try {
-                // Keep the minigame inside the region the patient can actually
-                // see: the canvas displays the video with object-fit: cover, so
-                // aspect-mismatched clients crop the frame — derive the visible
-                // sub-frame from the canvas's intrinsic (video) size vs its CSS
-                // (container) size and feed it to the game every detect tick.
-                // Gated on an active session (like the pose FSM) so the ball
-                // cannot be grabbed/scored during the pre-roll or while paused.
-                const visibleFrame = computeGripVisibleFrame(
-                  canvas.width,
-                  canvas.height,
-                  canvas.clientWidth,
-                  canvas.clientHeight
+                const game = gripGameRef.current;
+                // The canvas is displayed with object-fit: cover, so aspect-
+                // mismatched clients crop the frame — confine the ball/target
+                // to the region the patient can actually see (mirrored space).
+                const visibleFrame = mirrorVisibleFrame(
+                  computeGripVisibleFrame(canvas.width, canvas.height, canvas.clientWidth, canvas.clientHeight)
                 );
-                gripGameRef.current.setViewport(visibleFrame, canvas.width / Math.max(1, canvas.height));
-                gripGameRef.current.update(lastHandLandmarksRef.current, now);
-                const gripCaption = gripGameRef.current.snapshot().statusText;
-                if (gripCaption !== lastGripCaptionRef.current) {
+                game.setViewport(visibleFrame, canvas.width / Math.max(1, canvas.height));
+                // A long gap between ticks means the session was paused/resumed:
+                // restart the round clock instead of timing the round out.
+                if (lastGripTickMsRef.current !== null && now - lastGripTickMsRef.current > GRIP_RESUME_GAP_MS) {
+                  game.restartRound();
+                }
+                lastGripTickMsRef.current = now;
+
+                const landmarks = lastHandLandmarksRef.current;
+                const openness = landmarks ? computeHandOpenness(landmarks) : 0;
+                if (landmarks) gripStateRef.current = classifyGripState(openness, gripStateRef.current);
+                const roundResult = game.update({
+                  timestampMs: now,
+                  handPos: landmarks ? computeMirroredPalmCenter(landmarks) : null,
+                  gripState: gripStateRef.current ?? "open",
+                  openness
+                });
+                if (roundResult) gripRoundHookRef.current?.(roundResult);
+                const gripCaption = game.statusText(landmarks !== null);
+                if (gripCaption !== lastGripCaptionRef.current && !gripFinishedRef.current) {
                   lastGripCaptionRef.current = gripCaption;
                   setGripStatusText(gripCaption);
                 }
               } catch (gripError) {
-                console.error("grip minigame update failed", gripError);
+                console.error("grip ball game update failed", gripError);
               }
+            } else {
+              lastGripTickMsRef.current = null;
             }
           }
           if (poseTracker) {
@@ -376,7 +411,7 @@ export function PatientSessionPage({
             // Virtual-grip ball + target ring, layered over the hand skeleton.
             if (gripGameRef.current) {
               try {
-                drawGripMinigame(ctx, gripGameRef.current, canvas.width, canvas.height);
+                drawBallGrip(ctx, gripGameRef.current.snapshot(), canvas.width, canvas.height);
               } catch (gripDrawError) {
                 console.error("grip minigame render failed", gripDrawError);
               }
@@ -470,6 +505,7 @@ export function PatientSessionPage({
   const [repFeedback, setRepFeedback] = useState<string | null>(null);
 
   const poseReferenceRef = useRef<PoseReferencePublic | null>(null);
+  const referenceMissingRef = useRef(false);
   const fsmRef = useRef<ExerciseFSM | null>(null);
   // Mirrors sessionStarted/paused for the rAF loop (created once at mount).
   const sessionStartedRef = useRef(false);
@@ -485,6 +521,9 @@ export function PatientSessionPage({
   // ref keeps the complete set available when MediaRecorder asynchronously
   // finishes and hands the recording to the confirmation screen.
   const poseRepScoresRef = useRef<number[]>([]);
+  // Full server response per scored rep (metrics + detailedFeedback) — feeds the
+  // end-of-session comment (utils/sessionFeedback.ts).
+  const poseRepDetailsRef = useRef<PoseRepScoringResult[]>([]);
   // handleStop captured for submitCompletedRep's auto-finish (all reps done →
   // existing STOP → SessionUploadConfirmPage flow). Assigned every render.
   const stopRef = useRef<() => void>(() => {});
@@ -497,14 +536,35 @@ export function PatientSessionPage({
   const landmarkFiltersRef = useRef<Array<{ x: OneEuroFilter; y: OneEuroFilter }>>([]);
 
   // -------------------------------------------------------------------------
-  // Virtual-grip minigame (movementTracking = virtual_grip): close the hand
-  // over the displayed ball to grab it, drag it into the target circle, hold
-  // to score a repetition. Pure logic lives in ai/grip/gripMinigame.ts; the
-  // ball/target render on the shared overlay canvas next to the hand skeleton.
+  // Virtual-grip ball game (movementTracking = virtual_grip): timed rounds —
+  // close the hand over the ball, drag it into the ring and OPEN the hand to
+  // release it there for 1 point. Pure logic lives in ai/grip/ballGripFSM.ts;
+  // the ball/ring render on the shared overlay canvas next to the hand skeleton.
+  // Every finished round (point or not) advances the shared "X / N" counter.
   // -------------------------------------------------------------------------
-  const gripGameRef = useRef<GripMinigame | null>(null);
+  const gripGameRef = useRef<VirtualBallGripFSM | null>(null);
+  const gripStateRef = useRef<GripState | null>(null);
+  const lastGripTickMsRef = useRef<number | null>(null);
+  // Set once the prescribed rounds are done so the caption loop stops
+  // overwriting the "finishing…" message.
+  const gripFinishedRef = useRef(false);
+  // Every finished round of this recording (kept in a ref: the rAF loop and the
+  // MediaRecorder-finish effect both read it).
+  const gripRoundsRef = useRef<BallGripRepResult[]>([]);
+  const gripRoundHookRef = useRef<((round: BallGripRepResult) => void) | null>(null);
   const [gripStatusText, setGripStatusText] = useState<string | null>(null);
   const lastGripCaptionRef = useRef("");
+
+  // Fresh grip game state (new session / restart / exercise switch).
+  function resetGripSession() {
+    gripGameRef.current?.reset();
+    gripStateRef.current = null;
+    lastGripTickMsRef.current = null;
+    gripFinishedRef.current = false;
+    gripRoundsRef.current = [];
+    setGripStatusText(null);
+    lastGripCaptionRef.current = "";
+  }
 
   useEffect(() => {
     sessionStartedRef.current = sessionStarted;
@@ -522,15 +582,14 @@ export function PatientSessionPage({
     // Pose rep tracking resets with the exercise switch too.
     demoDoneRef.current = parsed.done;
     poseRepScoresRef.current = [];
+    poseRepDetailsRef.current = [];
     repCycleRef.current += 1;
     scoringHoldRef.current = false;
     setRepFeedback(null);
     setPoseStatusText(null);
     lastPoseCaptionRef.current = "";
     landmarkFiltersRef.current = [];
-    gripGameRef.current?.reset();
-    setGripStatusText(null);
-    lastGripCaptionRef.current = "";
+    resetGripSession();
     fsmRef.current?.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exercise.id]);
@@ -563,6 +622,7 @@ export function PatientSessionPage({
     // caller's state), so this builds the FSM once, not on every render.
     if (testConfig) {
       poseReferenceRef.current = testConfig.poseReference;
+      referenceMissingRef.current = false;
       fsmRef.current = new ExerciseFSM((testConfig.poseReference ?? DEFAULT_POSE_REFERENCE).fsmConfig);
       return;
     }
@@ -572,6 +632,10 @@ export function PatientSessionPage({
       .then((response) => {
         if (cancelled) return;
         poseReferenceRef.current = response.poseReference;
+        // No stored reference = this exercise cannot be tracked or scored (the
+        // shared defaults are bilateral ELBOW criteria and would silently
+        // mis-detect any other movement) — say so instead of running them.
+        referenceMissingRef.current = response.poseReference === null;
         fsmRef.current = new ExerciseFSM((response.poseReference ?? DEFAULT_POSE_REFERENCE).fsmConfig);
       })
       .catch(() => {
@@ -579,6 +643,7 @@ export function PatientSessionPage({
         // Network/auth failure — fall back to the shared defaults so the
         // session still runs; scoring requests will surface a clear error.
         poseReferenceRef.current = null;
+        referenceMissingRef.current = false;
         fsmRef.current = new ExerciseFSM(DEFAULT_POSE_REFERENCE.fsmConfig);
       });
     return () => {
@@ -614,7 +679,7 @@ export function PatientSessionPage({
       setPoseStatusText("ทำครบทุกครั้งแล้ว กำลังจบเซสชัน…");
       window.setTimeout(() => {
         if (cycle === repCycleRef.current) stopRef.current();
-      }, 2000);
+      }, SESSION_END_DELAY_MS);
       return;
     }
 
@@ -652,7 +717,10 @@ export function PatientSessionPage({
         frames: completed.sequence,
         peakRom: completed.peakRom,
         baseTrunkPoint: completed.baseTrunkPoint,
-        baseShoulderWidthNorm: completed.baseShoulderWidthNorm
+        baseShoulderWidthNorm: completed.baseShoulderWidthNorm,
+        baseRawTrunkPoint: completed.baseRawTrunkPoint,
+        baseTrunkLength: completed.baseTrunkLength,
+        baseWristDistanceNorm: completed.baseWristDistanceNorm
       };
       const { rep } = testConfig
         ? await scoreExerciseTestRep(token, {
@@ -668,6 +736,7 @@ export function PatientSessionPage({
       if (cycle !== repCycleRef.current) return; // session restarted meanwhile
 
       // Success — NOW the rep counts (demoDone drives "X of Y" + progress %).
+      poseRepDetailsRef.current.push(rep);
       advanceAfterRep(
         cycle,
         repNumber,
@@ -699,13 +768,32 @@ export function PatientSessionPage({
     const activeReference = poseReferenceRef.current ?? DEFAULT_POSE_REFERENCE;
     if (!sessionStartedRef.current || pausedRef.current || scoringHoldRef.current) return;
 
+    if (referenceMissingRef.current) {
+      const missingCaption = "ท่านี้ยังไม่มีข้อมูลอ้างอิง AI — กรุณาแจ้งนักกายภาพให้สแกนวิดีโอสาธิตของท่านี้";
+      if (lastPoseCaptionRef.current !== missingCaption) {
+        lastPoseCaptionRef.current = missingCaption;
+        setPoseStatusText(missingCaption);
+      }
+      return;
+    }
+
     const frameFeature = buildFrameFeature(
       landmarks,
       activeReference.angleDefinition,
       activeReference.secondaryAngleDefinition
     );
+    frameFeature.timestampMs = nowMs;
+    const trunkCentroid = calculateTrunkCentroid(landmarks);
     const output = fsm.processFrame(
-      { angle: frameFeature.elbowAngle, trunkCentroid: calculateTrunkCentroid(landmarks), timestampMs: nowMs },
+      {
+        angle: frameFeature.elbowAngle,
+        trunkCentroid,
+        timestampMs: nowMs,
+        // Start-pose hold restarts if the body drifts; the secondary angle only
+        // matters for exercises that configure a start-pose orientation gate.
+        stabilityPoint: trunkCentroid,
+        secondaryAngle: frameFeature.shoulderAngle
+      },
       frameFeature
     );
 
@@ -742,40 +830,41 @@ export function PatientSessionPage({
   // movementTracking=pose: real per-rep AI feedback from the backend scoring
   // engine (Thai, generated by scoreEngine) once a rep has been scored; the
   // canned demo messages only apply to non-pose exercises.
-  const feedbackText = poseTrackingEnabled
+  const feedbackText = poseTrackingEnabled || handTrackingEnabled
     ? repFeedback ?? exercise.feedback
     : demoFeedbackMessages(exercise)[feedbackIndex] ?? exercise.feedback;
 
-  // Virtual-grip rep completed (ball dropped + held in the target) — advance
-  // the shared rep counter / green bar. Counted locally: grip interactions
-  // have no backend scoring endpoint yet, so no score is fabricated here
-  // (the score chip stays "—" per the no-mock policy).
-  function handleGripRepComplete() {
-    // Ignore stray completions outside an active session (e.g. a rep that
-    // finished on the very frame Pause was pressed), and on "both" exercises
-    // where the pose FSM owns the scored rep counter — the minigame stays
-    // playable there but must not double-count into the same "1 / N" counter.
-    if (!sessionStartedRef.current || pausedRef.current || poseTrackingEnabled) return;
+  // Virtual-grip round finished (point, miss, timeout or lost tracking) —
+  // advance the shared rep counter / green bar and the running game score
+  // (points / rounds played, 0-100, same scale as pose rep scores). Scores are
+  // computed locally by ai/grip/ballGripScoring.ts (no backend round trip).
+  gripRoundHookRef.current = (round) => {
+    // Ignore stray completions outside an active session, and on "both"
+    // exercises where the pose FSM owns the scored rep counter — the ball game
+    // stays playable there but must not double-count into the same "1 / N".
+    if (!sessionStartedRef.current || pausedRef.current || poseTrackingEnabled || gripFinishedRef.current) return;
 
+    gripRoundsRef.current.push(round);
     const next = total > 0 ? Math.min(demoDoneRef.current + 1, total) : demoDoneRef.current + 1;
     demoDoneRef.current = next;
     setDemoDone(next);
+    const points = gripRoundsRef.current.filter((r) => r.success).length;
+    setDemoScore(Math.round((points / gripRoundsRef.current.length) * 100));
+    setRepFeedback(round.feedbackText);
 
-    // Prescribed reps reached → transition into the existing session-completion
-    // flow (STOP → SessionUploadConfirmPage), same as the pose flow. The
-    // repCycle guard drops this if the session was restarted meanwhile.
+    // Prescribed rounds played → the existing session-completion flow (STOP →
+    // SessionUploadConfirmPage), same as the pose flow. The repCycle guard
+    // drops this if the session was restarted meanwhile.
     if (total > 0 && next >= total) {
       const cycle = repCycleRef.current;
-      lastGripCaptionRef.current = "ทำครบทุกครั้งแล้ว กำลังจบเซสชัน…";
+      gripFinishedRef.current = true;
+      lastGripCaptionRef.current = "ครบทุกรอบแล้ว กำลังจบเซสชัน…";
       setGripStatusText(lastGripCaptionRef.current);
       window.setTimeout(() => {
         if (cycle === repCycleRef.current) stopRef.current();
-      }, 2000);
+      }, SESSION_END_DELAY_MS);
     }
-  }
-  if (gripGameRef.current) {
-    gripGameRef.current.onRepComplete = handleGripRepComplete;
-  }
+  };
 
   // §6.3/§6.4 — recording.stop() resolves asynchronously (MediaRecorder's onstop
   // fires after any final ondataavailable), so STOP can't hand a result to
@@ -788,16 +877,55 @@ export function PatientSessionPage({
   useEffect(() => {
     if (awaitingFinishRef.current && recording.result) {
       awaitingFinishRef.current = false;
-      const repScores = poseRepScoresRef.current;
-      const poseSummary = repScores.length > 0
+      // Pose reps win when present; otherwise a virtual-grip session reports its
+      // rounds (finalRepScore is 0/100 per round, so the average = success rate).
+      const gripRounds = gripRoundsRef.current;
+      const repScores = poseRepScoresRef.current.length > 0
+        ? poseRepScoresRef.current
+        : gripRounds.map((round) => round.finalRepScore);
+      const poseSummary: PoseSessionSummary | undefined = repScores.length > 0
         ? {
             averageScore: Math.round(repScores.reduce((sum, score) => sum + score, 0) / repScores.length),
-            repScores: [...repScores]
+            repScores: [...repScores],
+            targetReps: total,
+            ...(poseRepScoresRef.current.length === 0
+              ? { gripRounds: [...gripRounds] }
+              : { poseReps: [...poseRepDetailsRef.current] })
           }
         : undefined;
       onFinishRecording(recording.result, poseSummary);
     }
   }, [recording.result, onFinishRecording]);
+
+  // Shared by the on-camera pause button, the sidebar button and the voice
+  // commands so all three keep the recorder and the page's paused flag in sync.
+  const handleTogglePause = () => {
+    if (paused) {
+      recording.resume();
+    } else {
+      recording.pause();
+    }
+    onTogglePause();
+  };
+
+  // Voice commands (ai-trained Teachable Machine model, fully on-device) — a
+  // shortcut layer over the same handlers as the buttons. Each handler guards on
+  // the current phase because a spoken word can arrive at any time; the buttons
+  // keep working whether or not voice is available.
+  const voiceHandlers = {
+    start: () => {
+      if (camera.status === "streaming" && !sessionStarted) handleStart();
+    },
+    pause: () => {
+      if (sessionStarted && !paused) handleTogglePause();
+    },
+    continue: () => {
+      if (sessionStarted && paused) handleTogglePause();
+    },
+    stop: () => {
+      if (sessionStarted) handleStop();
+    }
+  };
 
   const handleStart = () => {
     setSessionStarted(true);
@@ -808,11 +936,10 @@ export function PatientSessionPage({
     scoringHoldRef.current = false;
     demoDoneRef.current = demoDone;
     poseRepScoresRef.current = [];
+    poseRepDetailsRef.current = [];
     // New session = time discontinuity — landmark filters start fresh.
     landmarkFiltersRef.current = [];
-    gripGameRef.current?.reset();
-    setGripStatusText(null);
-    lastGripCaptionRef.current = "";
+    resetGripSession();
     fsmRef.current?.reset();
   };
 
@@ -872,12 +999,11 @@ export function PatientSessionPage({
     scoringHoldRef.current = false;
     demoDoneRef.current = initialDone;
     poseRepScoresRef.current = [];
+    poseRepDetailsRef.current = [];
     setRepFeedback(null);
     lastPoseCaptionRef.current = "";
     landmarkFiltersRef.current = [];
-    gripGameRef.current?.reset();
-    setGripStatusText(null);
-    lastGripCaptionRef.current = "";
+    resetGripSession();
     fsmRef.current?.reset();
     onRestart();
   };
@@ -949,6 +1075,12 @@ export function PatientSessionPage({
               <LogOut size={18} />
             </button>
           </header>
+
+          {camera.status === "streaming" && (
+            <div className="session-voice">
+              <VoiceControl compact handlers={voiceHandlers} />
+            </div>
+          )}
 
           {/* §2.1 — shown once the camera is live but before the patient presses Start:
               a framing guide + prompt instead of jumping straight into the full
@@ -1051,14 +1183,7 @@ export function PatientSessionPage({
                   <button
                     type="button"
                     className="session-control-btn"
-                    onClick={() => {
-                      if (paused) {
-                        recording.resume();
-                      } else {
-                        recording.pause();
-                      }
-                      onTogglePause();
-                    }}
+                    onClick={handleTogglePause}
                     aria-label={paused ? "เล่นต่อ" : "หยุดชั่วคราว"}
                   >
                     {paused ? <TimerReset size={18} /> : <Square size={18} />}
@@ -1177,14 +1302,7 @@ export function PatientSessionPage({
             <button
               type="button"
               className="secondary-button"
-              onClick={() => {
-                if (paused) {
-                  recording.resume();
-                } else {
-                  recording.pause();
-                }
-                onTogglePause();
-              }}
+              onClick={handleTogglePause}
             >
               {paused ? <TimerReset size={16} /> : <Square size={16} />}
               {paused ? "เล่นต่อ" : "หยุดชั่วคราว"}

@@ -523,7 +523,7 @@ async function seedPatientsAndPlans(
             exerciseLibraryId: exercise.id,
             orderNumber: order,
             targetType: order === 1 ? "repetitions" : "duration",
-            targetValue: order === 1 ? { repetitions: 10 } : { minutes: 5 },
+            targetValue: order === 1 ? "10 ครั้ง" : "5 นาที",
             therapistInstruction:
               order === 1
                 ? "เคลื่อนไหวช้า ๆ อย่างมีการควบคุม"
@@ -648,7 +648,7 @@ async function backfillUpcomingExerciseDays(
             exerciseLibraryId: exercise.id,
             orderNumber: order,
             targetType: order === 1 ? "repetitions" : "duration",
-            targetValue: order === 1 ? { repetitions: 10 } : { minutes: 5 },
+            targetValue: order === 1 ? "10 ครั้ง" : "5 นาที",
             therapistInstruction:
               order === 1
                 ? "เคลื่อนไหวช้า ๆ อย่างมีการควบคุม"

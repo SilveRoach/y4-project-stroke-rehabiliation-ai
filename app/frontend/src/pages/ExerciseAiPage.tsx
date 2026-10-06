@@ -192,6 +192,14 @@ export function ExerciseAiPage({
   const [targetRom, setTargetRom] = useState(90);
   const [bveThreshold, setBveThreshold] = useState(0.15);
   const [enableTrunkBve, setEnableTrunkBve] = useState(true);
+  // Technique flags stored on the poseReference (backend scoring). Seeded from
+  // the exercise being edited so re-calibrating doesn't silently drop them.
+  const [allowsTorsoMovement, setAllowsTorsoMovement] = useState(
+    exercise?.baseCriteria?.poseReference?.allowsTorsoMovement === true
+  );
+  const [checksHandProximity, setChecksHandProximity] = useState(
+    exercise?.baseCriteria?.poseReference?.checksHandProximity === true
+  );
   const [repSensitivityIndex, setRepSensitivityIndex] = useState(2);
 
   // Additional takes (raw frames kept so features can be re-derived if the
@@ -347,6 +355,53 @@ export function ExerciseAiPage({
       cancelled = true;
     };
   }, [token, savedExerciseName]);
+
+  // Reopening a SAVED pose exercise: scan its stored demo video right away so the
+  // skeleton preview (Step 5) is populated without re-uploading or pressing
+  // "scan". Preview only — this deliberately does NOT calibrate or touch the
+  // stored criteria (masterSamples, wrong-form takes, checkpoints), so saving
+  // afterwards keeps the exercise's AI reference exactly as it was; pressing
+  // "scan and calibrate" with a new clip still recalibrates as before.
+  const autoScannedUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!savedDemoUrl || baseClip || calibration || scanBusy || !isPoseExercise) return;
+    if (autoScannedUrlRef.current === savedDemoUrl) return;
+    autoScannedUrlRef.current = savedDemoUrl;
+    let cancelled = false;
+    (async () => {
+      setScanBusy(true);
+      setScanError(null);
+      setScanProgressText("กำลังโหลดโครงกระดูกจากวิดีโอสาธิตที่บันทึกไว้…");
+      try {
+        const blob = await (await fetch(savedDemoUrl)).blob();
+        const file = new File([blob], "saved-demo-video", { type: blob.type || "video/mp4" });
+        const frames = await scanVideoPoseFrames(
+          file,
+          ({ currentTimeSeconds, durationSeconds, sampledFrames }) => {
+            if (!cancelled) {
+              setScanProgressText(`กำลังโหลดโครงกระดูก ${currentTimeSeconds.toFixed(1)} / ${durationSeconds.toFixed(1)} วินาที — ติดตามแล้ว ${sampledFrames} เฟรม`);
+            }
+          }
+        );
+        if (cancelled || frames.length < 10) return;
+        rankedCandidatesRef.current = rankCandidates(frames);
+        setBaseFrames(frames);
+        setPreviewIndex(0);
+        setScanProgressText(`โหลดโครงกระดูกจากวิดีโอสาธิตที่บันทึกไว้แล้ว — ${frames.length} เฟรม`);
+      } catch {
+        // Non-fatal: the preview just stays empty; the manual scan flow still works.
+        if (!cancelled) setScanProgressText(null);
+      } finally {
+        setScanBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      // StrictMode/dep-change remount: allow the scan to run again.
+      if (autoScannedUrlRef.current === savedDemoUrl) autoScannedUrlRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedDemoUrl, baseClip, isPoseExercise]);
 
   const getAngleDefinitionById = (id: string | null): AngleDefinition | null =>
     id ? rankedCandidatesRef.current.find((c) => c.id === id)?.angleDefinition ?? null : null;
@@ -623,6 +678,18 @@ export function ExerciseAiPage({
       targetRom,
       bveThreshold,
       enableTrunkBve,
+      allowsTorsoMovement,
+      checksHandProximity,
+      // Authoring labels kept server-side only, to word the per-rep
+      // detailedFeedback (which joint is primary / which is the secondary).
+      targetJoint: rankedCandidatesRef.current.find((c) => c.id === selectedPrimaryId)?.label ?? calibration?.primary.label,
+      autoAnalysis: calibration
+        ? {
+            primaryCandidateId: selectedPrimaryId ?? calibration.primary.id,
+            secondaryCandidateId: selectedSecondaryId ?? calibration.secondary.id,
+            rankedCandidates: calibration.rankedCandidates.map((c) => ({ id: c.id, label: c.label, range: c.range, score: c.score }))
+          }
+        : undefined,
       masterSamples: [
         {
           sampleId: 1,
@@ -824,8 +891,8 @@ export function ExerciseAiPage({
         id: targetExercise?.id ?? "ai-authoring-test",
         name: exerciseName.trim() || "AI test exercise",
         trackingType: movementTracking === "virtual_grip" ? "virtual_grip" : "pose",
-        targetLabel: `${Number(repetitions) || 0} reps`,
-        progressLabel: `${Number(repetitions) || 0} reps`,
+        targetLabel: `${Number(repetitions) || 0} ครั้ง`,
+        progressLabel: `${Number(repetitions) || 0} ครั้ง`,
         status: "not_started",
         feedback: exerciseDescription.trim() || "Follow the movement instructions you authored.",
         durationMinutes: 0,
@@ -1551,6 +1618,26 @@ export function ExerciseAiPage({
                     disabled={!calibration}
                   />
                   คิดคะแนนหักเมื่อใช้การเอนลำตัวชดเชย (BVE)
+                </label>
+
+                <label className="ai-check">
+                  <input
+                    type="checkbox"
+                    checked={allowsTorsoMovement}
+                    onChange={(e) => setAllowsTorsoMovement(e.target.checked)}
+                    disabled={!calibration}
+                  />
+                  ท่านี้ต้องขยับลำตัวช่วยตามธรรมชาติของท่า (ปิดการหักคะแนนจากการบิดลำตัว)
+                </label>
+
+                <label className="ai-check">
+                  <input
+                    type="checkbox"
+                    checked={checksHandProximity}
+                    onChange={(e) => setChecksHandProximity(e.target.checked)}
+                    disabled={!calibration}
+                  />
+                  ท่านี้ต้องกุม/ประกบมือไว้ตลอดท่า (หักคะแนนเมื่อมือแยกห่างจากกัน)
                 </label>
 
                 <div className="ai-save-actions">
