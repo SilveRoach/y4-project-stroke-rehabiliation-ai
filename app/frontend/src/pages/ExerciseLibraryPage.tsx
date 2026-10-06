@@ -19,7 +19,6 @@ import {
 } from "../services/api";
 import { useAuth } from "../store/authStore";
 import { useOwnProfilePicture } from "../hooks/useProfilePicture";
-import { initialsFromName } from "../utils/displayName";
 import type {
   ExerciseBaseCriteria,
   ExerciseLibraryDifficulty,
@@ -193,7 +192,6 @@ export function ExerciseLibraryPage({
     });
   }, [exercises, searchQuery, statusFilter]);
 
-  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
   const ownAvatarUrl = useOwnProfilePicture();
   // The exercise-library section is shared with the admin console (App routes
   // admins here from AdminSidebar's "Exercise Library" item): admins get the
@@ -219,17 +217,6 @@ export function ExerciseLibraryPage({
           <div>
             <h1>คลังท่าบริหาร</h1>
             <p>{loading ? "กำลังโหลด…" : `ท่าบริหารทั้งหมด ${exercises.length} ท่า`}</p>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{displayName}</strong>
-                <small>นักกายภาพบำบัด</small>
-              </div>
-              <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
-                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`รูปโปรไฟล์ของ ${displayName}`} /> : initialsFromName(displayName)}
-              </span>
-            </div>
           </div>
         </header>
 

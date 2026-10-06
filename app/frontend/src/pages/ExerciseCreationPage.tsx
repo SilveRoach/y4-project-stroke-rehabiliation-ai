@@ -23,7 +23,6 @@ import {
   type ExerciseInputPayload
 } from "../services/api";
 import { useAuth } from "../store/authStore";
-import { initialsFromName } from "../utils/displayName";
 import type {
   ExerciseBaseCriteria,
   ExerciseLibraryItem,
@@ -253,8 +252,6 @@ export function ExerciseCreationPage({
     }
   };
 
-  const displayName = user?.displayName || user?.username || "Therapist";
-
   return (
     <section className="therapist-shell exercise-creation-page">
       <TherapistSidebar activeLabel="Exercise Library" onNavigate={onNavigate} onLogout={onLogout} />
@@ -266,15 +263,6 @@ export function ExerciseCreationPage({
             <div>
               <strong>{isEditing ? "Edit exercise" : "Create exercise"}</strong>
               <span>Build a guided rehabilitation activity</span>
-            </div>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{displayName}</strong>
-                <small>Physical Therapist</small>
-              </div>
-              <span className="avatar-badge">{initialsFromName(displayName)}</span>
             </div>
           </div>
         </header>

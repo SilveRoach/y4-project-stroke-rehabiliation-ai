@@ -9,14 +9,13 @@
 // Layout mirrors the import's two-column workspace; styling stays on this
 // project's color scheme (creation-section-card / CSS variables).
 
-import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Hand, History, Loader2, Play, Save, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Hand, History, Loader2, Minus, Pause, Play, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
 import { useAuth } from "../store/authStore";
-import { initialsFromName } from "../utils/displayName";
 import { drawSkeleton } from "../ai/poseDetection";
 import {
   DEFAULT_FSM_MARGIN_SCALE,
@@ -31,7 +30,7 @@ import {
 import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
 import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
 import type { ExerciseFSMConfig, FrameFeature, AngleDefinition, PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
-import { ApiError, archiveExercise, createExercise, createExerciseVersion, getFileContent, getExerciseLibrary, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
+import { ApiError, archiveExercise, createExercise, createExerciseVersion, getFileContent, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
 import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType, PatientExercise } from "../types";
 import { PatientSessionPage } from "./PatientSessionPage";
 import type { SessionTestConfig } from "./PatientSessionPage";
@@ -42,6 +41,7 @@ interface ExerciseAiPageProps {
   initialTracking?: ExerciseTrackingType;
   onBack: () => void;
   onSaved: () => void;
+  onCreated: (name: string) => void;
   onLogout: () => void;
   // Union of both sidebars' contracts — this page renders TherapistSidebar for
   // therapists and AdminSidebar for admins (same section, same label), so App
@@ -73,6 +73,60 @@ interface ExerciseCheckpoint {
   description?: string;
   timestampSeconds: number;
   angle: number;
+}
+
+interface StoredPoseReference extends PoseReferencePublic, Record<string, unknown> {
+  checkpoints?: ExerciseCheckpoint[];
+  poseFrames?: StoredPoseFrame[];
+}
+
+interface StoredPoseFrame {
+  landmarks: Array<[number, number, number, number?]>;
+  trunkCentroid: { x: number; y: number };
+  timestampMs: number;
+  videoTimeSeconds: number;
+}
+
+function isStoredPoseFrame(value: unknown): value is StoredPoseFrame {
+  if (!value || typeof value !== "object") return false;
+  const frame = value as Partial<StoredPoseFrame>;
+  return (
+    Number.isFinite(frame.timestampMs) &&
+    Number.isFinite(frame.videoTimeSeconds) &&
+    Boolean(frame.trunkCentroid && Number.isFinite(frame.trunkCentroid.x) && Number.isFinite(frame.trunkCentroid.y)) &&
+    Array.isArray(frame.landmarks) &&
+    frame.landmarks.length >= 33 &&
+    frame.landmarks.every((landmark) =>
+      Boolean(
+        Array.isArray(landmark) &&
+          landmark.length >= 3 &&
+          Number.isFinite(landmark[0]) &&
+          Number.isFinite(landmark[1]) &&
+          Number.isFinite(landmark[2]) &&
+          (landmark[3] === undefined || Number.isFinite(landmark[3]))
+      )
+    )
+  );
+}
+
+function serializePoseFrames(frames: FrameSample[]): StoredPoseFrame[] {
+  return frames
+    .filter((_, index) => index % 3 === 0)
+    .map(({ landmarks, trunkCentroid, timestampMs, videoTimeSeconds }) => ({
+      landmarks: landmarks.map(({ x, y, z, visibility }): [number, number, number, number?] =>
+        visibility === undefined
+          ? [Math.round(x * 10000) / 10000, Math.round(y * 10000) / 10000, Math.round(z * 10000) / 10000]
+          : [
+              Math.round(x * 10000) / 10000,
+              Math.round(y * 10000) / 10000,
+              Math.round(z * 10000) / 10000,
+              Math.round(visibility * 100) / 100
+            ]
+      ),
+      trunkCentroid,
+      timestampMs,
+      videoTimeSeconds
+    }));
 }
 
 /** The 3 FSM states the therapist marks on the base clip (reference order). */
@@ -147,12 +201,12 @@ export function ExerciseAiPage({
   initialTracking = "pose",
   onBack,
   onSaved,
+  onCreated,
   onLogout,
   onNavigate,
   isVersionView = false
 }: ExerciseAiPageProps) {
   const { token, user } = useAuth();
-  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
 
   // Exercise identity / payload fields.
   const [exerciseName, setExerciseName] = useState(exercise?.name ?? initialName);
@@ -180,6 +234,7 @@ export function ExerciseAiPage({
   const [baseClipUrl, setBaseClipUrl] = useState<string | null>(null);
   const [savedDemoUrl, setSavedDemoUrl] = useState<string | null>(null);
   const [savedDemoState, setSavedDemoState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [loadedDemoFileId, setLoadedDemoFileId] = useState<string | null>(null);
 
   // Calibration results (null until the base clip has been scanned).
   const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
@@ -212,6 +267,7 @@ export function ExerciseAiPage({
   // Frame preview scrubber (skeleton-only preview over a dark backdrop) — also
   // the frame picker used when marking checkpoints.
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   // Live scan preview canvas (video frame + skeleton while scanning, the
   // reference's behavior) — separate from the post-scan preview above.
@@ -244,10 +300,6 @@ export function ExerciseAiPage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedExerciseName, setSavedExerciseName] = useState<string | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState<"publish" | "archive" | null>(null);
-  // "new" = create a new exercise; otherwise the id of an existing pose exercise
-  // to attach this reference to (draft → update in place, active → new version).
-  const [targetExerciseId, setTargetExerciseId] = useState<string>("new");
-  const [libraryExercises, setLibraryExercises] = useState<ExerciseLibraryItem[]>([]);
 
   // "Test exercise" run — mounts PatientSessionPage with the criteria
   // currently on screen while THIS component stays mounted (so scanned clips,
@@ -255,22 +307,23 @@ export function ExerciseAiPage({
   // authoring workspace is showing. Unlike a patient's session there is no
   // upload/confirmation step: finishing (or exiting) comes straight back here
   // and the take is discarded.
-  const [testSession, setTestSession] = useState<{ exercise: PatientExercise; testConfig: SessionTestConfig } | null>(null);
+  const [testSession, setTestSession] = useState<{
+    exercise: PatientExercise;
+    testConfig: SessionTestConfig;
+    ownsDemoVideoUrl: boolean;
+  } | null>(null);
   const [testPaused, setTestPaused] = useState(false);
   const [testNote, setTestNote] = useState<string | null>(null);
 
   const sensitivityLevels = DIFFICULTY_REP_SENSITIVITY[difficulty];
   const allCheckpointsSet = Boolean(checkpoints.ready && checkpoints.active && checkpoints.return);
 
-  // Pose exercises already in the library (this therapist's own rows included),
-  // offered as attach targets so a reference can be applied to an existing
-  // exercise instead of always creating a new one. Archived versions are
-  // excluded — attaching to them would resurrect a retired row.
-  const targetExercise =
-    exercise ?? (targetExerciseId === "new" ? null : libraryExercises.find((item) => item.id === targetExerciseId) ?? null);
+  const targetExercise = exercise ?? null;
+  const storedPoseReference = targetExercise?.baseCriteria.poseReference as unknown as StoredPoseReference | undefined;
   const isOwner = !targetExercise || (user ? targetExercise.createdById === user.id || user.role === "admin" : false);
   const isArchived = targetExercise?.status === "archived";
   const isPoseExercise = movementTracking === "pose";
+  const canEditPoseCriteria = Boolean(calibration || storedPoseReference);
   // Admins reach this workspace from AdminSidebar's "Exercise Library" item —
   // they get the AdminSidebar back (same section highlighted) so they can
   // navigate out again; therapists keep the TherapistSidebar exactly as before.
@@ -298,6 +351,7 @@ export function ExerciseAiPage({
   useEffect(() => {
     const fileId = targetExercise?.demoVideoFileId ?? null;
     setSavedDemoUrl(null);
+    setLoadedDemoFileId(null);
     if (!token || !fileId) {
       setSavedDemoState("idle");
       return;
@@ -313,6 +367,7 @@ export function ExerciseAiPage({
           return;
         }
         setSavedDemoUrl(objectUrl);
+        setLoadedDemoFileId(fileId);
         setSavedDemoState("ready");
       })
       .catch(() => {
@@ -335,26 +390,46 @@ export function ExerciseAiPage({
     setSavedExerciseName(null);
   }, [exercise, initialName, initialTracking]);
 
+  // Switching the library target must discard clip-specific authoring state;
+  // otherwise an old calibration/base clip can suppress the saved-video scan
+  // for the newly selected exercise.
   useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    getExerciseLibrary(token)
-      .then((response) => {
-        if (cancelled) return;
-        setLibraryExercises(
-          response.exercises
-            .filter((item) => item.movementTracking === "pose" && item.status !== "archived")
-            .sort((a, b) => a.name.localeCompare(b.name))
-        );
-      })
-      .catch(() => {
-        // Non-fatal: the picker just stays empty and "New exercise" still works.
-        if (!cancelled) setLibraryExercises([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token, savedExerciseName]);
+    setExerciseName(targetExercise?.name ?? initialName);
+    setExerciseDescription(targetExercise?.description ?? "");
+    setMovementTracking(targetExercise?.movementTracking ?? initialTracking);
+    setDifficulty(targetExercise?.difficultyLevel ?? "medium");
+    setRepetitions(targetExercise?.baseCriteria.repetitions?.toString() ?? "10");
+    setHoldSeconds(targetExercise?.baseCriteria.holdSeconds?.toString() ?? "5");
+    setTargetGripStrength(targetExercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+    setBaseClip(null);
+    setCalibration(null);
+    setBaseFrames([]);
+    setSelectedPrimaryId(null);
+    setSelectedSecondaryId(null);
+    setFsmConfig(storedPoseReference?.fsmConfig ?? null);
+    setTargetRom(storedPoseReference?.targetRom ?? 90);
+    setBveThreshold(storedPoseReference?.bveThreshold ?? 0.15);
+    setEnableTrunkBve(storedPoseReference?.enableTrunkBve === true);
+    setAllowsTorsoMovement(storedPoseReference?.allowsTorsoMovement === true);
+    setChecksHandProximity(storedPoseReference?.checksHandProximity === true);
+    setMasterClips([]);
+    setWrongFormClips([]);
+    setPreviewIndex(0);
+    setIsPreviewPlaying(false);
+    rankedCandidatesRef.current = [];
+    const savedCheckpoints = storedPoseReference?.checkpoints ?? [];
+    setCheckpoints({
+      ready: savedCheckpoints.find((checkpoint) => checkpoint.role === "ready") ?? null,
+      active: savedCheckpoints.find((checkpoint) => checkpoint.role === "active") ?? null,
+      return: savedCheckpoints.find((checkpoint) => checkpoint.role === "return") ?? null
+    });
+    setScanProgressText(null);
+    setScanError(null);
+    setSavedExerciseName(null);
+  // The exercise id is the identity boundary; library refreshes should not
+  // overwrite unsaved edits to the same exercise.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetExercise?.id]);
 
   // Reopening a SAVED pose exercise: scan its stored demo video right away so the
   // skeleton preview (Step 5) is populated without re-uploading or pressing
@@ -364,33 +439,65 @@ export function ExerciseAiPage({
   // "scan and calibrate" with a new clip still recalibrates as before.
   const autoScannedUrlRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!savedDemoUrl || baseClip || calibration || scanBusy || !isPoseExercise) return;
-    if (autoScannedUrlRef.current === savedDemoUrl) return;
-    autoScannedUrlRef.current = savedDemoUrl;
+    const savedFrames = storedPoseReference?.poseFrames;
+    const hasStoredPoseFrames = Boolean(savedFrames && savedFrames.length > 0 && savedFrames.every(isStoredPoseFrame));
+    if (
+      (!hasStoredPoseFrames &&
+        (!savedDemoUrl || loadedDemoFileId !== targetExercise?.demoVideoFileId)) ||
+      baseClip ||
+      scanBusy ||
+      !isPoseExercise
+    ) return;
+    const previewSourceKey = hasStoredPoseFrames ? `pose-reference:${targetExercise?.id}` : savedDemoUrl;
+    if (!previewSourceKey || autoScannedUrlRef.current === previewSourceKey) return;
+    autoScannedUrlRef.current = previewSourceKey;
     let cancelled = false;
     (async () => {
       setScanBusy(true);
       setScanError(null);
-      setScanProgressText("กำลังโหลดโครงกระดูกจากวิดีโอสาธิตที่บันทึกไว้…");
+      setScanProgressText(hasStoredPoseFrames ? "กำลังโหลดเฟรมโครงกระดูกจากข้อมูล JSON…" : "กำลังโหลดโครงกระดูกจากวิดีโอสาธิตที่บันทึกไว้…");
       try {
-        const blob = await (await fetch(savedDemoUrl)).blob();
-        const file = new File([blob], "saved-demo-video", { type: blob.type || "video/mp4" });
-        const frames = await scanVideoPoseFrames(
-          file,
-          ({ currentTimeSeconds, durationSeconds, sampledFrames }) => {
-            if (!cancelled) {
-              setScanProgressText(`กำลังโหลดโครงกระดูก ${currentTimeSeconds.toFixed(1)} / ${durationSeconds.toFixed(1)} วินาที — ติดตามแล้ว ${sampledFrames} เฟรม`);
+        let frames: FrameSample[];
+        if (hasStoredPoseFrames && savedFrames) {
+          frames = savedFrames.map((frame) => ({
+            ...frame,
+            landmarks: frame.landmarks.map(([x, y, z, visibility]) => ({
+              x,
+              y,
+              z,
+              ...(visibility === undefined ? {} : { visibility })
+            }))
+          }));
+        } else {
+          if (!savedDemoUrl) return;
+          const blob = await (await fetch(savedDemoUrl)).blob();
+          const file = new File([blob], "saved-demo-video", { type: blob.type || "video/mp4" });
+          frames = await scanVideoPoseFrames(
+            file,
+            ({ currentTimeSeconds, durationSeconds, sampledFrames }) => {
+              if (!cancelled) {
+                setScanProgressText(`กำลังโหลดโครงกระดูก ${currentTimeSeconds.toFixed(1)} / ${durationSeconds.toFixed(1)} วินาที — ติดตามแล้ว ${sampledFrames} เฟรม`);
+              }
             }
-          }
+          );
+        }
+        if (cancelled || frames.length === 0) return;
+        const candidates = rankCandidates(frames);
+        rankedCandidatesRef.current = candidates;
+        setSelectedPrimaryId(
+          candidates.find((candidate) => JSON.stringify(candidate.angleDefinition) === JSON.stringify(storedPoseReference?.angleDefinition))?.id ?? null
         );
-        if (cancelled || frames.length < 10) return;
-        rankedCandidatesRef.current = rankCandidates(frames);
+        setSelectedSecondaryId(
+          candidates.find((candidate) => JSON.stringify(candidate.angleDefinition) === JSON.stringify(storedPoseReference?.secondaryAngleDefinition))?.id ?? null
+        );
         setBaseFrames(frames);
         setPreviewIndex(0);
         setScanProgressText(`โหลดโครงกระดูกจากวิดีโอสาธิตที่บันทึกไว้แล้ว — ${frames.length} เฟรม`);
       } catch {
-        // Non-fatal: the preview just stays empty; the manual scan flow still works.
-        if (!cancelled) setScanProgressText(null);
+        if (!cancelled) {
+          setScanProgressText(null);
+          setScanError("โหลดเฟรมโครงกระดูกที่บันทึกไว้ไม่สำเร็จ");
+        }
       } finally {
         setScanBusy(false);
       }
@@ -398,16 +505,18 @@ export function ExerciseAiPage({
     return () => {
       cancelled = true;
       // StrictMode/dep-change remount: allow the scan to run again.
-      if (autoScannedUrlRef.current === savedDemoUrl) autoScannedUrlRef.current = null;
+      if (autoScannedUrlRef.current === previewSourceKey) autoScannedUrlRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedDemoUrl, baseClip, isPoseExercise]);
+  }, [savedDemoUrl, loadedDemoFileId, baseClip, isPoseExercise, targetExercise?.demoVideoFileId, targetExercise?.id]);
 
   const getAngleDefinitionById = (id: string | null): AngleDefinition | null =>
     id ? rankedCandidatesRef.current.find((c) => c.id === id)?.angleDefinition ?? null : null;
 
-  const primaryDef = getAngleDefinitionById(selectedPrimaryId) ?? calibration?.primary.angleDefinition ?? null;
-  const secondaryDef = getAngleDefinitionById(selectedSecondaryId) ?? calibration?.secondary.angleDefinition ?? null;
+  const primaryDef =
+    getAngleDefinitionById(selectedPrimaryId) ?? calibration?.primary.angleDefinition ?? storedPoseReference?.angleDefinition ?? null;
+  const secondaryDef =
+    getAngleDefinitionById(selectedSecondaryId) ?? calibration?.secondary.angleDefinition ?? storedPoseReference?.secondaryAngleDefinition ?? null;
 
   /** Primary-angle series over the scanned base frames (for FSM re-derivation). */
   const seriesFor = (def: AngleDefinition): number[] => baseFrames.map((f) => extractConfiguredAngle(f.landmarks, def).mean);
@@ -457,7 +566,21 @@ export function ExerciseAiPage({
       ctx.fillText("สแกนวิดีโอสาธิตเพื่อดูโครงกระดูก", 48, canvas.height / 2);
     }
   };
-  previewDrawRef.current();
+  useEffect(() => {
+    previewDrawRef.current?.();
+  }, [previewFrame]);
+
+  useEffect(() => {
+    if (!isPreviewPlaying || baseFrames.length < 2) return;
+    const frameDurationMs =
+      baseFrames.length > 1
+        ? Math.max(16, Math.min(250, ((baseFrames[baseFrames.length - 1].videoTimeSeconds - baseFrames[0].videoTimeSeconds) * 1000) / (baseFrames.length - 1)))
+        : 100;
+    const timer = window.setInterval(() => {
+      setPreviewIndex((current) => (current + 1) % baseFrames.length);
+    }, frameDurationMs);
+    return () => window.clearInterval(timer);
+  }, [isPreviewPlaying, baseFrames]);
 
   // Scans the base demo clip and auto-calibrates everything from it.
   const handleScanBaseClip = async () => {
@@ -716,7 +839,11 @@ export function ExerciseAiPage({
       checkpoints:
         checkpoints.ready && checkpoints.active && checkpoints.return
           ? [checkpoints.ready, checkpoints.active, checkpoints.return]
-          : undefined
+          : undefined,
+      // Keep a compact 10 fps pose sequence in the JSON reference. Stored
+      // joint coordinates let reopened exercises replay without rerunning pose
+      // detection; older references fall back to scanning their demo video.
+      poseFrames: serializePoseFrames(baseFrames)
     };
   };
 
@@ -741,7 +868,12 @@ export function ExerciseAiPage({
   //     version when it is active (BR-6 — active versions are immutable).
   const handleSave = async () => {
     if (!token || !isOwner || isArchived) return;
-    const poseReference = (calibration ? buildPoseReference() : targetExercise?.baseCriteria.poseReference) ?? undefined;
+    const poseReference =
+      (calibration
+        ? buildPoseReference()
+        : storedPoseReference && baseFrames.length > 0
+          ? { ...storedPoseReference, poseFrames: serializePoseFrames(baseFrames) }
+          : storedPoseReference) ?? undefined;
     if (isPoseExercise && !poseReference) {
       setSaveError("สแกนวิดีโอสาธิตเพื่อสร้างข้อมูลอ้างอิงท่าทางก่อนบันทึก");
       return;
@@ -809,6 +941,7 @@ export function ExerciseAiPage({
         demoVideoFileId: uploadedClipId
       });
       setSavedExerciseName(exerciseName.trim());
+      onCreated(exerciseName.trim());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
     } finally {
@@ -848,7 +981,6 @@ export function ExerciseAiPage({
   // the angle/FSM config derived from it) from this page, or a poseReference
   // already stored on the exercise being edited. Virtual-grip tests need
   // nothing extra; "none" has no AI tracking to exercise at all.
-  const storedPoseReference = targetExercise?.baseCriteria.poseReference as unknown as PoseReferencePublic | undefined;
   const hasTestablePoseReference = Boolean(
     (calibration && fsmConfig && primaryDef && secondaryDef && baseFrames.length >= 10) || storedPoseReference
   );
@@ -857,6 +989,10 @@ export function ExerciseAiPage({
       ? "ท่าบริหารนี้ดูได้อย่างเดียว จึงไม่สามารถทดสอบได้"
       : scanBusy
           ? "รอให้สแกนคลิปปัจจุบันเสร็จก่อนเริ่มทดสอบ"
+        : targetExercise?.demoVideoFileId && savedDemoState === "loading"
+          ? "กำลังโหลดวิดีโอสาธิตที่บันทึกไว้ กรุณารอสักครู่"
+        : targetExercise?.demoVideoFileId && savedDemoState === "error"
+          ? "โหลดวิดีโอสาธิตที่บันทึกไว้ไม่สำเร็จ กรุณาลองใหม่ก่อนทดสอบ"
         : movementTracking === "none"
             ? "ท่าบริหารนี้ไม่ได้ใช้ AI ติดตาม จึงไม่สามารถทดสอบได้"
           : isPoseExercise && !hasTestablePoseReference
@@ -883,7 +1019,7 @@ export function ExerciseAiPage({
         ? (calibration ? buildPoseReference() : null) ?? storedPoseReference ?? null
         : null
     ) as unknown as PoseReferencePublic | null;
-    const demoVideoUrl = baseClip ? URL.createObjectURL(baseClip) : null;
+    const demoVideoUrl = baseClip ? URL.createObjectURL(baseClip) : savedDemoUrl;
     setTestSession({
       exercise: {
         // Library id when editing an existing row (harmless in a test — no
@@ -900,7 +1036,8 @@ export function ExerciseAiPage({
         reps: Number(repetitions) || 0,
         difficulty: difficulty === "easy" ? "Easy" : difficulty === "medium" ? "Moderate" : "Hard"
       },
-      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl }
+      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl },
+      ownsDemoVideoUrl: Boolean(baseClip)
     });
     setTestPaused(false);
     setTestNote(null);
@@ -911,8 +1048,9 @@ export function ExerciseAiPage({
   // object URL and returns to the authoring workspace; the RecordingResult and
   // pose summary are deliberately dropped, since a test never uploads anything.
   const closeTest = (note: string | null) => {
-    const demoVideoUrl = testSession?.testConfig.demoVideoUrl;
-    if (demoVideoUrl) URL.revokeObjectURL(demoVideoUrl);
+    if (testSession?.ownsDemoVideoUrl && testSession.testConfig.demoVideoUrl) {
+      URL.revokeObjectURL(testSession.testConfig.demoVideoUrl);
+    }
     setTestSession(null);
     setTestPaused(false);
     setTestNote(note);
@@ -955,10 +1093,6 @@ export function ExerciseAiPage({
               <strong>พื้นที่สร้างท่าบริหารด้วย AI</strong>
               <span>สร้างข้อมูลอ้างอิงท่าทางจากวิดีโอสาธิต</span>
             </div>
-          </div>
-          <div className="therapist-topbar-profile">
-            <div><strong>{displayName}</strong><small>นักกายภาพบำบัด</small></div>
-            <span className="avatar-badge">{initialsFromName(displayName)}</span>
           </div>
         </header>
 
@@ -1122,6 +1256,40 @@ export function ExerciseAiPage({
                     <option value="virtual_grip">การจับเสมือน (Virtual grip)</option>
                     <option value="none">ไม่ติดตามด้วย AI</option>
                   </select>
+                </div>
+                <div className="ai-field">
+                  <label>จำนวนครั้งเริ่มต้น</label>
+                  <div className="ai-reps-stepper">
+                    <button
+                      type="button"
+                      className="ai-reps-step-button"
+                      onClick={() => setRepetitions(String(Math.max(1, (Number(repetitions) || 1) - 1)))}
+                      disabled={isArchived || !isOwner || (Number(repetitions) || 1) <= 1}
+                      aria-label="ลดจำนวนครั้งเริ่มต้น"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <input
+                      className="ai-reps-step-input"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={repetitions}
+                      onChange={(event) => setRepetitions(event.target.value)}
+                      disabled={isArchived || !isOwner}
+                      aria-label="จำนวนครั้งเริ่มต้น"
+                    />
+                    <span className="ai-reps-step-unit">ครั้ง</span>
+                    <button
+                      type="button"
+                      className="ai-reps-step-button"
+                      onClick={() => setRepetitions(String((Number(repetitions) || 0) + 1))}
+                      disabled={isArchived || !isOwner}
+                      aria-label="เพิ่มจำนวนครั้งเริ่มต้น"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
                 </div>
                 {/* Description sits last so its box absorbs the card's leftover
                     height (Step 1 shares its grid row with the taller Step 2). */}
@@ -1353,6 +1521,33 @@ export function ExerciseAiPage({
                   </div>
                 </div>
 
+                <div className="ai-save-actions" style={{ margin: "12px 0" }}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      if (previewIndex >= baseFrames.length - 1) setPreviewIndex(0);
+                      setIsPreviewPlaying((playing) => !playing);
+                    }}
+                    disabled={baseFrames.length < 2}
+                    aria-label={isPreviewPlaying ? "หยุดเล่นโครงกระดูกชั่วคราว" : "เล่นโครงกระดูก"}
+                  >
+                    {isPreviewPlaying ? <Pause size={16} /> : <Play size={16} />}
+                    {isPreviewPlaying ? "หยุดชั่วคราว" : "เล่น"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setPreviewIndex(0);
+                      setIsPreviewPlaying(true);
+                    }}
+                    disabled={baseFrames.length < 2}
+                    aria-label="เล่นโครงกระดูกซ้ำตั้งแต่ต้น"
+                  >
+                    <RotateCcw size={16} /> เล่นซ้ำ
+                  </button>
+                </div>
                 <canvas ref={previewCanvasRef} className="ai-frame-preview" width={480} height={270} />
 
                 <div style={{ marginTop: 12 }}>
@@ -1371,6 +1566,7 @@ export function ExerciseAiPage({
                       ? `เฟรม ${Math.min(previewIndex, baseFrames.length - 1) + 1} / ${baseFrames.length} · เวลา: ${(previewFrame?.videoTimeSeconds ?? 0).toFixed(2)} วินาที`
                       : "ยังไม่มีเฟรมที่สแกน"}
                   </p>
+                  {scanError && <p className="ai-error">{scanError}</p>}
                 </div>
               </section>
 
@@ -1488,157 +1684,140 @@ export function ExerciseAiPage({
                   </div>
                 </div>
 
-                <div className="ai-field">
-                  <label>บันทึกเป็น</label>
-                  <select
-                    className="ai-input"
-                    value={targetExerciseId}
-                    onChange={(e) => setTargetExerciseId(e.target.value)}
-                  >
-                    <option value="new">ท่าบริหารใหม่ (จากการตั้งค่าด้านบน)</option>
-                    {libraryExercises.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        แนบกับ: {item.name} (v{item.versionNumber} · {item.status === "active" ? "ใช้งาน" : item.status === "draft" ? "ฉบับร่าง" : "เก็บถาวร"})
-                      </option>
-                    ))}
-                  </select>
+                <div className="ai-save-target">
                   {targetExercise ? (
                     <>
-                      <p className="library-card-sub" style={{ marginTop: 4 }}>
-                        คงข้อมูล “{targetExercise.name}” (ชื่อ คำอธิบาย ระดับความยาก) และรวมข้อมูลอ้างอิงจาก AI เข้ากับ
-                        เกณฑ์
-                        {targetExercise.baseCriteria.poseReference
-                          ? " — ข้อมูลอ้างอิงท่าทางเดิมจะถูกแทนที่"
-                          : "."}
-                      </p>
+                      <strong>
+                        กำลังแก้ไข: {targetExercise.name} · v{targetExercise.versionNumber}
+                      </strong>
+                      <span>
+                        {targetExercise.status === "active"
+                          ? `บันทึกแล้วจะสร้างฉบับร่าง v${targetExercise.versionNumber + 1} โดยฉบับที่ใช้งานอยู่จะไม่เปลี่ยนแปลง`
+                          : targetExercise.status === "archived"
+                            ? "เวอร์ชันเก็บถาวรเปิดดูได้อย่างเดียว"
+                            : "บันทึกการเปลี่ยนแปลงลงในฉบับร่างนี้"}
+                      </span>
                       {targetExercise.status === "active" && (
-                        <>
-                          <p className="library-card-sub">
-                            เวอร์ชันนี้กำลังใช้งาน การบันทึกจะสร้างฉบับร่างเวอร์ชันใหม่ (v{targetExercise.versionNumber + 1})
-                            — เผยแพร่จากคลังเมื่อพร้อม
-                          </p>
-                          <p className="ai-advanced-warning" style={{ marginTop: 6 }}>
-                            ⚠️ ท่าบริหารที่กำหนดไว้ให้ผู้ป่วยยังอ้างอิงเวอร์ชันที่เผยแพร่อยู่ในปัจจุบัน — หลังเผยแพร่แล้ว
-                            ให้เพิ่มหรืออัปเดตท่านี้ในแผนของผู้ป่วยเพื่อให้เซสชันใช้ข้อมูลอ้างอิงใหม่
-                          </p>
-                        </>
+                        <span>
+                          หลังเผยแพร่ฉบับใหม่แล้ว ให้เพิ่มหรืออัปเดตท่านี้ในแผนผู้ป่วยเพื่อใช้เกณฑ์ใหม่
+                        </span>
                       )}
                       {!targetExercise.demoVideoFileId && !baseClip && (
-                        <p className="ai-error">ท่าบริหารนี้ยังไม่มีวิดีโอสาธิต — เลือกวิดีโอสาธิตหลักเพื่อเพิ่ม</p>
+                        <span className="ai-error">ท่าบริหารนี้ยังไม่มีวิดีโอสาธิต — เลือกวิดีโอสาธิตหลักเพื่อเพิ่ม</span>
                       )}
                     </>
                   ) : (
-                    <p className="library-card-sub" style={{ marginTop: 4 }}>
-                      สร้างท่าบริหารฉบับร่างโดยใช้ชื่อด้านบน และใช้วิดีโอสาธิตหลักเป็นวิดีโอสาธิต
-                    </p>
+                    <>
+                      <strong>พร้อมสร้างท่าบริหารฉบับร่างใหม่</strong>
+                      <span>รายละเอียดและข้อมูลอ้างอิงจาก AI จะถูกบันทึกลงในคลังท่าบริหาร</span>
+                    </>
                   )}
+                </div>
+
+                <div className="ai-field">
+                  <div className="ai-exercise-status-heading">
+                    <label>สถานะท่าบริหาร</label>
+                    <span className={`library-status-badge ${targetExercise?.status ?? "draft"}`}>
+                      {targetExercise?.status === "active"
+                        ? "ใช้งาน"
+                        : targetExercise?.status === "archived"
+                          ? "เก็บถาวร"
+                          : "ฉบับร่าง"}
+                    </span>
+                  </div>
+                  <p className="library-card-sub" style={{ margin: 0 }}>
+                    {targetExercise?.status === "active"
+                      ? "เวอร์ชันนี้กำลังใช้งาน การแก้ไขจะสร้างฉบับร่างเวอร์ชันใหม่"
+                      : targetExercise?.status === "archived"
+                        ? "เวอร์ชันนี้เก็บถาวรและไม่สามารถแก้ไขได้"
+                        : "ท่าบริหารฉบับร่างยังไม่เปิดให้ใช้งานจนกว่าจะเผยแพร่"}
+                  </p>
                 </div>
 
                 <div className="ai-field">
                   <label>ระดับความเข้มงวดในการนับจำนวนครั้ง</label>
-                  <select
-                    className="ai-input"
-                    value={repSensitivityIndex}
-                    onChange={(e) => handleSensitivityChange(Number(e.target.value))}
-                    disabled={!calibration}
-                  >
-                    {sensitivityLevels.map((level, index) => (
-                      <option key={level.label} value={index}>{level.label}</option>
-                    ))}
-                  </select>
-                  <p className="library-card-sub" style={{ marginTop: 4 }}>
+                  <p className="library-card-sub" style={{ margin: 0 }}>
                     {sensitivityLevels[repSensitivityIndex].desc} (ระดับความยาก {DIFFICULTY_INFO[difficulty].icon}{" "}
                     {DIFFICULTY_LABELS_TH[difficulty]} ปรับได้ {DIFFICULTY_INFO[difficulty].rangeText} จากค่าที่วิเคราะห์)
                   </p>
-                </div>
-
-                {/* Target ROM — slider bounded to the measured range ±40%/160%
-                    (reference behavior), with the clinic's measured value shown. */}
-                <div className="ai-field">
-                  <label>ช่วงการเคลื่อนไหวเป้าหมาย (°) — ผู้ป่วยต้องเคลื่อนไหวได้อย่างน้อยเท่านี้ต่อครั้ง</label>
-                  <input
-                    type="range"
-                    min={Math.max(5, Math.round((calibration?.derived.range ?? targetRom) * 0.4))}
-                    max={Math.round((calibration?.derived.range ?? targetRom) * 1.6) || 180}
-                    value={targetRom}
-                    onChange={(e) => setTargetRom(Number(e.target.value))}
-                    disabled={!calibration}
-                    style={{ width: "100%", accentColor: "var(--primary)" }}
-                  />
-                  <div className="ai-slider-row">
-                    <span className="library-card-sub">ผ่อนปรน</span>
-                    <input
-                      className="ai-input"
-                      type="number"
-                      min={5}
-                      max={180}
-                      value={targetRom}
-                      onChange={(e) => setTargetRom(Number(e.target.value) || 0)}
-                      disabled={!calibration}
-                      style={{ width: 88, textAlign: "center" }}
-                    />
-                    <span className="library-card-sub">เข้มงวด</span>
-                  </div>
-                  {calibration && (
-                    <p className="library-card-sub">
-                      วัดจากวิดีโอสาธิต: ±{Math.round(calibration.derived.range)}°
-                    </p>
-                  )}
-                </div>
-
-                {/* Trunk-compensation sensitivity as labeled presets (reference
-                    BVE_SENSITIVITY_LEVELS) instead of a raw number. */}
-                <div className="ai-field">
-                  <label>ความไวในการตรวจจับการชดเชยด้วยลำตัว (BVE)</label>
                   <div className="ai-choice-row">
-                    {BVE_SENSITIVITY_LEVELS.map((level) => (
+                    {sensitivityLevels.map((level, index) => (
                       <button
-                        key={level.value}
+                        key={level.label}
                         type="button"
-                        className={`ai-choice small ${Math.abs(bveThreshold - level.value) < 1e-6 ? "active" : ""}`}
-                        onClick={() => setBveThreshold(level.value)}
-                        disabled={!calibration}
-                        title={level.desc}
+                        className={`ai-choice ${repSensitivityIndex === index ? "active" : ""}`}
+                        onClick={() => handleSensitivityChange(index)}
+                        disabled={!canEditPoseCriteria}
+                        aria-pressed={repSensitivityIndex === index}
                       >
                         {level.label}
                       </button>
                     ))}
                   </div>
-                  <p className="library-card-sub" style={{ marginTop: 4 }}>
-                    {BVE_SENSITIVITY_LEVELS.find((l) => Math.abs(l.value - bveThreshold) < 1e-6)?.desc ??
-                      `กำหนดความไวในการเอนลำตัวเอง: ${bveThreshold}`}
-                  </p>
                 </div>
 
-                <label className="ai-check">
-                  <input
-                    type="checkbox"
-                    checked={enableTrunkBve}
-                    onChange={(e) => setEnableTrunkBve(e.target.checked)}
-                    disabled={!calibration}
-                  />
-                  คิดคะแนนหักเมื่อใช้การเอนลำตัวชดเชย (BVE)
-                </label>
+                <div className="ai-field">
+                  <label>สมดุลระหว่างความแม่นยำและการใช้งานจริง · ความเข้มงวดในการตรวจจับการเอนลำตัวชดเชย (BVE)</label>
+                  <p className="library-card-sub" style={{ margin: 0 }}>
+                    {BVE_SENSITIVITY_LEVELS.find((level) => Math.abs(bveThreshold - level.value) < 1e-6)?.desc}
+                  </p>
+                  <div className="ai-choice-row">
+                    {BVE_SENSITIVITY_LEVELS.map((level) => {
+                      const selected = Math.abs(bveThreshold - level.value) < 1e-6;
+                      return (
+                        <button
+                          key={level.value}
+                          type="button"
+                          className={`ai-choice ${selected ? "active" : ""}`}
+                          onClick={() => setBveThreshold(level.value)}
+                          disabled={!canEditPoseCriteria}
+                          aria-pressed={selected}
+                        >
+                          {level.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                <label className="ai-check">
-                  <input
-                    type="checkbox"
-                    checked={allowsTorsoMovement}
-                    onChange={(e) => setAllowsTorsoMovement(e.target.checked)}
-                    disabled={!calibration}
-                  />
-                  ท่านี้ต้องขยับลำตัวช่วยตามธรรมชาติของท่า (ปิดการหักคะแนนจากการบิดลำตัว)
-                </label>
-
-                <label className="ai-check">
-                  <input
-                    type="checkbox"
-                    checked={checksHandProximity}
-                    onChange={(e) => setChecksHandProximity(e.target.checked)}
-                    disabled={!calibration}
-                  />
-                  ท่านี้ต้องกุม/ประกบมือไว้ตลอดท่า (หักคะแนนเมื่อมือแยกห่างจากกัน)
-                </label>
+                <div className="ai-technique-grid">
+                  <label className={`ai-technique-option${enableTrunkBve ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={enableTrunkBve}
+                      onChange={(e) => setEnableTrunkBve(e.target.checked)}
+                      disabled={!canEditPoseCriteria}
+                    />
+                    <span>
+                      <strong>คิดคะแนนหักเมื่อใช้การเอนลำตัวชดเชย (BVE)</strong>
+                      <small>ตรวจจับและหักคะแนนเมื่อผู้ป่วยใช้การเอนลำตัวช่วยแทนการเคลื่อนไหว</small>
+                    </span>
+                  </label>
+                  <label className={`ai-technique-option${allowsTorsoMovement ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={allowsTorsoMovement}
+                      onChange={(e) => setAllowsTorsoMovement(e.target.checked)}
+                      disabled={!canEditPoseCriteria}
+                    />
+                    <span>
+                      <strong>ท่านี้ต้องขยับลำตัวช่วยตามธรรมชาติของท่า</strong>
+                      <small>ปิดการหักคะแนนจากการบิดลำตัวสำหรับท่านี้</small>
+                    </span>
+                  </label>
+                  <label className={`ai-technique-option${checksHandProximity ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={checksHandProximity}
+                      onChange={(e) => setChecksHandProximity(e.target.checked)}
+                      disabled={!canEditPoseCriteria}
+                    />
+                    <span>
+                      <strong>ท่านี้ต้องกุม/ประกบมือไว้ตลอดท่า</strong>
+                      <small>หักคะแนนเมื่อมือแยกห่างจากกัน</small>
+                    </span>
+                  </label>
+                </div>
 
                 <div className="ai-save-actions">
                   <button
@@ -1648,7 +1827,11 @@ export function ExerciseAiPage({
                     disabled={!canSave || saveBusy}
                   >
                     {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
-                    สร้างท่าบริหาร
+                    {targetExercise?.status === "active"
+                      ? `บันทึกเป็นฉบับร่าง v${targetExercise.versionNumber + 1}`
+                      : targetExercise
+                        ? "บันทึกการเปลี่ยนแปลง"
+                        : "สร้างท่าบริหาร"}
                   </button>
                   <button
                     type="button"
@@ -1682,9 +1865,6 @@ export function ExerciseAiPage({
                     <input className="ai-input" type="number" min="0" value={targetGripStrength} onChange={(event) => setTargetGripStrength(event.target.value)} disabled={isArchived || !isOwner} />
                   </label>
                 )}
-                <label className="ai-field">จำนวนครั้ง
-                  <input className="ai-input" type="number" min="1" value={repetitions} onChange={(event) => setRepetitions(event.target.value)} disabled={isArchived || !isOwner} />
-                </label>
                 {movementTracking === "virtual_grip" && (
                   <label className="ai-field">ระยะเวลาค้างไว้ (วินาที)
                     <input className="ai-input" type="number" min="0" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} disabled={isArchived || !isOwner} />

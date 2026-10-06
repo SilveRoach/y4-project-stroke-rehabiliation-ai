@@ -2,11 +2,9 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
-import { useOwnProfilePicture } from "../hooks/useProfilePicture";
 import { ApiError, getTherapistExerciseSessions } from "../services/api";
 import { useAuth } from "../store/authStore";
 import type { EvaluationSource, TherapistExerciseSessionEntry } from "../types";
-import { initialsFromName } from "../utils/displayName";
 
 interface TherapistSessionsPageProps {
   onLogout: () => void;
@@ -151,9 +149,6 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
     setSelectedDateIso(`${next.year}-${String(next.month + 1).padStart(2, "0")}-01`);
   };
 
-  const displayName = user?.displayName || user?.username || "นักกายภาพบำบัด";
-  const ownAvatarUrl = useOwnProfilePicture();
-
   return (
     <section className="therapist-shell">
       <TherapistSidebar activeLabel="Sessions" onNavigate={onNavigate} onLogout={onLogout} />
@@ -163,17 +158,6 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
           <div>
             <h1>การฝึก</h1>
             <p>ตรวจสอบผลการฝึกที่ส่งมาจากผู้ป่วยที่คุณดูแล</p>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{displayName}</strong>
-                <small>นักกายภาพบำบัด</small>
-              </div>
-              <span className={`avatar-badge${ownAvatarUrl ? " with-photo" : ""}`}>
-                {ownAvatarUrl ? <img src={ownAvatarUrl} alt={`${displayName}'s profile picture`} /> : initialsFromName(displayName)}
-              </span>
-            </div>
           </div>
         </header>
 

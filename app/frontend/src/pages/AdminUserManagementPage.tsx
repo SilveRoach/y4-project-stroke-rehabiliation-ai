@@ -39,7 +39,7 @@ import { AdminSidebar } from "../components/AdminSidebar";
 import type { AdminNavLabel } from "../components/AdminSidebar";
 import { ApiError, assignPatient, createUser, getUsers, unassignPatient, updateUserProfile, type AdminUserListItem } from "../services/api";
 import { useAuth } from "../store/authStore";
-import { useProfilePicture, useOwnProfilePicture } from "../hooks/useProfilePicture";
+import { useProfilePicture } from "../hooks/useProfilePicture";
 import { initialsFromName } from "../utils/displayName";
 import type { AdminManagedRole, AdminUserSummary, StaffRole } from "../types";
 
@@ -222,22 +222,13 @@ function TherapistRowAvatar({
 }
 
 export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavigateSettings, onNavigateExerciseLibrary }: AdminUserManagementPageProps) {
-  const { token, user } = useAuth();
-  // Real logged-in admin for the sidebar/topbar profile chrome, same idiom as
-  // the patient pages (PatientTodayPage.tsx) — replaces the static
-  // data/adminMock.ts "Admin Suda" placeholder.
-  const adminDisplayName = user?.displayName || user?.username || "ผู้ดูแลระบบ";
-  const adminInitials = initialsFromName(adminDisplayName);
-  // Real profile picture for the topbar chrome, same idiom as the therapist
-  // pages (TherapistPatientsPage/TherapistSessionsPage) and AdminSettingsPage:
-  // resolve the logged-in admin's own picture via useOwnProfilePicture, falling
-  // back to the initials badge while it loads / when none is uploaded / if the
-  // fetch fails. Previously this page's topbar was hardcoded to initials only.
-  const adminAvatarUrl = useOwnProfilePicture();
+  const { token } = useAuth();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<AdminUserSummary["role"] | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<AdminUserSummary["status"] | "all">("all");
   // Column-header sorting state (replaces the role-filter dropdown).
   const [sort, setSort] = useState<{ key: UserSortKey; dir: SortDir }>({ key: "name", dir: "asc" });
   const toggleSort = (key: UserSortKey) =>
@@ -295,7 +286,9 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
     const matched = users.filter((u) => {
       const matchesQuery =
         !query || u.name.toLowerCase().includes(query) || u.username.toLowerCase().includes(query);
-      return matchesQuery;
+      const matchesRole = roleFilter === "all" || u.role === roleFilter;
+      const matchesStatus = statusFilter === "all" || u.status === statusFilter;
+      return matchesQuery && matchesRole && matchesStatus;
     });
 
     const dirFactor = sort.dir === "asc" ? 1 : -1;
@@ -314,7 +307,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
           return a.name.localeCompare(b.name) * dirFactor;
       }
     });
-  }, [users, search, sort]);
+  }, [users, search, roleFilter, statusFilter, sort]);
 
   const USER_PAGE_SIZE = 8;
   const [userPage, setUserPage] = useState(0);
@@ -362,17 +355,6 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
           <div>
             <h1>จัดการผู้ใช้</h1>
             <p>สร้างบัญชีนักกายภาพบำบัด ผู้ดูแลระบบ และผู้ป่วย รวมถึงจัดการบัญชีที่มีอยู่</p>
-          </div>
-          <div className="therapist-topbar-actions">
-            <div className="therapist-topbar-profile">
-              <div>
-                <strong>{adminDisplayName}</strong>
-                <small>ผู้ดูแลระบบ</small>
-              </div>
-              <span className={`avatar-badge admin-avatar${adminAvatarUrl ? " with-photo" : ""}`}>
-                {adminAvatarUrl ? <img src={adminAvatarUrl} alt={`รูปโปรไฟล์ของ ${adminDisplayName}`} /> : adminInitials}
-              </span>
-            </div>
           </div>
         </header>
 
@@ -429,6 +411,37 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                     aria-label="ค้นหาบัญชีผู้ใช้"
                   />
                 </div>
+                <select
+                  className="admin-log-filter-select"
+                  value={roleFilter}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value === "all" || value === "patient" || value === "therapist" || value === "admin") {
+                      setRoleFilter(value);
+                    }
+                  }}
+                  aria-label="กรองตามบทบาท"
+                >
+                  <option value="all">ทุกบทบาท</option>
+                  <option value="patient">ผู้ป่วย</option>
+                  <option value="therapist">นักกายภาพบำบัด</option>
+                  <option value="admin">ผู้ดูแลระบบ</option>
+                </select>
+                <select
+                  className="admin-log-filter-select"
+                  value={statusFilter}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value === "all" || value === "active" || value === "disabled") {
+                      setStatusFilter(value);
+                    }
+                  }}
+                  aria-label="กรองตามสถานะบัญชี"
+                >
+                  <option value="all">ทุกสถานะ</option>
+                  <option value="active">ใช้งานอยู่</option>
+                  <option value="disabled">ปิดใช้งาน</option>
+                </select>
                 <button
                   type="button"
                   className="primary-button therapist-add-patient"
@@ -520,7 +533,7 @@ export function AdminUserManagementPage({ onLogout, onNavigateDashboard, onNavig
                   {!usersLoading && filteredUsers.length === 0 && (
                     <tr className="admin-table-empty">
                       <td colSpan={6}>
-                        {users.length === 0 ? "ยังไม่มีบัญชีผู้ใช้" : "ไม่พบบัญชีผู้ใช้ที่ตรงกับคำค้นหา"}
+                        {users.length === 0 ? "ยังไม่มีบัญชีผู้ใช้" : "ไม่พบบัญชีผู้ใช้ที่ตรงกับคำค้นหาหรือตัวกรอง"}
                       </td>
                     </tr>
                   )}
