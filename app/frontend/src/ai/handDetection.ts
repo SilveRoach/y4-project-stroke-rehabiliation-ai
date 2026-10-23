@@ -18,7 +18,7 @@ import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 export interface Landmark {
   x: number;
   y: number;
-  z: number;
+  z?: number;
 }
 
 const DEFAULT_WASM_BASE_URL =

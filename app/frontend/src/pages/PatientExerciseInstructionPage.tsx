@@ -112,7 +112,10 @@ export function PatientExerciseInstructionPage({
       <div className="therapist-workspace">
         <header className="therapist-topbar pei-topbar">
           <div>
-            <button type="button" className="sidebar-link" onClick={onBack}><ArrowLeft size={16} /> กลับไปหน้าวันนี้</button>
+            <button type="button" className="pei-back-button" onClick={onBack}>
+              <ArrowLeft size={16} />
+              <span>กลับไปหน้าวันนี้</span>
+            </button>
             <p className="eyebrow">คำแนะนำท่าบริหาร</p>
             <h1>{exercise?.name ?? "ท่าบริหาร"}</h1>
           </div>

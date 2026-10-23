@@ -9,8 +9,9 @@
 // Layout mirrors the import's two-column workspace; styling stays on this
 // project's color scheme (creation-section-card / CSS variables).
 
-import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Flag, Hand, History, Loader2, Minus, Pause, Play, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Hand, History, Loader2, Minus, Pause, Play, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent, PointerEvent } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { AdminSidebar } from "../components/AdminSidebar";
@@ -31,7 +32,7 @@ import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
 import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
 import type { ExerciseFSMConfig, FrameFeature, AngleDefinition, PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
 import { ApiError, archiveExercise, createExercise, createExerciseVersion, getFileContent, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
-import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType, PatientExercise } from "../types";
+import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType, HandTrackingGameType, PatientExercise } from "../types";
 import { PatientSessionPage } from "./PatientSessionPage";
 import type { SessionTestConfig } from "./PatientSessionPage";
 
@@ -78,6 +79,7 @@ interface ExerciseCheckpoint {
 interface StoredPoseReference extends PoseReferencePublic, Record<string, unknown> {
   checkpoints?: ExerciseCheckpoint[];
   poseFrames?: StoredPoseFrame[];
+  movementLandmarks?: MovementLandmarkIndices;
 }
 
 interface StoredPoseFrame {
@@ -85,6 +87,51 @@ interface StoredPoseFrame {
   trunkCentroid: { x: number; y: number };
   timestampMs: number;
   videoTimeSeconds: number;
+}
+
+type MovementLandmarkRole = "start" | "middle" | "end";
+
+interface MovementLandmarkIndices {
+  startFrameIndex: number;
+  middleFrameIndex: number;
+  endFrameIndex: number;
+}
+
+const DEFAULT_MOVEMENT_LANDMARKS: MovementLandmarkIndices = {
+  startFrameIndex: 0,
+  middleFrameIndex: 1,
+  endFrameIndex: 2
+};
+
+function defaultMovementLandmarks(frameCount: number): MovementLandmarkIndices {
+  if (frameCount < 3) return DEFAULT_MOVEMENT_LANDMARKS;
+  return {
+    startFrameIndex: 0,
+    middleFrameIndex: Math.floor((frameCount - 1) / 2),
+    endFrameIndex: frameCount - 1
+  };
+}
+
+function validMovementLandmarks(value: MovementLandmarkIndices | undefined, frameCount: number): MovementLandmarkIndices {
+  if (
+    value &&
+    Number.isInteger(value.startFrameIndex) &&
+    Number.isInteger(value.middleFrameIndex) &&
+    Number.isInteger(value.endFrameIndex) &&
+    value.startFrameIndex >= 0 &&
+    value.startFrameIndex < value.middleFrameIndex &&
+    value.middleFrameIndex < value.endFrameIndex &&
+    value.endFrameIndex < frameCount
+  ) {
+    return value;
+  }
+  return defaultMovementLandmarks(frameCount);
+}
+
+function movementLandmarkFrameIndex(indices: MovementLandmarkIndices, role: MovementLandmarkRole): number {
+  if (role === "start") return indices.startFrameIndex;
+  if (role === "middle") return indices.middleFrameIndex;
+  return indices.endFrameIndex;
 }
 
 function isStoredPoseFrame(value: unknown): value is StoredPoseFrame {
@@ -109,9 +156,9 @@ function isStoredPoseFrame(value: unknown): value is StoredPoseFrame {
   );
 }
 
-function serializePoseFrames(frames: FrameSample[]): StoredPoseFrame[] {
+function serializePoseFrames(frames: FrameSample[], preserveAllFrames = false): StoredPoseFrame[] {
   return frames
-    .filter((_, index) => index % 3 === 0)
+    .filter((_, index) => preserveAllFrames || index % 3 === 0)
     .map(({ landmarks, trunkCentroid, timestampMs, videoTimeSeconds }) => ({
       landmarks: landmarks.map(({ x, y, z, visibility }): [number, number, number, number?] =>
         visibility === undefined
@@ -130,11 +177,29 @@ function serializePoseFrames(frames: FrameSample[]): StoredPoseFrame[] {
 }
 
 /** The 3 FSM states the therapist marks on the base clip (reference order). */
-const CHECKPOINT_ROLES: { role: CheckpointRole; title: string; hint: string; icon: string }[] = [
-  { role: "ready", title: "ท่าเริ่มต้น", hint: "ท่าที่ผู้ป่วยต้องค้างไว้ก่อนเริ่มเคลื่อนไหว", icon: "📍" },
-  { role: "active", title: "จุดสูงสุดของการเคลื่อนไหว", hint: "จุดที่เคลื่อนไหวไปได้ไกลที่สุดในท่านี้", icon: "💪" },
-  { role: "return", title: "กลับสู่ท่าเริ่มต้น", hint: "จุดที่นับว่าทำครบหนึ่งครั้ง", icon: "🔁" }
+const CHECKPOINT_ROLES: { role: CheckpointRole; title: string; icon: string }[] = [
+  { role: "ready", title: "ท่าเริ่มต้น", icon: "📍" },
+  { role: "active", title: "ท่าเป้าหมาย", icon: "💪" },
+  { role: "return", title: "กลับสู่ท่าเริ่มต้น", icon: "🔁" }
 ];
+
+const MOVEMENT_LANDMARK_ROLES: { role: MovementLandmarkRole; label: string; colorClass: string }[] = [
+  { role: "start", label: "ท่าเริ่มต้น", colorClass: "start" },
+  { role: "middle", label: "ท่าเป้าหมาย", colorClass: "middle" },
+  { role: "end", label: "กลับสู่ท่าเริ่มต้น", colorClass: "end" }
+];
+
+const CHECKPOINT_LANDMARK_ROLES: Record<CheckpointRole, MovementLandmarkRole> = {
+  ready: "start",
+  active: "middle",
+  return: "end"
+};
+
+const CHECKPOINT_ROLE_BY_LANDMARK: Record<MovementLandmarkRole, CheckpointRole> = {
+  start: "ready",
+  middle: "active",
+  end: "return"
+};
 
 function describeCriteriaThai(criteria: ExerciseBaseCriteria): string {
   const parts: string[] = [];
@@ -216,6 +281,7 @@ export function ExerciseAiPage({
   const [repetitions, setRepetitions] = useState(exercise?.baseCriteria.repetitions?.toString() ?? "10");
   const [holdSeconds, setHoldSeconds] = useState(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
   const [targetGripStrength, setTargetGripStrength] = useState(exercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+  const [virtualGripGameType, setVirtualGripGameType] = useState<HandTrackingGameType | null>(exercise?.baseCriteria?.virtualGripGameType ?? null);
 
   // Demo-clip scanning state. Only ONE clip can scan at a time (the scanner
   // drives a hidden <video> element); one shared busy flag guards all inputs.
@@ -239,6 +305,7 @@ export function ExerciseAiPage({
   // Calibration results (null until the base clip has been scanned).
   const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
   const [baseFrames, setBaseFrames] = useState<FrameSample[]>([]);
+  const [baseFramesFromStoredReference, setBaseFramesFromStoredReference] = useState(false);
   const [selectedPrimaryId, setSelectedPrimaryId] = useState<string | null>(null);
   const [selectedSecondaryId, setSelectedSecondaryId] = useState<string | null>(null);
 
@@ -261,14 +328,15 @@ export function ExerciseAiPage({
   // therapist switches the primary/secondary angle before saving).
   const [masterClips, setMasterClips] = useState<ScannedClip[]>([]);
   const [wrongFormClips, setWrongFormClips] = useState<ScannedClip[]>([]);
-  const [masterDescription, setMasterDescription] = useState("");
-  const [wrongFormDescription, setWrongFormDescription] = useState("");
 
   // Frame preview scrubber (skeleton-only preview over a dark backdrop) — also
   // the frame picker used when marking checkpoints.
   const [previewIndex, setPreviewIndex] = useState(0);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const landmarkTrackRef = useRef<HTMLDivElement>(null);
+  const draggingLandmarkRef = useRef<MovementLandmarkRole | null>(null);
+  const [movementLandmarks, setMovementLandmarks] = useState<MovementLandmarkIndices>(DEFAULT_MOVEMENT_LANDMARKS);
   // Live scan preview canvas (video frame + skeleton while scanning, the
   // reference's behavior) — separate from the post-scan preview above.
   const scanPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -292,8 +360,6 @@ export function ExerciseAiPage({
     return: null
   });
   const [activeCheckpointRole, setActiveCheckpointRole] = useState<CheckpointRole>("ready");
-  const [checkpointLabelDraft, setCheckpointLabelDraft] = useState("");
-  const [checkpointDescDraft, setCheckpointDescDraft] = useState("");
 
   // Save state.
   const [saveBusy, setSaveBusy] = useState(false);
@@ -316,13 +382,17 @@ export function ExerciseAiPage({
   const [testNote, setTestNote] = useState<string | null>(null);
 
   const sensitivityLevels = DIFFICULTY_REP_SENSITIVITY[difficulty];
-  const allCheckpointsSet = Boolean(checkpoints.ready && checkpoints.active && checkpoints.return);
 
   const targetExercise = exercise ?? null;
   const storedPoseReference = targetExercise?.baseCriteria.poseReference as unknown as StoredPoseReference | undefined;
+  const timelineFrames = useMemo(
+    () => baseFramesFromStoredReference ? baseFrames : baseFrames.filter((_, index) => index % 3 === 0),
+    [baseFrames, baseFramesFromStoredReference]
+  );
   const isOwner = !targetExercise || (user ? targetExercise.createdById === user.id || user.role === "admin" : false);
   const isArchived = targetExercise?.status === "archived";
   const isPoseExercise = movementTracking === "pose";
+  const isHandTrackingExercise = movementTracking === "virtual_grip";
   const canEditPoseCriteria = Boolean(calibration || storedPoseReference);
   // Admins reach this workspace from AdminSidebar's "Exercise Library" item —
   // they get the AdminSidebar back (same section highlighted) so they can
@@ -387,6 +457,7 @@ export function ExerciseAiPage({
     setRepetitions(exercise?.baseCriteria.repetitions?.toString() ?? "10");
     setHoldSeconds(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
     setTargetGripStrength(exercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+    setVirtualGripGameType(exercise?.baseCriteria?.virtualGripGameType ?? null);
     setSavedExerciseName(null);
   }, [exercise, initialName, initialTracking]);
 
@@ -401,9 +472,11 @@ export function ExerciseAiPage({
     setRepetitions(targetExercise?.baseCriteria.repetitions?.toString() ?? "10");
     setHoldSeconds(targetExercise?.baseCriteria.holdSeconds?.toString() ?? "5");
     setTargetGripStrength(targetExercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+    setVirtualGripGameType(targetExercise?.baseCriteria?.virtualGripGameType ?? null);
     setBaseClip(null);
     setCalibration(null);
     setBaseFrames([]);
+    setBaseFramesFromStoredReference(false);
     setSelectedPrimaryId(null);
     setSelectedSecondaryId(null);
     setFsmConfig(storedPoseReference?.fsmConfig ?? null);
@@ -416,6 +489,7 @@ export function ExerciseAiPage({
     setWrongFormClips([]);
     setPreviewIndex(0);
     setIsPreviewPlaying(false);
+    setMovementLandmarks(storedPoseReference?.movementLandmarks ?? DEFAULT_MOVEMENT_LANDMARKS);
     rankedCandidatesRef.current = [];
     const savedCheckpoints = storedPoseReference?.checkpoints ?? [];
     setCheckpoints({
@@ -432,7 +506,7 @@ export function ExerciseAiPage({
   }, [targetExercise?.id]);
 
   // Reopening a SAVED pose exercise: scan its stored demo video right away so the
-  // skeleton preview (Step 5) is populated without re-uploading or pressing
+  // skeleton preview (Step 3) is populated without re-uploading or pressing
   // "scan". Preview only — this deliberately does NOT calibrate or touch the
   // stored criteria (masterSamples, wrong-form takes, checkpoints), so saving
   // afterwards keeps the exercise's AI reference exactly as it was; pressing
@@ -455,7 +529,7 @@ export function ExerciseAiPage({
     (async () => {
       setScanBusy(true);
       setScanError(null);
-      setScanProgressText(hasStoredPoseFrames ? "กำลังโหลดเฟรมโครงกระดูกจากข้อมูล JSON…" : "กำลังโหลดโครงกระดูกจากวิดีโอสาธิตที่บันทึกไว้…");
+      setScanProgressText(hasStoredPoseFrames ? "กำลังโหลดโครงกระดูกจากข้อมูลท่าทางที่บันทึกไว้…" : "กำลังโหลดโครงกระดูกจากวิดีโอสาธิตที่บันทึกไว้…");
       try {
         let frames: FrameSample[];
         if (hasStoredPoseFrames && savedFrames) {
@@ -481,7 +555,12 @@ export function ExerciseAiPage({
             }
           );
         }
-        if (cancelled || frames.length === 0) return;
+        if (cancelled) return;
+        if (frames.length === 0) {
+          setScanProgressText(null);
+          setScanError("ข้อมูลโครงกระดูกของท่าบริหารนี้ไม่มีเฟรมให้แสดง");
+          return;
+        }
         const candidates = rankCandidates(frames);
         rankedCandidatesRef.current = candidates;
         setSelectedPrimaryId(
@@ -490,8 +569,11 @@ export function ExerciseAiPage({
         setSelectedSecondaryId(
           candidates.find((candidate) => JSON.stringify(candidate.angleDefinition) === JSON.stringify(storedPoseReference?.secondaryAngleDefinition))?.id ?? null
         );
+        setBaseFramesFromStoredReference(hasStoredPoseFrames);
         setBaseFrames(frames);
         setPreviewIndex(0);
+        const timelineFrameCount = hasStoredPoseFrames ? frames.length : frames.filter((_, index) => index % 3 === 0).length;
+        setMovementLandmarks(validMovementLandmarks(storedPoseReference?.movementLandmarks, timelineFrameCount));
         setScanProgressText(`โหลดโครงกระดูกจากวิดีโอสาธิตที่บันทึกไว้แล้ว — ${frames.length} เฟรม`);
       } catch {
         if (!cancelled) {
@@ -541,6 +623,10 @@ export function ExerciseAiPage({
 
   // Frame preview: draw the scrubbed frame's skeleton on a dark canvas.
   const previewFrame = baseFrames[Math.min(previewIndex, Math.max(0, baseFrames.length - 1))];
+  const selectedTimelineIndex = timelineFrames.length === 0
+    ? 0
+    : Math.min(timelineFrames.length - 1, baseFramesFromStoredReference ? previewIndex : Math.floor(previewIndex / 3));
+  const selectedTimelineFrame = timelineFrames[selectedTimelineIndex];
 
   // Redraw the skeleton preview whenever the scrubbed frame changes.
   const previewDrawRef = useRef<(() => void) | null>(null);
@@ -602,10 +688,11 @@ export function ExerciseAiPage({
       }
       // Ranked once here (per-clip laterality detection depends on this clip's
       // own frames) and kept in rankedCandidatesRef so getAngleDefinitionById
-      // can resolve every candidate id shown in Step 5, not just the primary/
+      // can resolve every candidate id shown in Step 3, not just the primary/
       // secondary ones calibrateFromFrames already returns full definitions for.
       rankedCandidatesRef.current = rankCandidates(frames);
       const result = calibrateFromFrames(frames);
+      setBaseFramesFromStoredReference(false);
       setBaseFrames(frames);
       setCalibration(result);
       setSelectedPrimaryId(result.primary.id);
@@ -614,13 +701,11 @@ export function ExerciseAiPage({
       setTargetRom(result.suggestedTargetRom);
       setRepSensitivityIndex(2);
       setPreviewIndex(0);
+      setMovementLandmarks(defaultMovementLandmarks(frames.filter((_, index) => index % 3 === 0).length));
       // A new base clip invalidates any checkpoints marked on the previous one.
       setCheckpoints({ ready: null, active: null, return: null });
-      setCheckpointLabelDraft("");
-      setCheckpointDescDraft("");
       setActiveCheckpointRole("ready");
-      const confidenceText = { high: "ความมั่นใจสูง", medium: "ความมั่นใจปานกลาง — โปรดตรวจสอบตัวเลข", low: "ความมั่นใจต่ำ — วิดีโออาจไม่มีการเคลื่อนไหวที่ชัดเจน โปรดตรวจสอบ" }[result.derived.confidence];
-      setScanProgressText(`เสร็จแล้ว — วิเคราะห์ ${frames.length} เฟรม มุมหลักที่แนะนำ: “${result.primary.label}” (${confidenceText})`);
+      setScanProgressText(null);
     } catch (err) {
       setScanError(err instanceof Error ? err.message : "สแกนไม่สำเร็จ");
       setScanProgressText(null);
@@ -629,16 +714,53 @@ export function ExerciseAiPage({
     }
   };
 
-  // Recomputes ready/activation/return with the given strictness scale —
-  // using the therapist's marked checkpoints when all three exist (reference
-  // behavior: more accurate, matches their intent), else inferring from the
-  // selected primary angle's series over the base clip.
-  const deriveWithScale = (scale: number): ExerciseFSMConfig | null => {
-    if (checkpoints.ready && checkpoints.active && checkpoints.return) {
+  const checkpointForLandmark = (
+    role: CheckpointRole,
+    landmarks = movementLandmarks
+  ): ExerciseCheckpoint | null => {
+    const timelineIndex = movementLandmarkFrameIndex(landmarks, CHECKPOINT_LANDMARK_ROLES[role]);
+    const frameIndex = Math.min(
+      baseFrames.length - 1,
+      timelineIndex * (baseFramesFromStoredReference ? 1 : 3)
+    );
+    const frame = baseFrames[frameIndex];
+    if (!frame) return null;
+    const existing = checkpoints[role];
+    const definition = getAngleDefinitionById(selectedPrimaryId) ?? calibration?.primary.angleDefinition;
+    const angle = definition
+      ? Math.round(extractConfiguredAngle(frame.landmarks, definition).mean * 10) / 10
+      : existing?.angle;
+    if (angle === undefined) return null;
+    const roleInfo = CHECKPOINT_ROLES.find((checkpointRole) => checkpointRole.role === role);
+    return {
+      role,
+      label: roleInfo?.title || role,
+      description: existing?.description,
+      timestampSeconds: frame.videoTimeSeconds,
+      angle
+    };
+  };
+  const landmarkCheckpoints = CHECKPOINT_ROLES
+    .map(({ role }) => checkpointForLandmark(role))
+    .filter((checkpoint): checkpoint is ExerciseCheckpoint => checkpoint !== null);
+  const allCheckpointsSet = landmarkCheckpoints.length === CHECKPOINT_ROLES.length;
+
+  // Recomputes ready/activation/return using the timeline checkpoints when
+  // available, otherwise inferring from the selected primary angle series.
+  const deriveWithScale = (
+    scale: number,
+    landmarks = movementLandmarks
+  ): ExerciseFSMConfig | null => {
+    const selectedCheckpoints = landmarks === movementLandmarks
+      ? landmarkCheckpoints
+      : CHECKPOINT_ROLES
+          .map(({ role }) => checkpointForLandmark(role, landmarks))
+          .filter((checkpoint): checkpoint is ExerciseCheckpoint => checkpoint !== null);
+    if (selectedCheckpoints.length === CHECKPOINT_ROLES.length) {
       return deriveFsmConfigFromCheckpoints(
-        checkpoints.ready.angle,
-        checkpoints.active.angle,
-        checkpoints.return.angle,
+        selectedCheckpoints[0].angle,
+        selectedCheckpoints[1].angle,
+        selectedCheckpoints[2].angle,
         scale
       ).fsmConfig;
     }
@@ -681,76 +803,14 @@ export function ExerciseAiPage({
     applyDerivedThresholds(deriveWithScale(DEFAULT_FSM_MARGIN_SCALE));
   };
 
-  /** Primary angle at the currently scrubbed base-clip frame. */
-  const angleAtPreviewFrame = (): number | null => {
-    const frame = baseFrames[previewIndex];
-    const def = getAngleDefinitionById(selectedPrimaryId) ?? calibration?.primary.angleDefinition ?? null;
-    if (!frame || !def) return null;
-    return Math.round(extractConfiguredAngle(frame.landmarks, def).mean * 10) / 10;
-  };
-
-  // Therapist marks the scrubbed frame as the active checkpoint role: the
-  // primary angle there is stored, and once all three roles exist the FSM
-  // criteria are derived from those angles (reference behavior), then the UI
-  // auto-advances to the next unmarked role.
-  const handleMarkCheckpoint = () => {
-    const angle = angleAtPreviewFrame();
-    const frame = baseFrames[previewIndex];
-    if (angle === null || !frame) return;
-    const roleInfo = CHECKPOINT_ROLES.find((r) => r.role === activeCheckpointRole);
-    const checkpoint: ExerciseCheckpoint = {
-      role: activeCheckpointRole,
-      label: checkpointLabelDraft.trim() || roleInfo?.title || activeCheckpointRole,
-      description: checkpointDescDraft.trim() || undefined,
-      timestampSeconds: frame.videoTimeSeconds,
-      angle
-    };
-    const next = { ...checkpoints, [activeCheckpointRole]: checkpoint };
-    setCheckpoints(next);
-
-    if (next.ready && next.active && next.return) {
-      const derived = deriveFsmConfigFromCheckpoints(
-        next.ready.angle,
-        next.active.angle,
-        next.return.angle,
-        sensitivityLevels[repSensitivityIndex].scale
-      );
-      setFsmConfig(derived.fsmConfig);
-      setTargetRom(Math.max(10, Math.round(derived.range)));
-    }
-
-    setCheckpointLabelDraft("");
-    setCheckpointDescDraft("");
-    const nextRole = CHECKPOINT_ROLES.map((r) => r.role).find((role) => role !== activeCheckpointRole && !next[role]);
-    if (nextRole) setActiveCheckpointRole(nextRole);
-  };
-
-  const handleClearCheckpoint = (role: CheckpointRole) => {
-    setCheckpoints((prev) => ({ ...prev, [role]: null }));
-  };
-
-  // Selecting a role to edit prefills its drafts and jumps the scrubber to the
-  // nearest already-marked time (reference behavior).
+  // Selecting a checkpoint focuses its corresponding landmark on the timeline.
   const selectRoleForEditing = (role: CheckpointRole) => {
     setActiveCheckpointRole(role);
-    const existing = checkpoints[role];
-    if (existing) {
-      setCheckpointLabelDraft(existing.label);
-      setCheckpointDescDraft(existing.description ?? "");
-      let bestIndex = 0;
-      let bestDiff = Infinity;
-      baseFrames.forEach((frame, index) => {
-        const diff = Math.abs(frame.videoTimeSeconds - existing.timestampSeconds);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          bestIndex = index;
-        }
-      });
-      setPreviewIndex(bestIndex);
-    } else {
-      setCheckpointLabelDraft("");
-      setCheckpointDescDraft("");
-    }
+    const landmarkIndex = movementLandmarkFrameIndex(movementLandmarks, CHECKPOINT_LANDMARK_ROLES[role]);
+    setPreviewIndex(Math.min(
+      Math.max(0, baseFrames.length - 1),
+      landmarkIndex * (baseFramesFromStoredReference ? 1 : 3)
+    ));
   };
 
 
@@ -770,17 +830,13 @@ export function ExerciseAiPage({
       );
       const clip: ScannedClip = {
         id: Date.now(),
-        description:
-          (kind === "master" ? masterDescription : wrongFormDescription).trim() ||
-          `${kind === "master" ? "ตัวอย่างท่าที่ถูกต้อง" : "ตัวอย่างท่าที่ไม่ถูกต้อง"} #${(kind === "master" ? masterClips : wrongFormClips).length + 1}`,
+        description: `${kind === "master" ? "ตัวอย่างท่าที่ถูกต้อง" : "ตัวอย่างท่าที่ไม่ถูกต้อง"} #${(kind === "master" ? masterClips : wrongFormClips).length + 1}`,
         frames
       };
       if (kind === "master") {
         setMasterClips((prev) => [...prev, clip]);
-        setMasterDescription("");
       } else {
         setWrongFormClips((prev) => [...prev, clip]);
-        setWrongFormDescription("");
       }
       setScanProgressText(`เสร็จแล้ว — เพิ่ม ${frames.length} เฟรม`);
     } catch (err) {
@@ -833,30 +889,13 @@ export function ExerciseAiPage({
         totalFrames: clip.frames.length,
         frames: convertFramesToFeatures(clip.frames)
       })),
-      // Therapist-marked checkpoints — included only when all three exist
-      // (reference behavior: a partial set would be worse than the generic
-      // captions, since the session view falls back when the field is absent).
-      checkpoints:
-        checkpoints.ready && checkpoints.active && checkpoints.return
-          ? [checkpoints.ready, checkpoints.active, checkpoints.return]
-          : undefined,
+      checkpoints: landmarkCheckpoints.length === CHECKPOINT_ROLES.length ? landmarkCheckpoints : undefined,
+      movementLandmarks,
       // Keep a compact 10 fps pose sequence in the JSON reference. Stored
       // joint coordinates let reopened exercises replay without rerunning pose
       // detection; older references fall back to scanning their demo video.
-      poseFrames: serializePoseFrames(baseFrames)
+      poseFrames: serializePoseFrames(baseFrames, baseFramesFromStoredReference)
     };
-  };
-
-  const handleDownloadReference = () => {
-    const reference = buildPoseReference();
-    if (!reference) return;
-    const blob = new Blob([JSON.stringify(reference, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "reference_data.json";
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   // Saves the authored reference. Two paths:
@@ -868,12 +907,35 @@ export function ExerciseAiPage({
   //     version when it is active (BR-6 — active versions are immutable).
   const handleSave = async () => {
     if (!token || !isOwner || isArchived) return;
+    if (isPoseExercise && !hasValidMovementLandmarks) {
+      setSaveError(
+        timelineFrames.length < 3
+          ? "ข้อมูลโครงกระดูกต้องมีอย่างน้อย 3 เฟรมเพื่อกำหนดจุดตรวจสอบทั้งสามจุด"
+          : "กำหนดจุดตรวจสอบท่าเริ่มต้น จุดสูงสุด และการกลับสู่ท่าเริ่มต้นตามลำดับก่อนบันทึก"
+      );
+      return;
+    }
     const poseReference =
       (calibration
         ? buildPoseReference()
         : storedPoseReference && baseFrames.length > 0
-          ? { ...storedPoseReference, poseFrames: serializePoseFrames(baseFrames) }
-          : storedPoseReference) ?? undefined;
+          ? {
+              ...storedPoseReference,
+              poseFrames: serializePoseFrames(baseFrames, baseFramesFromStoredReference),
+              movementLandmarks,
+              checkpoints: landmarkCheckpoints.length === CHECKPOINT_ROLES.length
+                ? landmarkCheckpoints
+                : storedPoseReference.checkpoints
+            }
+          : storedPoseReference
+            ? {
+                ...storedPoseReference,
+                movementLandmarks,
+                checkpoints: landmarkCheckpoints.length === CHECKPOINT_ROLES.length
+                  ? landmarkCheckpoints
+                  : storedPoseReference.checkpoints
+              }
+            : undefined) ?? undefined;
     if (isPoseExercise && !poseReference) {
       setSaveError("สแกนวิดีโอสาธิตเพื่อสร้างข้อมูลอ้างอิงท่าทางก่อนบันทึก");
       return;
@@ -910,13 +972,15 @@ export function ExerciseAiPage({
               ? {
                   targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined,
                   repetitions: repetitions ? Number(repetitions) : undefined,
-                  holdSeconds: holdSeconds ? Number(holdSeconds) : undefined
+                  holdSeconds: holdSeconds ? Number(holdSeconds) : undefined,
+                  virtualGripGameType: virtualGripGameType ?? undefined
                 }
               : { repetitions: repetitions ? Number(repetitions) : undefined },
           demoVideoFileId: uploadedClipId ?? targetExercise.demoVideoFileId ?? null
         };
         if (targetExercise.status === "draft") {
           await updateExerciseDraft(token, targetExercise.id, payload);
+          targetExercise.baseCriteria = payload.baseCriteria;
           setSavedExerciseName(targetExercise.name);
         } else {
           const { exercise: created } = await createExerciseVersion(token, targetExercise.id, payload);
@@ -936,7 +1000,12 @@ export function ExerciseAiPage({
         baseCriteria: isPoseExercise
           ? { repetitions: repetitions ? Number(repetitions) : undefined, holdSeconds: holdSeconds ? Number(holdSeconds) : undefined, targetAngleDeg: targetRom, poseReference }
           : movementTracking === "virtual_grip"
-            ? { targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined, repetitions: repetitions ? Number(repetitions) : undefined, holdSeconds: holdSeconds ? Number(holdSeconds) : undefined }
+            ? {
+                targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined,
+                repetitions: repetitions ? Number(repetitions) : undefined,
+                holdSeconds: holdSeconds ? Number(holdSeconds) : undefined,
+                virtualGripGameType: virtualGripGameType ?? undefined,
+              }
             : { repetitions: repetitions ? Number(repetitions) : undefined },
         demoVideoFileId: uploadedClipId
       });
@@ -964,15 +1033,76 @@ export function ExerciseAiPage({
     }
   };
 
+  const moveLandmarkToFrame = (role: MovementLandmarkRole, requestedIndex: number) => {
+    const lastFrameIndex = timelineFrames.length - 1;
+    if (lastFrameIndex < 2) return;
+
+    const next = { ...movementLandmarks };
+    const frameIndex = Math.max(0, Math.min(lastFrameIndex, Math.round(requestedIndex)));
+    if (role === "start") {
+      next.startFrameIndex = Math.min(frameIndex, next.middleFrameIndex - 1);
+    } else if (role === "middle") {
+      next.middleFrameIndex = Math.max(next.startFrameIndex + 1, Math.min(frameIndex, next.endFrameIndex - 1));
+    } else {
+      next.endFrameIndex = Math.max(next.middleFrameIndex + 1, frameIndex);
+    }
+
+    setMovementLandmarks(next);
+    setPreviewIndex(movementLandmarkFrameIndex(next, role) * (baseFramesFromStoredReference ? 1 : 3));
+    applyDerivedThresholds(deriveWithScale(sensitivityLevels[repSensitivityIndex].scale, next));
+  };
+
+  const handleLandmarkPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const role = draggingLandmarkRef.current;
+    const track = landmarkTrackRef.current;
+    if (!role || !track || timelineFrames.length < 3) return;
+    const bounds = track.getBoundingClientRect();
+    if (bounds.width <= 0) return;
+    const fraction = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    moveLandmarkToFrame(role, fraction * (timelineFrames.length - 1));
+  };
+
+  const handleLandmarkKeyDown = (event: KeyboardEvent<HTMLButtonElement>, role: MovementLandmarkRole) => {
+    const frameIndex = movementLandmarkFrameIndex(movementLandmarks, role);
+    const minimum = role === "start" ? 0 : role === "middle" ? movementLandmarks.startFrameIndex + 1 : movementLandmarks.middleFrameIndex + 1;
+    const maximum = role === "start"
+      ? movementLandmarks.middleFrameIndex - 1
+      : role === "middle"
+        ? movementLandmarks.endFrameIndex - 1
+        : timelineFrames.length - 1;
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      moveLandmarkToFrame(role, Math.max(minimum, frameIndex - 1));
+    } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      moveLandmarkToFrame(role, Math.min(maximum, frameIndex + 1));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      moveLandmarkToFrame(role, minimum);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      moveLandmarkToFrame(role, maximum);
+    }
+  };
+
   // New exercises need a name + the base clip (it becomes the demo video);
   // attaching to an existing exercise needs neither when it already has a name
   // and a demo video.
   const needsBaseClip = isPoseExercise && (!targetExercise || !targetExercise.demoVideoFileId);
+  const hasValidMovementLandmarks =
+    timelineFrames.length >= 3 &&
+    movementLandmarks.startFrameIndex >= 0 &&
+    movementLandmarks.startFrameIndex < movementLandmarks.middleFrameIndex &&
+    movementLandmarks.middleFrameIndex < movementLandmarks.endFrameIndex &&
+    movementLandmarks.endFrameIndex < timelineFrames.length;
   const canSave = Boolean(
     isOwner &&
       !isArchived &&
       exerciseName.trim() &&
-      (!isPoseExercise || (calibration && fsmConfig && primaryDef && secondaryDef && baseFrames.length >= 10) || targetExercise?.baseCriteria.poseReference) &&
+      (!isPoseExercise ||
+        (hasValidMovementLandmarks &&
+          ((calibration && fsmConfig && primaryDef && secondaryDef && baseFrames.length >= 10) ||
+            targetExercise?.baseCriteria.poseReference))) &&
       (!needsBaseClip || baseClip)
   );
 
@@ -1034,9 +1164,10 @@ export function ExerciseAiPage({
         durationMinutes: 0,
         sets: 0,
         reps: Number(repetitions) || 0,
-        difficulty: difficulty === "easy" ? "Easy" : difficulty === "medium" ? "Moderate" : "Hard"
+        difficulty: difficulty === "easy" ? "Easy" : difficulty === "medium" ? "Moderate" : "Hard",
+        virtualGripGameType: movementTracking === "virtual_grip" ? (virtualGripGameType ?? undefined) : undefined
       },
-      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl },
+      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl, virtualGripGameType: movementTracking === "virtual_grip" ? virtualGripGameType : null },
       ownsDemoVideoUrl: Boolean(baseClip)
     });
     setTestPaused(false);
@@ -1209,7 +1340,7 @@ export function ExerciseAiPage({
           )}
 
           {/* Mixed step flow: paired two-column rows (1 | 2, 3 | 4, 7 | 8) with the dense steps (5, 6, 9) spanning both columns. */}
-          <div className={`ai-author-stack ${isPoseExercise ? "" : "manual"} ${!isOwner || isArchived ? "readonly" : ""}`}>
+          <div className={`ai-author-stack ${isPoseExercise ? "" : isHandTrackingExercise ? "hand-tracking" : "manual"} ${!isOwner || isArchived ? "readonly" : ""}`}>
 
               {/* Step 1 — Exercise Identity */}
               <section className="creation-section-card ai-setup-card">
@@ -1257,6 +1388,21 @@ export function ExerciseAiPage({
                     <option value="none">ไม่ติดตามด้วย AI</option>
                   </select>
                 </div>
+                {movementTracking === "virtual_grip" && (
+                  <div className="ai-field">
+                    <label>เลือกชนิดเกม</label>
+                    <select
+                      className="ai-input"
+                      value={virtualGripGameType ?? ""}
+                      onChange={(event) => setVirtualGripGameType(event.target.value as HandTrackingGameType | null)}
+                    >
+                      <option value="">— เลือกเกม —</option>
+                      <option value="ball-grip">จับลูกบอลเสมือน (Ball Grip)</option>
+                      <option value="path-drag">ลากตามเส้นทาง (Path Drag)</option>
+                      <option value="falling-cup">จับถ้วยตกลงมา (Falling Cup)</option>
+                    </select>
+                  </div>
+                )}
                 <div className="ai-field">
                   <label>จำนวนครั้งเริ่มต้น</label>
                   <div className="ai-reps-stepper">
@@ -1307,13 +1453,17 @@ export function ExerciseAiPage({
               </section>
 
               {/* Step 2 — Base Demo Clip */}
-              <section className="creation-section-card">
+              <section className="creation-section-card ai-base-demo-step">
                 <div className="ai-card-step-tag">ขั้นตอนที่ 2 · วิดีโอสาธิตหลัก</div>
                 <div className="creation-section-header">
                   <Film size={20} />
                   <div>
                     <strong>วิดีโอสาธิตหลัก</strong>
-                    <p className="library-card-sub">วิดีโอสาธิตที่ชัดเจนหนึ่งคลิปสำหรับวิเคราะห์มุมการเคลื่อนไหวและเกณฑ์การนับครั้ง</p>
+                    <p className="library-card-sub">
+                      {isPoseExercise
+                        ? "วิดีโอสาธิตที่ชัดเจนหนึ่งคลิปสำหรับวิเคราะห์มุมการเคลื่อนไหวและเกณฑ์การนับครั้ง"
+                        : "เพิ่มวิดีโอสาธิตเพื่อให้ผู้ป่วยดูประกอบการทำกิจกรรม"}
+                    </p>
                   </div>
                 </div>
 
@@ -1327,7 +1477,7 @@ export function ExerciseAiPage({
                     accept="video/*"
                     className="ai-file-hidden-input"
                     onChange={(e) => setBaseClip(e.target.files?.[0] ?? null)}
-                    disabled={scanBusy}
+                    disabled={scanBusy || !isOwner || isArchived}
                   />
                 </label>
 
@@ -1368,51 +1518,46 @@ export function ExerciseAiPage({
                     the scanner only draws into the attribute-sized canvas, so it
                     doesn't need to be visible to work, and the demo player above
                     becomes the card's single video surface when idle. */}
-                <canvas
-                  ref={scanPreviewCanvasRef}
-                  className="ai-frame-preview"
-                  width={480}
-                  height={270}
-                  style={{ display: scanBusy ? "block" : "none" }}
-                />
+                {isPoseExercise && (
+                  <>
+                    <canvas
+                      ref={scanPreviewCanvasRef}
+                      className="ai-frame-preview"
+                      width={480}
+                      height={270}
+                      style={{ display: scanBusy ? "block" : "none" }}
+                    />
 
-                <button
-                  type="button"
-                  className="primary-button"
-                  style={{ width: "100%", marginTop: 12, justifyContent: "center" }}
-                  onClick={handleScanBaseClip}
-                  disabled={!baseClip || scanBusy}
-                >
-                  {scanBusy ? <Loader2 size={16} className="spin-icon" /> : <Upload size={16} />}
-                  สแกนและปรับเทียบ
-                </button>
-                {scanProgressText && <p className="ai-progress">{scanProgressText}</p>}
-                {scanError && <p className="ai-error">{scanError}</p>}
-              </section>
+                    <div className="ai-base-demo-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    style={{ width: "100%", marginTop: 12, justifyContent: "center" }}
+                    onClick={handleScanBaseClip}
+                    disabled={!baseClip || scanBusy}
+                  >
+                    {scanBusy ? <Loader2 size={16} className="spin-icon" /> : <Upload size={16} />}
+                    สแกนและปรับเทียบ
+                  </button>
+                  {scanProgressText && <p className="ai-progress">{scanProgressText}</p>}
+                  {scanError && <p className="ai-error">{scanError}</p>}
 
-              {/* Step 3 — Extra Master Takes (optional) */}
-              <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
-                <div className="ai-card-step-tag">ขั้นตอนที่ 3 · วิดีโอตัวอย่างท่าที่ถูกต้องเพิ่มเติม (ไม่บังคับ)</div>
+                  <details className="ai-extra-clips">
+                  <summary className="ai-extra-clips-toggle">
+                    <span>ตัวอย่างวิดีโอเพิ่มเติม (ไม่บังคับ)</span>
+                    <span className="ai-extra-clips-counts">
+                      {masterClips.length > 0 && <span className="ai-clip-count">{masterClips.length}</span>}
+                      {wrongFormClips.length > 0 && <span className="ai-clip-count ai-clip-count-err">{wrongFormClips.length}</span>}
+                    </span>
+                  </summary>
+                  <div className="ai-extra-clips-content">
+                <section className="ai-extra-clip-field">
                 <div className="creation-section-header">
                   <Film size={20} />
                   <div>
-                    <strong>
-                      วิดีโอตัวอย่างท่าที่ถูกต้องเพิ่มเติม
-                      {masterClips.length > 0 && <span className="ai-clip-count">{masterClips.length}</span>}
-                      {" "}<small>(ไม่บังคับ)</small>
-                    </strong>
+                    <strong>วิดีโอตัวอย่างท่าที่ถูกต้องเพิ่มเติม</strong>
                     <p className="library-card-sub">เพิ่มวิดีโอตัวอย่างท่าที่ถูกต้องเพื่อปรับปรุงความแม่นยำในการจับคู่การเคลื่อนไหว</p>
                   </div>
-                </div>
-                <div className="ai-field">
-                  <label>คำอธิบายวิดีโอตัวอย่าง</label>
-                  <input
-                    className="ai-input"
-                    value={masterDescription}
-                    onChange={(e) => setMasterDescription(e.target.value)}
-                    placeholder="เช่น ตัวอย่างที่ 2 จังหวะเร็วขึ้นเล็กน้อย"
-                    disabled={scanBusy || !calibration}
-                  />
                 </div>
                 <label className="ai-file-upload-area ai-file-upload-area-sm">
                   <Upload size={16} className="ai-file-upload-icon" />
@@ -1450,29 +1595,13 @@ export function ExerciseAiPage({
                 )}
               </section>
 
-              {/* Step 4 — Wrong-Form Clips (optional) */}
-              <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
-                <div className="ai-card-step-tag">ขั้นตอนที่ 4 · วิดีโอตัวอย่างท่าที่ไม่ถูกต้อง (ไม่บังคับ)</div>
+              <section className="ai-extra-clip-field">
                 <div className="creation-section-header">
                   <Film size={20} />
                   <div>
-                    <strong>
-                      วิดีโอตัวอย่างท่าที่ไม่ถูกต้อง
-                      {wrongFormClips.length > 0 && <span className="ai-clip-count ai-clip-count-err">{wrongFormClips.length}</span>}
-                      {" "}<small>(ไม่บังคับ)</small>
-                    </strong>
+                    <strong>วิดีโอตัวอย่างท่าที่ไม่ถูกต้อง</strong>
                     <p className="library-card-sub">วิดีโอตัวอย่างท่าที่ไม่ถูกต้องสำหรับฝึกตรวจจับความผิดพลาดของท่าทาง</p>
                   </div>
-                </div>
-                <div className="ai-field">
-                  <label>คำอธิบายข้อผิดพลาดของท่าทาง</label>
-                  <input
-                    className="ai-input"
-                    value={wrongFormDescription}
-                    onChange={(e) => setWrongFormDescription(e.target.value)}
-                    placeholder="เช่น เอนลำตัวไปข้างหน้า ยกไหล่"
-                    disabled={scanBusy || !calibration}
-                  />
                 </div>
                 <label className="ai-file-upload-area ai-file-upload-area-sm">
                   <Upload size={16} className="ai-file-upload-icon" />
@@ -1509,19 +1638,26 @@ export function ExerciseAiPage({
                   </div>
                 )}
               </section>
-
-              {/* Step 5 — Scanned Frame Preview */}
-              <section className="creation-section-card">
-                <div className="ai-card-step-tag">ขั้นตอนที่ 5 · ตรวจสอบเฟรมที่ติดตามได้</div>
-                <div className="creation-section-header">
-                  <Film size={20} />
-                  <div>
-                    <strong>ตัวอย่างโครงกระดูกจากการสแกน</strong>
-                    <p className="library-card-sub">เลื่อนดูเฟรมโครงกระดูกที่ติดตามได้จากวิดีโอสาธิตหลัก</p>
                   </div>
+                  </details>
                 </div>
+                  </>
+                )}
+              </section>
 
-                <div className="ai-save-actions" style={{ margin: "12px 0" }}>
+              {/* Step 3 — Exercise skeleton preview and Pose Landmarker setup */}
+              <section className="creation-section-card ai-card-full ai-pose-setup-step">
+                <div className="ai-card-step-tag">ขั้นตอนที่ 3 · ตัวอย่างการเคลื่อนไหวและกำหนดจุดตรวจสอบ</div>
+                <div className="ai-pose-content-grid">
+                  <div className="ai-pose-preview-column">
+                    <div className="creation-section-header">
+                      <Film size={20} />
+                      <div>
+                        <strong>ตัวอย่างการเคลื่อนไหวของโครงกระดูก</strong>
+                        <p className="library-card-sub">กำหนดจุดตรวจสอบจากเฟรมของท่าบริหารนี้</p>
+                      </div>
+                    </div>
+                <div className="ai-save-actions" style={{ margin: "6px 0" }}>
                   <button
                     type="button"
                     className="secondary-button"
@@ -1549,133 +1685,137 @@ export function ExerciseAiPage({
                   </button>
                 </div>
                 <canvas ref={previewCanvasRef} className="ai-frame-preview" width={480} height={270} />
+                  </div>
 
-                <div style={{ marginTop: 12 }}>
+                  <div className="ai-checkpoint-details">
+                    <div className="creation-section-header">
+                      <div>
+                        <strong>รายละเอียดจุดตรวจสอบ</strong>
+                        <p className="library-card-sub">หมุดทั้งสามกำหนดเฟรมท่าเริ่มต้น จุดสูงสุด และการกลับสู่ท่าเริ่มต้นตามลำดับ การลากหมุดจะอัปเดตภาพตัวอย่าง เฟรม เวลา และมุม พร้อมใช้จุดเหล่านี้คำนวณเกณฑ์การนับครั้ง</p>
+                      </div>
+                    </div>
+                    <div className="ai-checkpoint-grid">
+                      {CHECKPOINT_ROLES.map(({ role, title, icon }) => {
+                        const checkpoint = checkpointForLandmark(role);
+                        const timelineIndex = movementLandmarkFrameIndex(movementLandmarks, CHECKPOINT_LANDMARK_ROLES[role]);
+                        return (
+                          <button
+                            key={role}
+                            type="button"
+                            className={`ai-checkpoint-card checkpoint-${CHECKPOINT_LANDMARK_ROLES[role]}${activeCheckpointRole === role ? " active" : ""}`}
+                            onClick={() => selectRoleForEditing(role)}
+                            disabled={timelineFrames.length === 0}
+                          >
+                            <span className="ai-checkpoint-number">{checkpoint ? "✓" : icon}</span>
+                            <div>
+                              <strong>{title}</strong>
+                              <small>
+                                {checkpoint
+                                    ? `เฟรม ${timelineIndex + 1} · ${checkpoint.timestampSeconds.toFixed(2)} วินาที`
+                                  : "ยังไม่มีเฟรม"}
+                              </small>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                  </div>
+                </div>
+                <div className="ai-landmark-setup">
+                  <strong className="ai-landmark-timeline-title">ไทม์ไลน์แสดงการเคลื่อนไหว</strong>
+                  <p className="ai-landmark-instruction">
+                    ลากหมุดบนไทม์ไลน์เพื่อกำหนดจุดตรวจสอบท่าเริ่มต้น จุดสูงสุด และการกลับสู่ท่าเริ่มต้นตามลำดับการเคลื่อนไหว
+                  </p>
+                  {timelineFrames.length >= 3 ? (
+                    <>
+                      <div
+                        ref={landmarkTrackRef}
+                        className="ai-landmark-track"
+                        onPointerMove={handleLandmarkPointerMove}
+                        onPointerUp={() => { draggingLandmarkRef.current = null; }}
+                        onPointerCancel={() => { draggingLandmarkRef.current = null; }}
+                        aria-label="ไทม์ไลน์แสดงการเคลื่อนไหว"
+                      >
+                        <div className="ai-landmark-track-fill" />
+                        {MOVEMENT_LANDMARK_ROLES.map(({ role, label, colorClass }) => {
+                          const frameIndex = movementLandmarkFrameIndex(movementLandmarks, role);
+                          const minimum = role === "start"
+                            ? 0
+                            : role === "middle"
+                              ? movementLandmarks.startFrameIndex + 1
+                              : movementLandmarks.middleFrameIndex + 1;
+                          const maximum = role === "start"
+                            ? movementLandmarks.middleFrameIndex - 1
+                            : role === "middle"
+                              ? movementLandmarks.endFrameIndex - 1
+                              : timelineFrames.length - 1;
+                          return (
+                            <button
+                              key={role}
+                              type="button"
+                              className={`ai-landmark-pin ${colorClass}${activeCheckpointRole === CHECKPOINT_ROLE_BY_LANDMARK[role] ? " selected" : ""}`}
+                              style={{ left: `${(frameIndex / (timelineFrames.length - 1)) * 100}%` }}
+                              role="slider"
+                              aria-label={`จุดตรวจสอบ: ${label}`}
+                              aria-valuemin={minimum}
+                              aria-valuemax={maximum}
+                              aria-valuenow={frameIndex}
+                              aria-valuetext={`เฟรม ${frameIndex + 1} · ${timelineFrames[frameIndex]?.videoTimeSeconds.toFixed(2) ?? "0.00"} วินาที`}
+                              disabled={!isOwner || isArchived}
+                              onPointerDown={(event) => {
+                                setActiveCheckpointRole(CHECKPOINT_ROLE_BY_LANDMARK[role]);
+                                draggingLandmarkRef.current = role;
+                                event.currentTarget.setPointerCapture(event.pointerId);
+                                const bounds = landmarkTrackRef.current?.getBoundingClientRect();
+                                if (bounds && bounds.width > 0) {
+                                  const fraction = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+                                  moveLandmarkToFrame(role, fraction * (timelineFrames.length - 1));
+                                }
+                              }}
+                              onPointerUp={() => { draggingLandmarkRef.current = null; }}
+                              onKeyDown={(event) => handleLandmarkKeyDown(event, role)}
+                            />
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : baseFrames.length > 0 ? (
+                    <p className="ai-error" role="alert">
+                      ข้อมูลโครงกระดูกมีเพียง {timelineFrames.length} เฟรม ต้องมีอย่างน้อย 3 เฟรมเพื่อกำหนดจุดตรวจสอบ
+                    </p>
+                  ) : (
+                    <p className="library-card-sub">โหลดข้อมูลโครงกระดูกของท่าบริหารเพื่อกำหนดจุดตรวจสอบ</p>
+                  )}
+                </div>
+
+                <div className="ai-landmark-scrubber">
+                  <label htmlFor="ai-selected-frame">เฟรมที่เลือก</label>
                   <input
+                    id="ai-selected-frame"
                     type="range"
                     min={0}
-                    max={Math.max(0, baseFrames.length - 1)}
-                    value={Math.min(previewIndex, Math.max(0, baseFrames.length - 1))}
-                    onChange={(e) => setPreviewIndex(Number(e.target.value))}
-                    disabled={baseFrames.length === 0}
-                    style={{ width: "100%", accentColor: "var(--primary)" }}
-                    aria-label="ดูตัวอย่างเฟรม"
+                    max={Math.max(0, timelineFrames.length - 1)}
+                    value={selectedTimelineIndex}
+                    onChange={(event) => {
+                      const index = Number(event.target.value);
+                      setPreviewIndex(index * (baseFramesFromStoredReference ? 1 : 3));
+                    }}
+                    disabled={timelineFrames.length === 0}
+                    aria-label="เฟรมที่เลือก"
                   />
                   <p className="library-card-sub" style={{ marginTop: 4 }}>
-                    {baseFrames.length > 0
-                      ? `เฟรม ${Math.min(previewIndex, baseFrames.length - 1) + 1} / ${baseFrames.length} · เวลา: ${(previewFrame?.videoTimeSeconds ?? 0).toFixed(2)} วินาที`
+                    {timelineFrames.length > 0
+                      ? `เฟรม ${selectedTimelineIndex + 1} / ${timelineFrames.length} · เวลา: ${(selectedTimelineFrame?.videoTimeSeconds ?? 0).toFixed(2)} วินาที`
                       : "ยังไม่มีเฟรมที่สแกน"}
                   </p>
                   {scanError && <p className="ai-error">{scanError}</p>}
                 </div>
               </section>
 
-              {/* Step 6 — Checkpoint marking (reference CreateExerciseView):
-                  mark the starting position / peak / return frames on the base
-                  clip; all three angles re-derive the FSM criteria directly. */}
-              <section className={`creation-section-card${!calibration ? " ai-card-locked" : ""}`}>
-                <div className="ai-card-step-tag">ขั้นตอนที่ 6 · จุดตรวจสอบการเคลื่อนไหว (ไม่บังคับ)</div>
-                <div className="creation-section-header">
-                  <Flag size={20} />
-                  <div>
-                    <strong>
-                      จุดตรวจสอบ
-                      {allCheckpointsSet && <span className="ai-clip-count">{CHECKPOINT_ROLES.length}</span>}
-                    </strong>
-                    <p className="library-card-sub">
-                      เลื่อนวิดีโอไปยังแต่ละช่วงของการเคลื่อนไหวแล้วทำเครื่องหมาย เมื่อทำเครื่องหมายครบทั้งสามจุด
-                      เกณฑ์การนับครั้งจะอ้างอิงจากเฟรมตัวอย่างแทนการใช้ค่าทางสถิติ
-                    </p>
-                  </div>
-                </div>
-
-                <div className="ai-checkpoint-grid">
-                  {CHECKPOINT_ROLES.map(({ role, title, icon }) => (
-                    <button
-                      key={role}
-                      type="button"
-                      className={`ai-checkpoint-card${activeCheckpointRole === role ? " active" : ""}`}
-                      onClick={() => selectRoleForEditing(role)}
-                      disabled={!calibration}
-                    >
-                      <span className="ai-checkpoint-number">{checkpoints[role] ? "✓" : icon}</span>
-                      <div>
-                        <strong>{title}</strong>
-                        <small>
-                          {checkpoints[role]
-                            ? `${checkpoints[role]!.angle}° · ${checkpoints[role]!.timestampSeconds.toFixed(2)}s`
-                            : "ยังไม่ได้ทำเครื่องหมาย"}
-                        </small>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="ai-field">
-                  <label>ชื่อจุดตรวจสอบ</label>
-                  <input
-                    className="ai-input"
-                    value={checkpointLabelDraft}
-                    onChange={(e) => setCheckpointLabelDraft(e.target.value)}
-                    placeholder={CHECKPOINT_ROLES.find((r) => r.role === activeCheckpointRole)?.hint}
-                    disabled={!calibration}
-                  />
-                </div>
-                <div className="ai-field">
-                  <label>คำอธิบาย (ไม่บังคับ) — แสดงให้ผู้ป่วยเห็นในช่วงนี้</label>
-                  <textarea
-                    className="ai-input"
-                    value={checkpointDescDraft}
-                    onChange={(e) => setCheckpointDescDraft(e.target.value)}
-                    placeholder="เช่น เหยียดข้อศอกให้สุดโดยไม่ยกไหล่"
-                    style={{ minHeight: 54, fontFamily: "inherit", resize: "vertical" }}
-                    disabled={!calibration}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  className="primary-button"
-                  style={{ width: "100%", justifyContent: "center" }}
-                  onClick={handleMarkCheckpoint}
-                  disabled={!calibration || baseFrames.length === 0}
-                >
-                  📌 ทำเครื่องหมายเฟรมนี้เป็น “{CHECKPOINT_ROLES.find((r) => r.role === activeCheckpointRole)?.title}”
-                </button>
-                <p className="ai-progress">
-                  {baseFrames.length > 0
-                    ? `เฟรมที่เลือก ${Math.min(previewIndex, baseFrames.length - 1) + 1} · มุมหลัก ณ จุดนี้: ${
-                        angleAtPreviewFrame() ?? "—"
-                      }°`
-                    : "สแกนวิดีโอสาธิตก่อน"}
-                  {allCheckpointsSet ? " — เกณฑ์การนับครั้งคำนวณจากจุดตรวจสอบแล้ว" : ""}
-                </p>
-
-                {CHECKPOINT_ROLES.filter(({ role }) => checkpoints[role]).length > 0 && (
-                  <div className="ai-checkpoint-list">
-                    {CHECKPOINT_ROLES.map(({ role, title }) => {
-                      const checkpoint = checkpoints[role];
-                      if (!checkpoint) return null;
-                      return (
-                        <div className="ai-checkpoint-item" key={role}>
-                          <div>
-                            <strong>{title}: {checkpoint.label}</strong>
-                            {checkpoint.description && <p>{checkpoint.description}</p>}
-                            <small>{checkpoint.timestampSeconds.toFixed(2)}s · {checkpoint.angle}°</small>
-                          </div>
-                          <button type="button" className="text-action danger" onClick={() => handleClearCheckpoint(role)}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-
-              {/* Step 7 — Save to Library */}
-              <section className="creation-section-card ai-card-full">
-                <div className="ai-card-step-tag">ขั้นตอนที่ 7 · บันทึกลงคลัง</div>
+              {/* Step 4 — Save to Library */}
+              <section className="creation-section-card ai-card-full ai-save-step">
+                <div className="ai-card-step-tag">ขั้นตอนที่ 4 · บันทึกลงคลัง</div>
                 <div className="creation-section-header">
                   <Save size={20} />
                   <div>
@@ -1756,43 +1896,44 @@ export function ExerciseAiPage({
                   </div>
                 </div>
 
-                <div className="ai-field">
-                  <label>สมดุลระหว่างความแม่นยำและการใช้งานจริง · ความเข้มงวดในการตรวจจับการเอนลำตัวชดเชย (BVE)</label>
-                  <p className="library-card-sub" style={{ margin: 0 }}>
-                    {BVE_SENSITIVITY_LEVELS.find((level) => Math.abs(bveThreshold - level.value) < 1e-6)?.desc}
-                  </p>
-                  <div className="ai-choice-row">
-                    {BVE_SENSITIVITY_LEVELS.map((level) => {
-                      const selected = Math.abs(bveThreshold - level.value) < 1e-6;
-                      return (
-                        <button
-                          key={level.value}
-                          type="button"
-                          className={`ai-choice ${selected ? "active" : ""}`}
-                          onClick={() => setBveThreshold(level.value)}
-                          disabled={!canEditPoseCriteria}
-                          aria-pressed={selected}
-                        >
-                          {level.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
                 <div className="ai-technique-grid">
-                  <label className={`ai-technique-option${enableTrunkBve ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
-                    <input
-                      type="checkbox"
-                      checked={enableTrunkBve}
-                      onChange={(e) => setEnableTrunkBve(e.target.checked)}
-                      disabled={!canEditPoseCriteria}
-                    />
-                    <span>
-                      <strong>คิดคะแนนหักเมื่อใช้การเอนลำตัวชดเชย (BVE)</strong>
-                      <small>ตรวจจับและหักคะแนนเมื่อผู้ป่วยใช้การเอนลำตัวช่วยแทนการเคลื่อนไหว</small>
-                    </span>
-                  </label>
+                  <div className="ai-bve-option-group">
+                    <label className={`ai-technique-option${enableTrunkBve ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
+                      <input
+                        type="checkbox"
+                        checked={enableTrunkBve}
+                        onChange={(e) => setEnableTrunkBve(e.target.checked)}
+                        disabled={!canEditPoseCriteria}
+                      />
+                      <span>
+                        <strong>คิดคะแนนหักเมื่อใช้การเอนลำตัวชดเชย (BVE)</strong>
+                        <small>ตรวจจับและหักคะแนนเมื่อผู้ป่วยใช้การเอนลำตัวช่วยแทนการเคลื่อนไหว</small>
+                      </span>
+                    </label>
+                    <div className={`ai-bve-sensitivity${enableTrunkBve ? "" : " disabled"}`}>
+                      <strong>ความเข้มงวดในการตรวจจับการเอนลำตัวชดเชย</strong>
+                      <p className="library-card-sub" style={{ margin: 0 }}>
+                        {BVE_SENSITIVITY_LEVELS.find((level) => Math.abs(bveThreshold - level.value) < 1e-6)?.desc}
+                      </p>
+                      <div className="ai-choice-row">
+                        {BVE_SENSITIVITY_LEVELS.map((level) => {
+                          const selected = enableTrunkBve && Math.abs(bveThreshold - level.value) < 1e-6;
+                          return (
+                            <button
+                              key={level.value}
+                              type="button"
+                              className={`ai-choice ${selected ? "active" : ""}`}
+                              onClick={() => setBveThreshold(level.value)}
+                              disabled={!canEditPoseCriteria || !enableTrunkBve}
+                              aria-pressed={selected}
+                            >
+                              {level.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
                   <label className={`ai-technique-option${allowsTorsoMovement ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
                     <input
                       type="checkbox"
@@ -1833,14 +1974,6 @@ export function ExerciseAiPage({
                         ? "บันทึกการเปลี่ยนแปลง"
                         : "สร้างท่าบริหาร"}
                   </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={handleDownloadReference}
-                    disabled={!calibration}
-                  >
-                    ดาวน์โหลด reference_data.json
-                  </button>
                 </div>
 
                 {saveError && <p className="ai-error">{saveError}</p>}
@@ -1852,7 +1985,9 @@ export function ExerciseAiPage({
               </section>
 
               <section className="creation-section-card ai-manual-criteria-card ai-card-full">
-                <div className="ai-card-step-tag">ขั้นตอนที่ 2 · เกณฑ์ท่าบริหาร</div>
+                <div className="ai-card-step-tag">
+                  ขั้นตอนที่ {isHandTrackingExercise ? 3 : 2} · เกณฑ์ท่าบริหาร
+                </div>
                 <div className="creation-section-header">
                   {movementTracking === "virtual_grip" ? <Hand size={20} /> : <Dumbbell size={20} />}
                   <div>

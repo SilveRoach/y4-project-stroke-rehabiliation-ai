@@ -98,14 +98,15 @@ function poseComment(summary: PoseSessionSummary, reps: PoseRepScoringResult[]):
   const best = Math.max(...scores);
   const worst = Math.min(...scores);
   const overall = computeOverallFeedback(reps);
+  const avg = summary.averageScore ?? 0;
 
-  let feedback = `${verdict(summary.averageScore)} — คะแนนเฉลี่ย ${summary.averageScore} จาก ${scores.length} ครั้ง`;
+  let feedback = `${verdict(avg)} — คะแนนเฉลี่ย ${avg} จาก ${scores.length} ครั้ง`;
   if (scores.length > 1) feedback += ` (ดีที่สุด ${best}, ต่ำสุด ${worst})`;
   feedback += ".";
 
   if (overall.length > 0) {
     feedback += " สิ่งที่ควรปรับ: " + overall.map((item) => `${item.part} — ${item.message}`).join(" · ");
-  } else if (summary.averageScore >= 80) {
+  } else if (avg >= 80) {
     feedback += " ท่าทางสม่ำเสมอ ไม่พบปัญหาที่เกิดซ้ำ";
   } else {
     feedback += " ลองทำช้าลงและเคลื่อนไหวให้ลื่นไหลตามวิดีโอตัวอย่าง";
@@ -114,7 +115,7 @@ function poseComment(summary: PoseSessionSummary, reps: PoseRepScoringResult[]):
   const metrics = [
     { label: "จำนวนครั้งที่ทำ", value: repsLabel(scores.length, summary.targetReps) },
     { label: "ช่วงคะแนน", value: `${worst}–${best}` },
-    { label: "คะแนนเฉลี่ย", value: String(summary.averageScore) }
+    { label: "คะแนนเฉลี่ย", value: String(avg) }
   ];
   if (reps.length > 0) {
     const mean = (pick: (r: PoseRepScoringResult) => number) =>
@@ -131,8 +132,9 @@ function gripComment(summary: PoseSessionSummary, rounds: NonNullable<PoseSessio
   const points = rounds.filter((r) => r.success).length;
   const failures = countGripFailures(rounds);
   const avgTime = rounds.filter((r) => r.success).reduce((sum, r) => sum + r.timeTakenSeconds, 0) / Math.max(1, points);
+  const avg = summary.averageScore ?? 0;
 
-  let feedback = `${verdict(summary.averageScore)} — วางบอลเข้าเป้าสำเร็จ ${points} จาก ${rounds.length} รอบ`;
+  let feedback = `${verdict(avg)} — วางบอลเข้าเป้าสำเร็จ ${points} จาก ${rounds.length} รอบ`;
   if (points > 0) feedback += ` (เฉลี่ย ${avgTime.toFixed(1)} วินาทีต่อรอบ)`;
   feedback += ".";
 
@@ -148,7 +150,7 @@ function gripComment(summary: PoseSessionSummary, rounds: NonNullable<PoseSessio
     metrics: [
       { label: "จำนวนครั้งที่ทำ", value: repsLabel(rounds.length, summary.targetReps) },
       { label: "แต้มที่ได้", value: `${points}/${rounds.length}` },
-      { label: "อัตราสำเร็จ", value: `${summary.averageScore}%` }
+      { label: "อัตราสำเร็จ", value: `${avg}%` }
     ]
   };
 }

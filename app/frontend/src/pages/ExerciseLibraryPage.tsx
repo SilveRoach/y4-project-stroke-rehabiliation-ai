@@ -676,6 +676,9 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
     if (exercise?.baseCriteria?.poseReference) {
       baseCriteria.poseReference = exercise.baseCriteria.poseReference;
     }
+    if (exercise?.baseCriteria?.virtualGripGameType) {
+      baseCriteria.virtualGripGameType = exercise.baseCriteria.virtualGripGameType;
+    }
 
     const payload: ExerciseInputPayload = {
       name: name.trim(),

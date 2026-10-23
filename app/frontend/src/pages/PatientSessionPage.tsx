@@ -29,6 +29,30 @@ import {
   scorePoseRep
 } from "../services/api";
 import type { PatientExercise, TrackingType } from "../types";
+import { HandLandmarkerService } from "../ai/handTracking/handLandmarkerService";
+import { ObjectDetectorService } from "../ai/objectDetection/objectDetectorService";
+import { ItemTracker, LOST_THRESHOLD_FRAMES } from "../ai/objectDetection/itemTracker";
+import { PathDragFSM } from "../ai/evaluators/pathDragFSM";
+import { FallingCupGameFSM, DEFAULT_FALLING_CUP_CONFIG, type FallingCupSnapshot } from "../ai/evaluators/fallingCupGameFSM";
+import { drawPathGame } from "../ai/render/pathGameRenderer";
+import { drawFallingCupGame } from "../ai/render/fallingCupRenderer";
+import { computePathGameSummary } from "../ai/scoring/pathGameScoreEngine";
+import { computeFallingCupGameSummary } from "../ai/scoring/fallingCupGameScoreEngine";
+import {
+  computeMirroredPalmCenterNormalized,
+  palmCenterToCanvasPixels,
+  classifyGripFromLandmarks
+} from "../ai/handTracking/handInputHelpers";
+import type {
+  PathGameConfig,
+  PathRoundResult,
+  PathGameSnapshot,
+  PathType,
+  PathWidthLevel,
+  TrackedItem,
+  DetectedObject,
+  HandTrackingGameType
+} from "../types";
 
 /** Authoring-test session config — passed by ExerciseAiPage's "Test exercise"
  * button. A test runs the exact same PatientSessionPage flow a patient gets,
@@ -53,6 +77,8 @@ export interface SessionTestConfig {
   exerciseLibraryId?: string | null;
   /** Object URL of the therapist's base demo clip, shown as the reference media. */
   demoVideoUrl?: string | null;
+  /** Which hand-tracking minigame to test (only for virtual_grip exercises). */
+  virtualGripGameType?: HandTrackingGameType | null;
 }
 
 interface PatientSessionPageProps {
@@ -68,18 +94,20 @@ interface PatientSessionPageProps {
   // §6.3/§6.4 — called once STOP ends a recording with a result to review;
   // App.tsx routes to pages/SessionUploadConfirmPage.tsx from here instead of
   // going straight back to Today.
-  onFinishRecording: (result: RecordingResult, poseSummary?: PoseSessionSummary) => void;
+  onFinishRecording: (result: RecordingResult, poseSummary?: PoseSessionSummary, completedRounds?: number) => void;
 }
 
 /** The real aggregate sent to the upload-confirmation page after pose scoring. */
 export interface PoseSessionSummary {
-  averageScore: number;
+  /** null when no scored reps exist yet (e.g. virtual-grip-only session before first round). */
+  averageScore: number | null;
   repScores: number[];
   /** Prescribed repetitions (rounds) for this exercise; 0 when unknown. */
   targetReps: number;
-  /** Present for virtual-grip sessions: every finished round, for the
-   * end-of-session comment (utils/sessionFeedback.ts). */
+  /** Present for virtual-grip ball sessions: every finished round. */
   gripRounds?: BallGripRepResult[];
+  /** Present for virtual-grip path-drag sessions: every finished round. */
+  pathDragRounds?: PathRoundResult[];
   /** Present for pose sessions: the server's full per-rep results. */
   poseReps?: PoseRepScoringResult[];
 }
@@ -277,6 +305,10 @@ export function PatientSessionPage({
     exercise.trackingType === "virtual_grip" || exercise.trackingType === "both";
   const poseTrackingEnabled =
     exercise.trackingType === "pose" || exercise.trackingType === "both";
+  // Which hand-tracking minigame this exercise uses — read from base_criteria JSON.
+  const virtualGripGameType = ((testConfig?.virtualGripGameType !== undefined && testConfig?.virtualGripGameType !== null
+    ? testConfig.virtualGripGameType
+    : (exercise.virtualGripGameType ?? (exercise.baseCriteria as any)?.virtualGripGameType))) as HandTrackingGameType | undefined;
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const handTrackerRef = useRef<HandTracker | null>(null);
   const poseTrackerRef = useRef<PoseTracker | null>(null);
@@ -309,7 +341,35 @@ export function PatientSessionPage({
     // One grip ball game per session flow; reset()s happen on Start/Restart/
     // exercise change (time discontinuity), matching the landmark filters.
     if (handTrackingEnabled && !gripGameRef.current) {
-      gripGameRef.current = new VirtualBallGripFSM();
+      // VirtualBallGripFSM will be initialized below if gameType is ball-grip
+    }
+
+    // New virtual-grip games — only init the game type selected for this exercise.
+    // If no game type is selected, default to ball-grip.
+    if (handTrackingEnabled) {
+      const gameType = virtualGripGameType ?? 'ball-grip';
+      if (gameType === 'falling-cup') {
+        if (!fallingCupGameRef.current) {
+          handLandmarkerRef.current = handLandmarkerRef.current ?? new HandLandmarkerService();
+          fallingCupGameRef.current = new FallingCupGameFSM({ ...DEFAULT_FALLING_CUP_CONFIG });
+        }
+      } else if (gameType === 'path-drag') {
+        if (!pathDragGameRef.current) {
+          objectDetectorRef.current = objectDetectorRef.current ?? new ObjectDetectorService();
+          itemTrackerRef.current = itemTrackerRef.current ?? new ItemTracker();
+          pathDragGameRef.current = new PathDragFSM({
+            pathType: 'straight',
+            widthLevel: 'medium',
+            roundTimeSec: 30,
+            totalRounds: 5
+          });
+        }
+      } else {
+        // ball-grip (default)
+        if (!gripGameRef.current) {
+          gripGameRef.current = new VirtualBallGripFSM();
+        }
+      }
     }
 
     const loop = () => {
@@ -335,7 +395,7 @@ export function PatientSessionPage({
             // loop that draws the skeleton overlay. Gated on an active session
             // (like the pose FSM) so rounds cannot be played or timed during
             // the pre-roll or while paused.
-            if (gripGameRef.current && sessionStartedRef.current && !pausedRef.current) {
+            if ((!virtualGripGameType || virtualGripGameType === 'ball-grip') && gripGameRef.current && sessionStartedRef.current && !pausedRef.current) {
               try {
                 const game = gripGameRef.current;
                 // The canvas is displayed with object-fit: cover, so aspect-
@@ -374,6 +434,164 @@ export function PatientSessionPage({
               lastGripTickMsRef.current = null;
             }
           }
+
+          // -----------------------------------------------------------------
+          // Falling Cup game: grip to catch falling fruit, release into cup.
+          // Uses HandLandmarkerService + grip classification.
+          // -----------------------------------------------------------------
+          if (
+            virtualGripGameType === 'falling-cup' &&
+            handTrackingEnabled &&
+            sessionStartedRef.current &&
+            !pausedRef.current &&
+            handLandmarkerRef.current &&
+            fallingCupGameRef.current
+          ) {
+            try {
+              if (now - (fallingCupLastTickMsRef.current ?? 0) >= HAND_DETECT_INTERVAL_MS) {
+                fallingCupLastTickMsRef.current = now;
+                const cupLandmarks = handLandmarkerRef.current.detect(video, now);
+                const palm = cupLandmarks
+                  ? computeMirroredPalmCenterNormalized(cupLandmarks)
+                  : null;
+                const gripState = palm
+                  ? classifyGripFromLandmarks(cupLandmarks ?? [], 'open')
+                  : 'open';
+                const cupResults = fallingCupGameRef.current.update({
+                  timestampMs: now,
+                  handPos: palm ?? null,
+                  gripState
+                });
+                for (const _ of cupResults) {
+                  fallingCupRoundHookRef.current?.(fallingCupGameRef.current.snapshot());
+                }
+              }
+              const cupSnap = fallingCupGameRef.current.snapshot();
+              if (cupSnap.status === 'finished' && !fallingCupFinishedRef.current) {
+                fallingCupFinishedRef.current = true;
+                setFallingCupStatusText(
+                  `จบเกมแล้ว — จับได้ ${cupSnap.caught}/${cupSnap.total} ชิ้น`
+                );
+                const cycle = repCycleRef.current;
+                window.setTimeout(() => {
+                  if (cycle === repCycleRef.current) stopRef.current();
+                }, SESSION_END_DELAY_MS);
+              }
+            } catch (cupError) {
+              console.error("falling cup game update failed", cupError);
+            }
+          }
+
+          // -----------------------------------------------------------------
+          // Path Drag game: hold a real object, drag it along a drawn path.
+          // Uses HandTracker landmarks + ObjectDetectorService + ItemTracker
+          // for object attach/release logic.
+          // -----------------------------------------------------------------
+          if (
+            virtualGripGameType === 'path-drag' &&
+            handTrackingEnabled &&
+            sessionStartedRef.current &&
+            !pausedRef.current &&
+            handTracker &&
+            objectDetectorRef.current &&
+            itemTrackerRef.current &&
+            pathDragGameRef.current
+          ) {
+            try {
+              const landmarks = lastHandLandmarksRef.current;
+              const palm = landmarks
+                ? computeMirroredPalmCenterNormalized(landmarks)
+                : null;
+              const palmCanvas = palm
+                ? palmCenterToCanvasPixels(palm, canvas.width, canvas.height)
+                : null;
+
+              // Object detection (throttled ~5fps).
+              if (
+                now - pathDragLastObjectMsRef.current >= 200 &&
+                objectDetectorRef.current.isReady
+              ) {
+                pathDragLastObjectMsRef.current = now;
+                const detections = objectDetectorRef.current.detect(video, now);
+                if (pathDragItemStateRef.current === 'selecting') {
+                  const handPixel = palm
+                    ? { x: palm.x * video.videoWidth, y: palm.y * video.videoHeight }
+                    : null;
+                  const diagonal = Math.sqrt(video.videoWidth ** 2 + video.videoHeight ** 2) || 1;
+                  const reachable = detections.filter((d) => {
+                    if (!handPixel) return true;
+                    const cx = d.boundingBox.originX + d.boundingBox.width / 2;
+                    const cy = d.boundingBox.originY + d.boundingBox.height / 2;
+                    return Math.hypot(cx - handPixel.x, cy - handPixel.y) / diagonal <= 0.35;
+                  });
+                  if (reachable.length > 0 && palmCanvas) {
+                    const nearest = reachable.reduce((best, d) => {
+                      const cx = d.boundingBox.originX + d.boundingBox.width / 2;
+                      const cy = d.boundingBox.originY + d.boundingBox.height / 2;
+                      const d2 = Math.hypot(cx - palmCanvas.x, cy - palmCanvas.y);
+                      return d2 < (best ? Math.hypot(
+                        best.boundingBox.originX + best.boundingBox.width / 2 - palmCanvas.x,
+                        best.boundingBox.originY + best.boundingBox.height / 2 - palmCanvas.y
+                      ) : Infinity) ? d : best;
+                    }, reachable[0]);
+                    pathDragLastTrackedItemRef.current = itemTrackerRef.current.lock(nearest, now);
+                    pathDragItemStateRef.current = 'tracking';
+                  }
+                } else {
+                  const tracked = itemTrackerRef.current.update(
+                    detections,
+                    video.videoWidth,
+                    video.videoHeight,
+                    now
+                  );
+                  pathDragLastTrackedItemRef.current = tracked;
+                  if (tracked) {
+                    pathDragItemStateRef.current =
+                      tracked.framesSinceSeen > LOST_THRESHOLD_FRAMES ? 'lost' : 'tracking';
+                  }
+                }
+              }
+
+              // Attached = holding object (grip closed + object tracked near hand).
+              const gripClosed = landmarks
+                ? classifyGripFromLandmarks(landmarks, null) === 'closed'
+                : false;
+              const objectNearHand =
+                pathDragLastTrackedItemRef.current &&
+                palmCanvas &&
+                Math.hypot(
+                  pathDragLastTrackedItemRef.current.centroid.x - palmCanvas.x,
+                  pathDragLastTrackedItemRef.current.centroid.y - palmCanvas.y
+                ) <= Math.hypot(canvas.width, canvas.height) * 0.15;
+              pathDragAttachedRef.current =
+                !!(gripClosed && objectNearHand && pathDragItemStateRef.current !== 'lost');
+
+              pathDragPalmCanvasRef.current = palmCanvas;
+              const handPoint = palmCanvas ? { x: palmCanvas.x, y: palmCanvas.y } : null;
+              const roundResult = pathDragGameRef.current.update({
+                timestampMs: now,
+                handPoint,
+                attached: pathDragAttachedRef.current
+              });
+              if (roundResult) {
+                pathDragRoundsRef.current.push(roundResult);
+                pathDragRoundHookRef.current?.(roundResult);
+              }
+              const snap = pathDragGameRef.current.snapshot();
+              if (snap.phase === 'gameOver' && !pathDragFinishedRef.current) {
+                pathDragFinishedRef.current = true;
+                setPathDragStatusText(
+                  `จบเกมแล้ว — ทำสำเร็จ ${snap.roundNumber - 1}/${snap.totalRounds} รอบ`
+                );
+                const cycle = repCycleRef.current;
+                window.setTimeout(() => {
+                  if (cycle === repCycleRef.current) stopRef.current();
+                }, SESSION_END_DELAY_MS);
+              }
+            } catch (pathError) {
+              console.error("path drag game update failed", pathError);
+            }
+          }
           if (poseTracker) {
             const rawPose = poseTracker.detect(video, now);
             // One-Euro smooth x/y per landmark before drawing/rep tracking —
@@ -409,11 +627,38 @@ export function PatientSessionPage({
           if (lastHandLandmarksRef.current) {
             drawHandSkeleton(ctx, lastHandLandmarksRef.current, canvas.width, canvas.height);
             // Virtual-grip ball + target ring, layered over the hand skeleton.
-            if (gripGameRef.current) {
+            if ((!virtualGripGameType || virtualGripGameType === 'ball-grip') && gripGameRef.current) {
               try {
                 drawBallGrip(ctx, gripGameRef.current.snapshot(), canvas.width, canvas.height);
               } catch (gripDrawError) {
                 console.error("grip minigame render failed", gripDrawError);
+              }
+            }
+            // New games: Path Drag corridor + hand marker, layered over skeleton.
+            if (virtualGripGameType === 'path-drag' && pathDragGameRef.current) {
+              try {
+                const snap = pathDragGameRef.current.snapshot();
+                drawPathGame(ctx, snap, {
+                  gripPoint: pathDragPalmCanvasRef.current,
+                  nowMs: now
+                });
+              } catch (pathDrawError) {
+                console.error("path drag render failed", pathDrawError);
+              }
+            }
+            // Falling Cup: cups + falling objects.
+            if (virtualGripGameType === 'falling-cup' && fallingCupGameRef.current) {
+              try {
+                const cupSnap = fallingCupGameRef.current.snapshot();
+                drawFallingCupGame(
+                  ctx,
+                  cupSnap,
+                  canvas.width,
+                  canvas.height,
+                  { bandWarning: cupSnap.status === 'paused', dimOutsideBand: false }
+                );
+              } catch (cupDrawError) {
+                console.error("falling cup render failed", cupDrawError);
               }
             }
           }
@@ -428,6 +673,8 @@ export function PatientSessionPage({
     const inits: Array<Promise<void>> = [];
     if (handTracker) inits.push(handTracker.init());
     if (poseTracker) inits.push(poseTracker.init());
+    if (handLandmarkerRef.current) inits.push(handLandmarkerRef.current.init());
+    if (objectDetectorRef.current) inits.push(objectDetectorRef.current.init());
     Promise.all(inits)
       .then(() => {
         if (cancelled) return;
@@ -459,10 +706,15 @@ export function PatientSessionPage({
       setPoseDetected(false);
       handTracker?.dispose();
       poseTracker?.dispose();
+      handLandmarkerRef.current?.dispose();
+      objectDetectorRef.current?.dispose();
       handTrackerRef.current = null;
       poseTrackerRef.current = null;
+      handLandmarkerRef.current = null;
+      objectDetectorRef.current = null;
+      itemTrackerRef.current = null;
     };
-  }, [handTrackingEnabled, poseTrackingEnabled, camera.status, camera.videoRef]);
+  }, [handTrackingEnabled, poseTrackingEnabled, virtualGripGameType, camera.status, camera.videoRef]);
 
   // §2.1 — a brief "get positioned in frame" state before the tracking HUD/controls
   // appear, instead of jumping straight from a live camera feed into the full
@@ -557,6 +809,52 @@ export function PatientSessionPage({
   const [gripStatusText, setGripStatusText] = useState<string | null>(null);
   const lastGripCaptionRef = useRef("");
 
+  // -------------------------------------------------------------------------
+  // New virtual-grip games (commit "add 2 new games into this repo") — embedded
+  // into the same PatientSessionPage rAF loop / shared overlay canvas as the
+  // original ball game. Each FSM is pure logic; rendering + scoring live in
+  // separate modules (ai/render/*.ts, ai/scoring/*.ts).
+  //
+  // Path Drag: hold a real object (object detection + ItemTracker), drag it
+  // along a drawn path. Needs ObjectDetectorService + ItemTracker in addition
+  // to hand landmarks.
+  // Falling Cup: grip to catch falling fruit, release into a cup. Needs only
+  // hand landmarks (HandLandmarkerService).
+  // -------------------------------------------------------------------------
+  const pathDragGameRef = useRef<PathDragFSM | null>(null);
+  const fallingCupGameRef = useRef<FallingCupGameFSM | null>(null);
+  const handLandmarkerRef = useRef<HandLandmarkerService | null>(null); // falling cup only
+  const objectDetectorRef = useRef<ObjectDetectorService | null>(null);  // path drag only
+  const itemTrackerRef = useRef<ItemTracker | null>(null);               // path drag only
+  const pathDragHandFilterXRef = useRef(new OneEuroFilter(1.5, 0.3));   // path drag hand smoothing
+  const pathDragHandFilterYRef = useRef(new OneEuroFilter(1.5, 0.3));
+  const pathDragPalmCanvasRef = useRef<{ x: number; y: number } | null>(null);
+
+  const pathDragLastDetectMsRef = useRef(0);
+  const pathDragLastObjectMsRef = useRef(0);
+  const pathDragItemStateRef = useRef<'selecting' | 'tracking' | 'lost' | 'attached'>('selecting');
+  const pathDragAttachedRef = useRef(false);
+  const pathDragLastTrackedItemRef = useRef<TrackedItem | null>(null);
+  const pathDragLastCandidatesRef = useRef<DetectedObject[]>([]);
+
+  const pathDragFinishedRef = useRef(false);
+  const pathDragRoundsRef = useRef<PathRoundResult[]>([]);
+  const pathDragRoundHookRef = useRef<((round: PathRoundResult) => void) | null>(null);
+  const [pathDragStatusText, setPathDragStatusText] = useState<string | null>(null);
+
+  const fallingCupFinishedRef = useRef(false);
+  const fallingCupLastTickMsRef = useRef<number | null>(null);
+  const fallingCupRoundsRef = useRef<FallingCupSnapshot[]>([]); // one snapshot per resolved object
+  const fallingCupRoundHookRef = useRef<((snap: FallingCupSnapshot) => void) | null>(null);
+  const [fallingCupStatusText, setFallingCupStatusText] = useState<string | null>(null);
+
+  const handStatusText =
+    virtualGripGameType === 'path-drag'
+      ? pathDragStatusText
+      : virtualGripGameType === 'falling-cup'
+      ? fallingCupStatusText
+      : gripStatusText;
+
   // Fresh grip game state (new session / restart / exercise switch).
   function resetGripSession() {
     gripGameRef.current?.reset();
@@ -566,6 +864,33 @@ export function PatientSessionPage({
     gripRoundsRef.current = [];
     setGripStatusText(null);
     lastGripCaptionRef.current = "";
+
+    // New games: reset only the selected game type.
+    const gameType = virtualGripGameType ?? 'ball-grip';
+    if (gameType === 'path-drag') {
+      pathDragGameRef.current?.reset({
+        pathType: 'straight',
+        widthLevel: 'medium',
+        roundTimeSec: 30,
+        totalRounds: 5
+      });
+      pathDragFinishedRef.current = false;
+      pathDragRoundsRef.current = [];
+      pathDragItemStateRef.current = 'selecting';
+      pathDragAttachedRef.current = false;
+      pathDragLastTrackedItemRef.current = null;
+      pathDragLastCandidatesRef.current = [];
+      pathDragHandFilterXRef.current.reset();
+      pathDragHandFilterYRef.current.reset();
+      pathDragLastDetectMsRef.current = 0;
+      pathDragLastObjectMsRef.current = 0;
+      setPathDragStatusText(null);
+    } else if (gameType === 'falling-cup') {
+      fallingCupGameRef.current = new FallingCupGameFSM({ ...DEFAULT_FALLING_CUP_CONFIG });
+      fallingCupFinishedRef.current = false;
+      fallingCupRoundsRef.current = [];
+      setFallingCupStatusText(null);
+    }
   }
 
   useEffect(() => {
@@ -878,6 +1203,59 @@ export function PatientSessionPage({
     }
   };
 
+  // Path Drag round finished — advance the shared rep counter + score.
+  pathDragRoundHookRef.current = (round) => {
+    if (!sessionStartedRef.current || pausedRef.current || poseTrackingEnabled || pathDragFinishedRef.current) return;
+
+    pathDragRoundsRef.current.push(round);
+    const next = total > 0 ? Math.min(demoDoneRef.current + 1, total) : demoDoneRef.current + 1;
+    demoDoneRef.current = next;
+    setDemoDone(next);
+    const points = pathDragRoundsRef.current.filter((r) => r.completed).length;
+    setDemoScore(Math.round((points / pathDragRoundsRef.current.length) * 100));
+    setRepFeedback(round.feedbackText);
+
+    if (total > 0 && next >= total) {
+      if (!completionNotifiedRef.current) {
+        completionNotifiedRef.current = true;
+        setSessionCompleteNotice(true);
+      }
+      const cycle = repCycleRef.current;
+      pathDragFinishedRef.current = true;
+      setPathDragStatusText("ครบทุกรอบแล้ว กำลังจบเซสชัน…");
+      window.setTimeout(() => {
+        if (cycle === repCycleRef.current) stopRef.current();
+      }, SESSION_END_DELAY_MS);
+    }
+  };
+
+  // Falling Cup object resolved (caught or lost) — counts as one "round" of the
+  // shared rep counter. The game itself decides when all objects are done.
+  fallingCupRoundHookRef.current = (snap) => {
+    if (!sessionStartedRef.current || pausedRef.current || poseTrackingEnabled || fallingCupFinishedRef.current) return;
+
+    // Only count when an object was actually resolved (caught or lost).
+    const prevResolved = fallingCupRoundsRef.current.length;
+    fallingCupRoundsRef.current.push(snap);
+    if (fallingCupRoundsRef.current.length > prevResolved) {
+      const next = total > 0 ? Math.min(demoDoneRef.current + 1, total) : demoDoneRef.current + 1;
+      demoDoneRef.current = next;
+      setDemoDone(next);
+      const rate = Math.round((snap.caught / Math.max(1, snap.resolved)) * 100);
+      setDemoScore(rate);
+      setRepFeedback(snap.status === 'finished' ? `จับได้ ${snap.caught}/${snap.total} ชิ้น` : `จับแล้ว ${snap.caught} ชิ้น`);
+    }
+
+    if (snap.status === 'finished') {
+      const cycle = repCycleRef.current;
+      fallingCupFinishedRef.current = true;
+      setFallingCupStatusText(`จบเกมแล้ว — จับได้ ${snap.caught}/${snap.total} ชิ้น`);
+      window.setTimeout(() => {
+        if (cycle === repCycleRef.current) stopRef.current();
+      }, SESSION_END_DELAY_MS);
+    }
+  };
+
   // §6.3/§6.4 — recording.stop() resolves asynchronously (MediaRecorder's onstop
   // fires after any final ondataavailable), so STOP can't hand a result to
   // onFinishRecording synchronously. This ref marks "a STOP is in flight";
@@ -892,6 +1270,7 @@ export function PatientSessionPage({
       // Pose reps win when present; otherwise a virtual-grip session reports its
       // rounds (finalRepScore is 0/100 per round, so the average = success rate).
       const gripRounds = gripRoundsRef.current;
+      const pathDragRounds = pathDragRoundsRef.current;
       const repScores = poseRepScoresRef.current.length > 0
         ? poseRepScoresRef.current
         : gripRounds.map((round) => round.finalRepScore);
@@ -904,8 +1283,14 @@ export function PatientSessionPage({
               ? { gripRounds: [...gripRounds] }
               : { poseReps: [...poseRepDetailsRef.current] })
           }
-        : undefined;
-      onFinishRecording(recording.result, poseSummary);
+        : {
+            averageScore: null,
+            repScores: [],
+            targetReps: total,
+            ...(gripRounds.length > 0 ? { gripRounds: [...gripRounds] } : {}),
+            ...(pathDragRounds.length > 0 ? { pathDragRounds: [...pathDragRounds] } : {})
+          };
+      onFinishRecording(recording.result, poseSummary, Math.max(0, demoDone - initialDone));
     }
   }, [recording.result, onFinishRecording]);
 
@@ -1150,8 +1535,8 @@ export function PatientSessionPage({
                   ? "กำลังโหลดระบบติดตาม…"
                   : poseTrackingEnabled && poseStatusText
                   ? poseStatusText
-                  : handTrackingEnabled && gripStatusText
-                  ? gripStatusText
+                  : handTrackingEnabled && handStatusText
+                  ? handStatusText
                   : handTrackingEnabled && handDetected
                   ? "กำลังติดตามมือ"
                   : poseTrackingEnabled && poseDetected

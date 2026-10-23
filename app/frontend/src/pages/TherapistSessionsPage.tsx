@@ -128,11 +128,22 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
     };
   }, [token, user]);
 
-  const datesWithSessions = useMemo(() => new Set(sessions.map((session) => session.dateIso)), [sessions]);
-  const datesNeedingReview = useMemo(
-    () => new Set(sessions.filter((session) => !session.reviewed).map((session) => session.dateIso)),
-    [sessions]
-  );
+  const reviewStatusByDate = useMemo(() => {
+    const reviewFlagsByDate = new Map<string, { reviewed: boolean; needsReview: boolean }>();
+    for (const session of sessions) {
+      const flags = reviewFlagsByDate.get(session.dateIso) ?? { reviewed: false, needsReview: false };
+      if (session.reviewed) flags.reviewed = true;
+      else flags.needsReview = true;
+      reviewFlagsByDate.set(session.dateIso, flags);
+    }
+
+    return new Map(
+      Array.from(reviewFlagsByDate, ([date, flags]) => [
+        date,
+        flags.reviewed && flags.needsReview ? "mixed_review" : flags.needsReview ? "needs_review" : "completed"
+      ])
+    );
+  }, [sessions]);
   const calendarCells = useMemo(() => getMonthCells(viewedMonth), [viewedMonth]);
   const visibleSessions = useMemo(
     () => sessions.filter((session) =>
@@ -192,19 +203,26 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
               </div>
               <div className="pd-calendar-grid">
                 {calendarCells.map((cell) => {
-                  const hasSessions = cell.dateIso !== null && datesWithSessions.has(cell.dateIso);
-                  const needsReview = cell.dateIso !== null && datesNeedingReview.has(cell.dateIso);
+                  const reviewStatus = cell.dateIso ? reviewStatusByDate.get(cell.dateIso) : undefined;
+                  const statusClass = cell.dateNumber === null ? "blank" : reviewStatus ?? "no_plan";
+                  const statusLabel = reviewStatus === "mixed_review"
+                    ? "มีผลการฝึกทั้งที่ตรวจสอบแล้วและรอตรวจสอบ"
+                    : reviewStatus === "needs_review"
+                      ? "มีผลการฝึกที่รอตรวจสอบ"
+                      : reviewStatus === "completed"
+                        ? "ตรวจสอบผลการฝึกแล้ว"
+                        : "ไม่มีผลการฝึก";
                   return (
                     <button
                       key={cell.key}
                       type="button"
-                      className={`pd-calendar-cell ${cell.dateNumber === null ? "blank" : needsReview ? "needs_review" : hasSessions ? "completed" : "no_plan"} ${
+                      className={`pd-calendar-cell ${statusClass} ${
                         cell.dateIso === selectedDateIso ? "selected" : ""
                       }`}
                       disabled={cell.dateIso === null}
                       aria-pressed={cell.dateIso === selectedDateIso}
                       aria-label={cell.dateIso
-                        ? `${formatCalendarDate(cell.dateIso)}${needsReview ? " มีผลการฝึกที่รอตรวจสอบ" : hasSessions ? " ตรวจสอบผลการฝึกแล้ว" : " ไม่มีผลการฝึก"}`
+                        ? `${formatCalendarDate(cell.dateIso)} ${statusLabel}`
                         : undefined}
                       onClick={() => cell.dateIso && setSelectedDateIso(cell.dateIso)}
                     >
@@ -216,6 +234,7 @@ export function TherapistSessionsPage({ onLogout, onNavigate, onReviewSession }:
               <div className="pd-legend">
                 <span><span className="pd-legend-dot needs_review" />รอตรวจสอบ</span>
                 <span><span className="pd-legend-dot completed" />ตรวจสอบแล้ว</span>
+                <span><span className="pd-legend-dot mixed_review" />ตรวจสอบแล้วและรอตรวจสอบ</span>
                 <span><span className="pd-legend-dot no_plan" />ไม่มีผลการฝึก</span>
               </div>
             </div>

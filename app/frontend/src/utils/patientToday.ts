@@ -75,6 +75,14 @@ const trackingTypeFallback: Record<ExerciseTrackingType, TrackingType> = {
 // aren't actually read by PatientSessionPage.tsx's UI — filled with harmless
 // placeholders rather than left to silently be `undefined`.
 export function shimScheduledExerciseToPatientExercise(exercise: ScheduledExercise): PatientExercise {
+  // Preserve baseCriteria (including virtualGripGameType for hand-tracking minigames)
+  const baseCriteria = exercise.baseCriteria
+    ? {
+        ...exercise.baseCriteria,
+        virtualGripGameType:
+          exercise.baseCriteria.virtualGripGameType ?? undefined,
+      }
+    : undefined;
   return {
     id: exercise.id,
     name: exercise.exerciseName,
@@ -86,7 +94,8 @@ export function shimScheduledExerciseToPatientExercise(exercise: ScheduledExerci
     durationMinutes: 10,
     sets: 1,
     reps: 1,
-    difficulty: exercise.difficultyLevel === "easy" ? "Easy" : exercise.difficultyLevel === "hard" ? "Hard" : "Moderate"
+    difficulty: exercise.difficultyLevel === "easy" ? "Easy" : exercise.difficultyLevel === "hard" ? "Hard" : "Moderate",
+    virtualGripGameType: exercise.baseCriteria?.virtualGripGameType
   };
 }
 

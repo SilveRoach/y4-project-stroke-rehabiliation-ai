@@ -187,10 +187,10 @@ function AppShell() {
   }
 
   // PatientSessionPage's STOP hands off the recording plus, for scored sessions
-  // (pose reps or virtual-grip rounds), the per-rep results; utils/
-  // sessionFeedback.ts turns them into the end-of-session AI comment. Other tracking
-  // modes retain the existing preview fallback until they have real scoring.
-  const handleFinishRecording = (result: RecordingResult, poseSummary?: PoseSessionSummary) => {
+  // (pose reps or virtual-grip rounds), the per-rep results used to show the
+  // average, score range, and completed-round count on the confirmation screen.
+  // Other tracking modes retain the existing preview score until real scoring is available.
+  const handleFinishRecording = (result: RecordingResult, poseSummary?: PoseSessionSummary, completedRounds = 0) => {
     const extension = result.mimeType.includes("mp4") ? "mp4" : "webm";
     const fileSlug = activeExercise.name.trim().toLowerCase().replace(/\s+/g, "-");
     setPendingAttempt({
@@ -208,7 +208,7 @@ function AppShell() {
         ? (() => {
             const comment = buildSessionComment(poseSummary);
             return {
-              aiScore: poseSummary.averageScore,
+              aiScore: poseSummary.averageScore ?? 0,
               aiFeedback: comment.feedback,
               aiMetrics: comment.metrics,
               repsCompleted: poseSummary.repScores.length,
@@ -216,7 +216,7 @@ function AppShell() {
               repScores: poseSummary.repScores
             };
           })()
-        : mockAiEvaluation())
+        : { ...mockAiEvaluation(), repsCompleted: completedRounds, repScores: [] })
     });
     setView("session-upload-confirm");
   };

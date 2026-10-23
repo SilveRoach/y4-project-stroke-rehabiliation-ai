@@ -1,8 +1,15 @@
-export type Role = "patient" | "therapist" | "admin";
+﻿export type Role = "patient" | "therapist" | "admin";
 
 export type TrackingType = "pose" | "virtual_grip" | "both";
 
 export type ExerciseStatus = "done" | "in_progress" | "not_started";
+
+export interface Landmark {
+  x: number;
+  y: number;
+  z?: number;
+  visibility?: number;
+}
 
 export interface PatientUser {
   id: string;
@@ -35,6 +42,8 @@ export interface PatientExercise {
   reps: number;
   difficulty: "Easy" | "Moderate" | "Hard";
   score?: number;
+  baseCriteria?: Array<{ label: string; value: string }> | null;
+  virtualGripGameType?: HandTrackingGameType;
 }
 
 export interface PatientProgramDay {
@@ -45,7 +54,10 @@ export interface PatientProgramDay {
   heatmap: Array<"completed" | "missed" | "today" | "future">;
 }
 
-// --- Therapist dashboard (frontend-design.md §5, mockup built from
+// --- Therapist dashboard (frontend-design.md ยง5, mockup built from
+// `design draft/src/views/TherapistView.tsx`) ---
+
+// --- Therapist dashboard (frontend-design.md ยง5, mockup built from
 // `design draft/src/views/TherapistView.tsx`) ---
 
 export interface TherapistProfile {
@@ -98,20 +110,20 @@ export interface ProgressTrendPoint {
 }
 
 // Per-patient recovery trend for the Dashboard's "Avg. Recovery Progress" chart
-// (frontend-design.md §4). Previously that chart always plotted a single
+// (frontend-design.md ยง4). Previously that chart always plotted a single
 // aggregate-across-all-patients series (progressTrendData) with no way to view
 // one patient's own trend. One row per patient in therapistMock.ts's
 // `patientProgressTrends`; `planName` is shown as the chart subtitle once a
 // patient is selected (mock data only has one active plan per patient, matching
 // the "one active program per patient" domain rule, so there's no separate plan
-// picker — selecting the patient is enough to determine which plan's trend shows).
+// picker โ€” selecting the patient is enough to determine which plan's trend shows).
 export interface PatientProgressTrend {
   patientId: string;
   planName: string;
   points: ProgressTrendPoint[];
 }
 
-// --- Admin dashboard (frontend-design.md §8/9, built from
+// --- Admin dashboard (frontend-design.md ยง8/9, built from
 // `design draft/src/views/AdminView.tsx`) ---
 
 export interface AdminProfile {
@@ -123,9 +135,9 @@ export interface AdminProfile {
 export type StaffRole = "therapist" | "admin";
 
 // Widened beyond StaffRole to also cover Patient rows in the Staff accounts table
-// (UI_MOCKUP_PLAN_NEWDB.md §6). Patients normally self-register (FR-AUTH-01b), but
+// (UI_MOCKUP_PLAN_NEWDB.md ยง6). Patients normally self-register (FR-AUTH-01b), but
 // an admin can also create one directly through this page's "Create account" flow
-// now (POST /users, user.service.ts's `createAccount()` patient branch) — same
+// now (POST /users, user.service.ts's `createAccount()` patient branch) โ€” same
 // table/Edit-popup pattern already built for Therapist/Admin, generalized to a 3rd
 // account kind without a separate page.
 export type AdminManagedRole = "patient" | StaffRole;
@@ -134,7 +146,7 @@ export interface AdminUserSummary {
   id: string;
   name: string;
   role: AdminManagedRole;
-  // Login identifier — for Therapist/Admin this is a chosen username; for Patient
+  // Login identifier โ€” for Therapist/Admin this is a chosen username; for Patient
   // it's their phone number, per newdb.txt's users.username comment ("Patient:
   // Usually their phone number"). Same underlying field in the schema either way,
   // so it isn't split into a separate phoneNumber column here.
@@ -143,10 +155,10 @@ export interface AdminUserSummary {
   lastLoginLabel: string;
   patientCount?: number;
   // Therapist-only (newdb.txt's therapists.license_number/issued/expiry) and
-  // Admin-only (admins.employee_id) fields — UI_MOCKUP_PLAN_NEWDB.md §2.2/§6#1.
+  // Admin-only (admins.employee_id) fields โ€” UI_MOCKUP_PLAN_NEWDB.md ยง2.2/ยง6#1.
   // Client-side only: collected in the create-account modal but not sent to the
   // real POST /users call, since CreateUserPayload/createAccount() don't accept
-  // them yet (no matching columns on Therapist/Admin — see the plan's §5). Held
+  // them yet (no matching columns on Therapist/Admin โ€” see the plan's ยง5). Held
   // here so the new row in the table reflects what was entered, same "real UI,
   // mock persistence" pattern as every other still-mock page.
   licenseNumber?: string;
@@ -154,13 +166,13 @@ export interface AdminUserSummary {
   licenseExpiryLabel?: string;
   employeeId?: string;
   // Therapist/Admin only, matching users.email/phone_number on schema.prisma
-  // (real fields, sent to and returned from POST /users — unlike
+  // (real fields, sent to and returned from POST /users โ€” unlike
   // licenseNumber/employeeId above, which still aren't persisted). Not used
   // for Patient rows: `username` already carries the phone-as-login-identifier
   // for that role, so a second phoneNumber field would be redundant there.
   email?: string;
   phoneNumber?: string;
-  // users.profile_picture_file_id (files-row id) — resolved to a blob URL per
+  // users.profile_picture_file_id (files-row id) โ€” resolved to a blob URL per
   // row via useProfilePicture for the account table's avatar (initials
   // fallback when unset/loading/failed).
   profilePictureFileId?: string;
@@ -171,7 +183,7 @@ export interface AdminUserSummary {
   // avatar initials, and search) derived from firstName + lastName on save; the
   // DBML itself has no single "name"/"display_name" column on `patients` the way
   // User.displayName covers Therapist/Admin. affectedSide was DROPPED entirely
-  // rather than kept alongside these — this DBML's `patients` table has no such
+  // rather than kept alongside these โ€” this DBML's `patients` table has no such
   // column, so it doesn't belong here; if the app still needs it, that's a
   // decision for wherever it's actually used (exercise assignment?), not this row.
   firstName?: string;
@@ -213,13 +225,96 @@ export interface SystemLogEntry {
 
 export type ExerciseTrackingType = "pose" | "virtual_grip" | "none";
 
+// Minigame type for virtual_grip exercises โ€” stored in base_criteria as JSON.
+// PatientSessionPage reads this to know which hand-tracking minigame to load.
+export type HandTrackingGameType = "ball-grip" | "path-drag" | "falling-cup";
+
+export interface DetectedObject {
+  label: string;
+  score: number;
+  boundingBox: { originX: number; originY: number; width: number; height: number };
+}
+
+export interface TrackedItem {
+  label: string;
+  centroid: { x: number; y: number };
+  boundingBox: { originX: number; originY: number; width: number; height: number };
+  score: number;
+  framesSinceSeen: number;
+}
+
+export type PathType = "straight" | "curve" | "zigzag" | "mixed";
+export type PathWidthLevel = "wide" | "medium" | "narrow";
+export type PathSegmentKind = "straight" | "curve" | "zigzag";
+
+export interface PathGameConfig {
+  pathType: PathType;
+  widthLevel: PathWidthLevel;
+  roundTimeSec: number;
+  totalRounds: number;
+}
+
+export interface PathRoundResult {
+  roundNumber: number;
+  pathType: PathType;
+  segmentKinds: PathSegmentKind[];
+  completed: boolean;
+  skipped: boolean;
+  progressRatio: number;
+  timeUsedSec: number;
+  timeLimitSec: number;
+  accuracyScore: number;
+  accuracyMeasured: boolean;
+  onPathRatio: number;
+  dropCount: number;
+  feedbackText: string;
+}
+
+export interface PathGameSnapshot {
+  phase: PathGamePhase;
+  roundNumber: number;
+  totalRounds: number;
+  path: GamePath | null;
+  progressLength: number;
+  progressRatio: number;
+  timeLimitSec: number;
+  timeRemainingSec: number;
+  timeRemainingRatio: number;
+  holding: boolean;
+  currentDistance: number | null;
+  onPath: boolean | null;
+  liveAccuracy: number | null;
+  dropCount: number;
+  lastResult: PathRoundResult | null;
+}
+
 export type ExerciseLibraryDifficulty = "easy" | "medium" | "hard";
 
+// Minigame type for virtual_grip exercises โ€” stored in base_criteria as JSON.
+
+export type PathGamePhase = "ready" | "dragging" | "roundEnd" | "gameOver";
+
+export interface GamePath {
+  type: PathType;
+  segmentKinds: PathSegmentKind[];
+  points: PathPoint[];
+  cumulative: number[];
+  totalLength: number;
+  halfWidth: number;
+  direction: 1 | -1;
+}
+
+export type PathPoint = {
+  x: number;
+  y: number;
+};
+
+// Minigame type for virtual_grip exercises โ€” stored in base_criteria as JSON.
 export type ExerciseLibraryStatus = "draft" | "active" | "archived";
 
 // Base evaluation criteria, shaped by movement_tracking (newdb.txt's
 // exercise_library.base_criteria json). Only the fields relevant to the exercise's
-// movement_tracking are expected to be set — see UI_MOCKUP_PLAN_NEWDB.md §2.5.
+// movement_tracking are expected to be set โ€” see UI_MOCKUP_PLAN_NEWDB.md ยง2.5.
 export interface ExerciseBaseCriteria {
   targetAngleDeg?: number;
   targetGripStrength?: number;
@@ -233,10 +328,12 @@ export interface ExerciseBaseCriteria {
    * pose-scoring module.
    */
   poseReference?: Record<string, unknown>;
+  /** Minigame type for virtual_grip exercises โ€” stored in base_criteria as JSON. PatientSessionPage reads baseCriteria.virtualGripGameType to know which hand-tracking minigame to load. */
+  virtualGripGameType?: HandTrackingGameType;
 }
 
 // One row in an exercise family's version history (newdb.txt's exercise_library,
-// grouped by parent_exercise_id). Lighter-weight than ExerciseLibraryItem — just
+// grouped by parent_exercise_id). Lighter-weight than ExerciseLibraryItem โ€” just
 // enough to render the History panel's version list AND, on click, that old
 // version's own read-only detail view (name/description/tracking/demo video can
 // differ per version, so they come from the row itself).
@@ -281,11 +378,11 @@ export interface ExerciseLibraryItem {
   createdById?: string;
 
   // Full version history for this parent_exercise_id, including this row itself,
-  // newest first. Powers the "History" panel (UI_MOCKUP_PLAN_NEWDB.md §2.5).
+  // newest first. Powers the "History" panel (UI_MOCKUP_PLAN_NEWDB.md ยง2.5).
   versions: ExerciseVersionSummary[];
 }
 
-// --- File Picker / Uploader (shared component, UI_MOCKUP_PLAN_NEWDB.md §2.4).
+// --- File Picker / Uploader (shared component, UI_MOCKUP_PLAN_NEWDB.md ยง2.4).
 // Backs every `*_file_id` column in newdb.txt's `files` table: profile pictures,
 // medical_history_attachments, exercise_library.demo_video_file_id,
 // exercise_performance_results.reference_video. Mirrors
@@ -302,21 +399,21 @@ export interface PickedFile {
   sizeLabel: string;
   previewUrl: string;
   uploadedAtLabel: string;
-  // Video only, formatted m:ss (best-effort — read from the browser's decoded
+  // Video only, formatted m:ss (best-effort โ€” read from the browser's decoded
   // metadata, so may be briefly absent right after upload).
   durationLabel?: string;
 }
 
-// --- Patient Detail (Therapist view, frontend-design.md §5, revised per
-// UI_MOCKUP_PLAN_NEWDB.md §2.3 for patient_medical_history/medical_history_attachments,
-// §2.7 for exercise_performance_results' AI/PT review split, and modeled directly on
+// --- Patient Detail (Therapist view, frontend-design.md ยง5, revised per
+// UI_MOCKUP_PLAN_NEWDB.md ยง2.3 for patient_medical_history/medical_history_attachments,
+// ยง2.7 for exercise_performance_results' AI/PT review split, and modeled directly on
 // patient_rehabilitation_plans/rehabilitation_schedule_days for the plan
 // selector + calendar). Mirrors docs/04-design/mockups/patient-detail.html plus a
 // later layout revision (multi-plan calendar block). Mock data in
 // data/patientDetailMock.ts; page in pages/PatientDetailPage.tsx. "Add record",
 // attachments (via FilePicker), and plan create/edit are all real client-side
 // state; "Review"/"Generate summary report" are stubs pending Session Result
-// Review's own persistence and a reporting backend respectively — see inline
+// Review's own persistence and a reporting backend respectively โ€” see inline
 // comments in the page component.
 
 export type MedicalRecordType =
@@ -335,11 +432,11 @@ export interface MedicalHistoryRecord {
   dateLabel: string;
   recordedByLabel: string;
   // Rendered as a small key-value row, never raw JSON, per
-  // UI_MOCKUP_PLAN_NEWDB.md §4's design assumption for `assessment_data`.
+  // UI_MOCKUP_PLAN_NEWDB.md ยง4's design assumption for `assessment_data`.
   details?: Array<{ label: string; value: string }>;
   // Real medical_history_attachments rows, rendered via the FilePicker component.
   // Pre-seeded mock records may have attachments the mock data doesn't actually
-  // hold files for — see data/patientDetailMock.ts's comments for which is which.
+  // hold files for โ€” see data/patientDetailMock.ts's comments for which is which.
   attachments: PickedFile[];
 }
 
@@ -387,7 +484,7 @@ export interface TherapistExerciseSessionEntry extends TherapistSessionLogEntry 
 }
 
 // Matches newdb.txt's patient_rehabilitation_plans_status enum exactly (draft/
-// active/paused/completed/cancelled) — a patient can have several plans over
+// active/paused/completed/cancelled) โ€” a patient can have several plans over
 // time (a completed baseline assessment plan, the current active one, etc.), not
 // just one, per that table's design. Replaces the earlier PatientProgramSummary,
 // which modeled only a single "current program".
@@ -395,10 +492,10 @@ export type RehabPlanStatus = "draft" | "active" | "paused" | "completed" | "can
 
 // One row from patient_rehabilitation_plans, plus its derived day-by-day calendar.
 // `heatmap` is one entry per rehabilitation_schedule_days row for this plan, in
-// date order starting at startDateLabel — there's no separate "current day"
+// date order starting at startDateLabel โ€” there's no separate "current day"
 // column in the schema; that's derived from how many days aren't `pending` yet
 // (see PatientDetailPage.tsx's planProgress()).
-// --- Program Editor (PT_EXERCISE_PATH_MOCKUP_PLAN.md §4.1). Models
+// --- Program Editor (PT_EXERCISE_PATH_MOCKUP_PLAN.md ยง4.1). Models
 // rehabilitation_schedule_days + scheduled_exercises from newdb.txt: each day in a
 // plan can carry its own ordered list of assigned exercises, each pointing back at
 // an ExerciseLibraryItem. Mirrors docs/04-design/mockups/program-editor.html.
@@ -421,6 +518,7 @@ export interface ScheduledExercise {
   therapistInstruction?: string;
   status: ScheduledExerciseStatus;
   performanceResults?: any[];
+  baseCriteria?: ExerciseBaseCriteria; // exercise_library.base_criteria carried through for session scoring
 }
 
 export interface ScheduleDay {
@@ -456,7 +554,7 @@ export interface PlanAttachment {
 }
 
 // `heatmap` stays exactly as-is (PatientDetailPage's calendar cells already render
-// from it) — `days` is added alongside it, same length/order, one entry per
+// from it) โ€” `days` is added alongside it, same length/order, one entry per
 // rehabilitation_schedule_days row, so existing calendar code needs no changes.
 export interface PatientRehabPlan {
   id: string;
@@ -477,7 +575,7 @@ export interface PatientDetailProfile {
   age: number;
   affectedSide: "Left" | "Right" | "Both" | "None";
   patientCode: string;
-  // Every plan this patient has ever had, newest first — the Progress calendar
+  // Every plan this patient has ever had, newest first โ€” the Progress calendar
   // shows whichever one the PT has selected (defaulting to the active one), and
   // the plan selector lets them switch. Empty array is valid (no plan created yet).
   plans: PatientRehabPlan[];
@@ -493,7 +591,7 @@ export interface PatientDetailProfile {
 // calendar-grid rendering logic (weekday header + Sun-first month layout from a
 // startDateLabel) can be shared between the two pages instead of reinvented.
 // Extends the plan's plain per-day status with the exercises actually attempted
-// that day (with per-exercise scores) — a bare heatmap can answer "was this day
+// that day (with per-exercise scores) โ€” a bare heatmap can answer "was this day
 // completed" but not "what did I do that day", which the calendar drill-down
 // (clicking a day) needs. Mock data in data/patientHistoryMock.ts; page in
 // pages/PatientHistoryPage.tsx.
@@ -514,25 +612,25 @@ export interface PatientHistoryPlan {
   name: string;
   status: RehabPlanStatus;
   // One entry per rehabilitation_schedule_days row for this plan, in date order
-  // starting at startDateLabel — same anchoring convention as
+  // starting at startDateLabel โ€” same anchoring convention as
   // PatientRehabPlan.heatmap above.
   startDateLabel: string;
   endDateLabel?: string;
   days: PatientHistoryDay[];
 }
 
-// --- Session Result Review (frontend-design.md §2.7, new page — no prior spec
-// section, only UI_MOCKUP_PLAN_NEWDB.md §2.7). Mirrors
+// --- Session Result Review (frontend-design.md ยง2.7, new page โ€” no prior spec
+// section, only UI_MOCKUP_PLAN_NEWDB.md ยง2.7). Mirrors
 // docs/04-design/mockups/session-result-review.html. Reached from Patient Detail's
-// per-session "Review ›" action. Models newdb.txt's exercise_performance_results:
+// per-session "Review โ€บ" action. Models newdb.txt's exercise_performance_results:
 // one row per completed attempt of a scheduled_exercise, with separate AI and PT
 // evaluation fields plus a final_score/evaluation_source recording which one (or a
 // manual override) was selected as the official result.
 //
 // Mock data in data/sessionReviewMock.ts; page in pages/SessionResultReviewPage.tsx.
 // "Use AI score"/"Use my score" are real client-side state updates (no backend
-// endpoint exists for exercise_performance_results yet — see
-// UI_MOCKUP_PLAN_NEWDB.md §5 for why: the running schema has no ai_score/pt_score/
+// endpoint exists for exercise_performance_results yet โ€” see
+// UI_MOCKUP_PLAN_NEWDB.md ยง5 for why: the running schema has no ai_score/pt_score/
 // evaluation_source/final_score split at all yet, only a single `score` column).
 
 export type EvaluationDecisionSource = "ai" | "pt" | "manual";
@@ -541,7 +639,7 @@ export interface ExercisePerformanceAttempt {
   id: string;
   attemptNumber: number;
   completedAtIso?: string | null;
-  // Placeholder only for mock attempts — real attempts (from
+  // Placeholder only for mock attempts โ€” real attempts (from
   // GET /schedule-days/:id/results) carry the server files-row id here, which
   // the review page streams via GET /files/:fileId/content.
   referenceVideo: PickedFile | null;
@@ -555,7 +653,7 @@ export interface ExercisePerformanceAttempt {
   therapistReviewed?: boolean;
   // Rendered as small key-value pairs, never raw JSON, matching the design
   // assumption already applied to MedicalHistoryRecord.details and
-  // ExerciseLibraryItem.baseCriteria (UI_MOCKUP_PLAN_NEWDB.md §4).
+  // ExerciseLibraryItem.baseCriteria (UI_MOCKUP_PLAN_NEWDB.md ยง4).
   aiMetrics?: Array<{ label: string; value: string }>;
   aiEvaluatedAtLabel?: string;
 
@@ -571,7 +669,7 @@ export interface SessionExerciseReview {
   id: string;
   exerciseName: string;
   // exercise_library.id this scheduled_exercise points to, plus its version badge
-  // for display (e.g. "v3") — links back to ExerciseLibraryItem.versionNumber.
+  // for display (e.g. "v3") โ€” links back to ExerciseLibraryItem.versionNumber.
   exerciseVersionLabel?: string;
   description?: string | null;
   difficultyLevel?: string;
@@ -594,10 +692,10 @@ export interface SessionReviewData {
   exercises: SessionExerciseReview[];
 }
 
-// --- Session video capture / upload confirm (CAMERA_TRACKING_MOCKUP_PLAN.md §6).
+// --- Session video capture / upload confirm (CAMERA_TRACKING_MOCKUP_PLAN.md ยง6).
 // Client-side shape for what a confirmed upload sends to
-// POST /scheduled-exercises/:id/results (backend session-results module) — see
-// the plan's §6.1 schema-mapping table. Held in App.tsx between
+// POST /scheduled-exercises/:id/results (backend session-results module) โ€” see
+// the plan's ยง6.1 schema-mapping table. Held in App.tsx between
 // PatientSessionPage's STOP/handoff and SessionUploadConfirmPage's
 // Confirm/Retry/Discard actions. The raw video Blob rides along here (the
 // object URL is only for preview) so Confirm can actually upload it.
@@ -607,7 +705,7 @@ export interface PendingSessionAttempt {
   exerciseNameTh?: string;
   trackingType: TrackingType;
   videoBlobUrl: string;
-  // The real recording bytes — sent to POST /scheduled-exercises/:id/results on
+  // The real recording bytes โ€” sent to POST /scheduled-exercises/:id/results on
   // Confirm and stored via the backend files module.
   videoBlob: Blob;
   videoFileName: string;

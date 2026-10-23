@@ -11,7 +11,7 @@
 // exercise_performance_results row, and marks the exercise/day completed —
 // then App.tsx's onConfirm updates the local Today/Progress state to match.
 
-import { AlertCircle, Loader2, RotateCcw, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertCircle, Loader2, RotateCcw, Trash2, UploadCloud } from "lucide-react";
 import { useState } from "react";
 import { PoseVideoPlayer } from "../components/PoseVideoPlayer";
 import { submitExerciseResult } from "../services/api";
@@ -34,6 +34,13 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const roundScores = attempt.repScores ?? [];
+  const averageScore = roundScores.length > 0
+    ? Math.round(roundScores.reduce((sum, score) => sum + score, 0) / roundScores.length)
+    : attempt.aiScore;
+  const scoreRange = roundScores.length > 0
+    ? `${Math.min(...roundScores)} - ${Math.max(...roundScores)}`
+    : "—";
 
   const handleConfirm = async () => {
     if (!token) {
@@ -79,35 +86,19 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
           <div className="srr-video-col">
             <p className="pd-record-attachments-label">วิดีโอของคุณ · ครั้งที่ {attemptNumber} (เมื่อยืนยัน)</p>
             <PoseVideoPlayer src={attempt.videoBlobUrl} trackingType={attempt.trackingType} />
-            <p>
-              {attempt.videoFileName} &middot; {attempt.videoSizeLabel}
-            </p>
           </div>
 
           <div>
             <div className="srr-score-panel">
               <div className="srr-score-panel-top">
-                <strong className="sud-ai-title">
-                  <Sparkles size={14} /> ความเห็นจาก AI
-                </strong>
-                <span className="srr-score-value">{attempt.aiScore}</span>
+                <strong>คะแนนเฉลี่ย</strong>
+                <span className="srr-score-value">{averageScore}/100</span>
               </div>
-              <p>{attempt.aiFeedback}</p>
-              {attempt.aiMetrics.length > 0 && (
-                <div className="srr-metrics-list">
-                  {attempt.aiMetrics.map((metric) => (
-                    <span key={metric.label}>
-                      {metric.label}: <strong>{metric.value}</strong>
-                    </span>
-                  ))}
-                </div>
-              )}
+              <div className="srr-metrics-list">
+                <span>ช่วงคะแนน: <strong>{scoreRange}</strong></span>
+                <span>จำนวนรอบที่ทำ: <strong>{attempt.repsCompleted ?? 0}</strong></span>
+              </div>
             </div>
-            <p className="pd-modal-hint sud-hint">
-              {attempt.scoreSource === "pose_average"
-                ? "คะแนนนี้เป็นค่าเฉลี่ยโดยประมาณของจำนวนครั้งที่ AI ประเมินผลสำเร็จจากวิดีโอนี้ นักกายภาพบำบัดยังสามารถตรวจสอบและเพิ่มคะแนนของตนเองได้ภายหลัง"
-                : "คะแนนนี้เป็นเพียงตัวอย่าง — ยังไม่มีการเชื่อมต่อการประเมินด้วย AI สำหรับโหมดติดตามนี้ นักกายภาพบำบัดยังสามารถตรวจสอบวิดีโอนี้และเพิ่มคะแนนของตนเองได้ภายหลัง"}
-            </p>
           </div>
         </div>
 

@@ -20,7 +20,7 @@ import {
 } from "../services/api";
 import { useAuth } from "../store/authStore";
 import { useProfilePicture } from "../hooks/useProfilePicture";
-import type { PatientProgressTrend, TherapistPatientSummary } from "../types";
+import type { PatientProgressTrend, ScheduledExerciseStatus, TherapistPatientSummary } from "../types";
 import { initialsFromName } from "../utils/displayName";
 import { ISO_DATE_RE } from "../utils/rehabPlan";
 
@@ -45,6 +45,57 @@ const WEEKDAY_LABELS: Record<string, string> = {
   Sat: "ส.",
   Sun: "อา."
 };
+
+const SCORE_COLOR_STOPS = [
+  { score: 0, color: [239, 68, 68] },
+  { score: 50, color: [245, 158, 11] },
+  { score: 100, color: [34, 197, 94] }
+];
+const SCORE_CHART_TOP = 8;
+const SCORE_CHART_BOTTOM = 170;
+
+function scoreColor(score: number): string {
+  const boundedScore = Math.max(0, Math.min(100, score));
+  const lower = boundedScore <= 50 ? SCORE_COLOR_STOPS[0] : SCORE_COLOR_STOPS[1];
+  const upper = boundedScore <= 50 ? SCORE_COLOR_STOPS[1] : SCORE_COLOR_STOPS[2];
+  const progress = (boundedScore - lower.score) / (upper.score - lower.score);
+  const channels = lower.color.map((channel, index) =>
+    Math.round(channel + (upper.color[index] - channel) * progress)
+  );
+  return `rgb(${channels.join(", ")})`;
+}
+
+function ScoreDot({
+  cx,
+  cy,
+  value,
+  r = 4
+}: {
+  cx?: number;
+  cy?: number;
+  value?: unknown;
+  r?: number | string;
+}) {
+  if (cx === undefined || cy === undefined || typeof value !== "number" || !Number.isFinite(value)) return null;
+  return <circle cx={cx} cy={cy} r={r} fill={scoreColor(value)} stroke="var(--bg)" strokeWidth={1.5} />;
+}
+
+function ScoreGradient({ id }: { id: string }) {
+  return (
+    <linearGradient
+      id={id}
+      gradientUnits="userSpaceOnUse"
+      x1="0"
+      y1={SCORE_CHART_BOTTOM}
+      x2="0"
+      y2={SCORE_CHART_TOP}
+    >
+      <stop offset="0%" stopColor={scoreColor(0)} />
+      <stop offset="50%" stopColor={scoreColor(50)} />
+      <stop offset="100%" stopColor={scoreColor(100)} />
+    </linearGradient>
+  );
+}
 
 const CONDITION_LABELS: Record<string, string> = {
   "Ischemic Stroke": "โรคหลอดเลือดสมองชนิดขาดเลือด",
@@ -88,6 +139,7 @@ function planStatusLabel(status: string): string {
 interface ChartPlanExercise {
   // Raw exercise_performance_result rows: attemptNumber + finalScore/ptScore/aiScore.
   performanceResults: any[];
+  status: ScheduledExerciseStatus;
 }
 
 interface ChartPlanDay {
@@ -133,7 +185,8 @@ function mapPlansForChart(serverPlans: any[]): ChartPlan[] {
       days: (sp.scheduleDays ?? []).map((sd: any) => ({
         dateLabel: sd.scheduledDate ? isoSliceDate(sd.scheduledDate) : null,
         exercises: (sd.scheduledExercises ?? []).map((ex: any) => ({
-          performanceResults: ex.performanceResults ?? []
+          performanceResults: ex.performanceResults ?? [],
+          status: ex.status ?? "pending"
         }))
       }))
     };
@@ -171,6 +224,10 @@ function latestExerciseScore(results: any[]): number | null {
 function planDayPoint(day: ChartPlanDay | null, key: string, label: string, longLabel: string): PlanDayPoint {
   const scores: number[] = [];
   for (const exercise of day?.exercises ?? []) {
+    if (exercise.status === "skipped") {
+      scores.push(0);
+      continue;
+    }
     const score = latestExerciseScore(exercise.performanceResults);
     if (score !== null) scores.push(score);
   }
@@ -178,12 +235,28 @@ function planDayPoint(day: ChartPlanDay | null, key: string, label: string, long
     key,
     label,
     longLabel,
-    // Average across the exercises that HAVE a score — an unscored exercise
-    // never drags the day down as a phantom 0, and a day with no scores at all
-    // stays null (a gap in the line, never a fabricated number).
+    // Skipped exercises count as zero; other unscored exercises are omitted.
+    // A day with no scored or skipped exercises stays null (a graph gap).
     score: scores.length > 0 ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length) : null,
     scoredExercises: scores.length
   };
+}
+
+function planAverageScore(plan: ChartPlan | null): number | null {
+  const scores: number[] = [];
+  for (const day of plan?.days ?? []) {
+    for (const exercise of day.exercises) {
+      if (exercise.status === "skipped") {
+        scores.push(0);
+        continue;
+      }
+      const score = latestExerciseScore(exercise.performanceResults);
+      if (score !== null) scores.push(score);
+    }
+  }
+  return scores.length > 0
+    ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
+    : null;
 }
 
 // One point per calendar day from the plan's earliest to latest scheduled date
@@ -427,16 +500,9 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
   const trendPatient = trendPatientId ? (patients.find((p) => p.id === trendPatientId) ?? null) : null;
   const selectedPlan = planOptions.find((plan) => plan.id === trendPlanId) ?? null;
   const planPoints = useMemo(() => buildPlanDayPoints(selectedPlan), [selectedPlan]);
-  // Delta badge — plan mode: first vs last SCORED day of the selected plan;
-  // weekly mode: first vs last point of the existing report trend (unchanged).
-  const scoredPlanPoints = planPoints.filter(
-    (point): point is PlanDayPoint & { score: number } => point.score !== null
-  );
-  const trendDelta = selectedPlan
-    ? scoredPlanPoints.length > 1
-      ? scoredPlanPoints[scoredPlanPoints.length - 1].score - scoredPlanPoints[0].score
-      : null
-    : trend && trend.points.length > 1
+  const selectedPlanAverage = planAverageScore(selectedPlan);
+  const trendDelta =
+    !selectedPlan && trend && trend.points.length > 1
       ? trend.points[trend.points.length - 1].score - trend.points[0].score
       : null;
 
@@ -542,12 +608,16 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                       </option>
                     ))}
                   </select>
-                  {trendDelta !== null && (
+                  {selectedPlanAverage !== null ? (
+                    <span className="badge-pill">
+                      คะแนนเฉลี่ย {selectedPlanAverage}
+                    </span>
+                  ) : trendDelta !== null ? (
                     <span className={`badge-pill ${trendDelta >= 0 ? "good" : "poor"}`}>
                       {trendDelta >= 0 ? "+" : ""}
                       {trendDelta}pts
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
               {trendLoading || planOptionsLoading ? (
@@ -564,6 +634,9 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                 planPoints.length > 0 ? (
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={planPoints} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                      <defs>
+                        <ScoreGradient id="plan-score-gradient" />
+                      </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                       <XAxis
                         dataKey="label"
@@ -585,10 +658,10 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                       <Line
                         type="monotone"
                         dataKey="score"
-                        stroke="var(--primary)"
+                        stroke="url(#plan-score-gradient)"
                         strokeWidth={2.5}
-                        dot={{ fill: "var(--primary)", r: 4, strokeWidth: 0 }}
-                        activeDot={{ r: 6 }}
+                        dot={ScoreDot}
+                        activeDot={(props) => <ScoreDot {...props} r={6} />}
                         connectNulls={false}
                       />
                     </LineChart>
@@ -601,7 +674,10 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                 )
               ) : trend && trend.points.length > 0 ? (
                 <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={trend.points}>
+                  <LineChart data={trend.points} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                    <defs>
+                      <ScoreGradient id="trend-score-gradient" />
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="week" tick={{ fontSize: 12, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} />
                     <YAxis
@@ -617,10 +693,10 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                     <Line
                       type="monotone"
                       dataKey="score"
-                      stroke="var(--primary)"
+                      stroke="url(#trend-score-gradient)"
                       strokeWidth={2.5}
-                      dot={{ fill: "var(--primary)", r: 4, strokeWidth: 0 }}
-                      activeDot={{ r: 6 }}
+                      dot={ScoreDot}
+                      activeDot={(props) => <ScoreDot {...props} r={6} />}
                     />
                   </LineChart>
                 </ResponsiveContainer>

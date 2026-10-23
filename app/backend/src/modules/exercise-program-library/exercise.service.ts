@@ -52,6 +52,8 @@ import { prisma } from "../../config/prisma";
 import type { Prisma } from "@prisma/client";
 
 export type ExerciseTrackingType = "pose" | "virtual_grip" | "none";
+// Minigame type for virtual_grip exercises — stored in base_criteria as JSON.
+export type HandTrackingGameType = "ball-grip" | "path-drag" | "falling-cup";
 export type ExerciseDifficulty = "easy" | "medium" | "hard";
 export type ExerciseStatus = "draft" | "active" | "archived";
 
@@ -68,6 +70,8 @@ export interface ExerciseBaseCriteria {
    * module's resolvePoseReference().
    */
   poseReference?: Record<string, unknown>;
+  /** Minigame type for virtual_grip exercises — stored in base_criteria as JSON. PatientSessionPage reads baseCriteria.virtualGripGameType to know which hand-tracking minigame to load. */
+  virtualGripGameType?: HandTrackingGameType;
 }
 
 export interface ExerciseVersionSummary {

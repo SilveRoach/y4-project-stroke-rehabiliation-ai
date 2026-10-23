@@ -502,7 +502,7 @@ input:focus {
 
 .today-grid {
   display: grid;
-  gap: 18px;
+  gap: 4px 18px;
   padding: 20px 20px 100px;
 }
 
@@ -5065,6 +5065,18 @@ div.exercise-card:hover {
   background: var(--bg);
 }
 
+.ai-checkpoint-card.checkpoint-start {
+  border-left: 3px solid var(--success);
+}
+
+.ai-checkpoint-card.checkpoint-middle {
+  border-left: 3px solid var(--warning);
+}
+
+.ai-checkpoint-card.checkpoint-end {
+  border-left: 3px solid var(--error);
+}
+
 .ai-checkpoint-card > div {
   min-width: 0;
   flex: 1;
@@ -6025,6 +6037,18 @@ div.exercise-card:hover {
 .pd-calendar-cell.needs_review,
 .pd-legend-dot.needs_review {
   background: var(--warning);
+  color: #ffffff;
+}
+
+.pd-calendar-cell.mixed_review,
+.pd-legend-dot.mixed_review {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--success) 0,
+    var(--success) 5px,
+    var(--warning) 5px,
+    var(--warning) 10px
+  );
   color: #ffffff;
 }
 
@@ -10529,11 +10553,32 @@ tr.admin-user-row:hover .admin-row-open-hint {
   padding-bottom: 12px;
 }
 
-.pei-topbar .sidebar-link {
-  min-height: 0;
-  padding: 4px 0;
-  margin-bottom: 4px;
+.pei-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
   color: var(--primary);
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.pei-back-button:hover {
+  transform: translateX(-2px);
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.pei-back-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 /* Clickable session-log rows (TherapistSessionsPage) — the whole row opens the
@@ -10552,8 +10597,7 @@ tr.admin-user-row:hover .admin-row-open-hint {
    shared CSS variables, so no new palette is introduced. --- */
 
 /* Mixed step flow: a two-column grid where lighter cards pair up row by row
-   (Step 1 | Step 2, Step 3 | Step 4, Step 5 | Step 6) and the dense step
-   (7) opts into a full-width row via .ai-card-full. Fills main's full
+   and dense pose setup steps span both columns. Fills main's full
    content width so the rows line up with the heading/banners above (no empty
    strip on the right). */
 .ai-author-stack {
@@ -10562,6 +10606,11 @@ tr.admin-user-row:hover .admin-row-open-hint {
   gap: 18px;
   align-content: start;
 }
+
+.ai-author-stack:not(.manual) > .ai-setup-card { order: 1; }
+.ai-author-stack:not(.manual) > .ai-base-demo-step { order: 2; }
+.ai-author-stack:not(.manual) > .ai-pose-setup-step { order: 3; }
+.ai-author-stack:not(.manual) > .ai-save-step { order: 4; }
 
 /* Cards that should span both columns of the stack. */
 .ai-card-full {
@@ -10574,10 +10623,68 @@ tr.admin-user-row:hover .admin-row-open-hint {
   margin-bottom: 0;
 }
 
-/* Step 6 (movement checkpoints) sits in a half-width column — stack its
-   checkpoint cards instead of squeezing 3 across ~450px. */
+/* The checkpoint card grid uses full-width workspace spacing. */
 .ai-author-stack > section:not(.ai-card-full) .ai-checkpoint-grid {
   grid-template-columns: 1fr;
+}
+
+.ai-pose-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.ai-pose-setup-step {
+  align-self: start;
+  padding: 14px 16px;
+}
+
+.ai-pose-setup-step > .ai-card-step-tag {
+  margin-bottom: 8px;
+}
+
+.ai-pose-preview-column {
+  min-width: 0;
+}
+
+.ai-pose-setup-step .creation-section-header {
+  gap: 9px;
+  margin-bottom: 8px;
+}
+
+.ai-pose-setup-step .creation-section-header strong {
+  margin-bottom: 2px;
+}
+
+.ai-checkpoint-details {
+  min-width: 0;
+  padding-top: 82px;
+}
+
+.ai-pose-content-grid .ai-checkpoint-grid {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.ai-pose-content-grid .ai-checkpoint-card {
+  align-items: flex-start;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.ai-pose-content-grid .ai-checkpoint-number {
+  flex: 0 0 25px;
+}
+
+.ai-pose-content-grid .ai-checkpoint-card strong {
+  overflow-wrap: anywhere;
+}
+
+.ai-pose-setup-step > .ai-landmark-setup,
+.ai-pose-setup-step > .ai-landmark-scrubber {
+  width: 100%;
 }
 
 /* Step 1 (การตั้งค่าท่า): the card stretches to its grid row height (Step 2's
@@ -10586,6 +10693,17 @@ tr.admin-user-row:hover .admin-row-open-hint {
 .ai-setup-card {
   display: flex;
   flex-direction: column;
+}
+
+.ai-base-demo-step {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-base-demo-actions {
+  display: flex;
+  flex-direction: column;
+  margin-top: auto;
 }
 
 .ai-setup-card > .ai-field:last-child {
@@ -10853,6 +10971,219 @@ tr.admin-user-row:hover .admin-row-open-hint {
   display: block;
 }
 
+.ai-landmark-setup {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.ai-landmark-timeline-title {
+  color: var(--text-primary);
+  font-size: 0.88rem;
+}
+
+.ai-landmark-instruction {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.ai-landmark-track {
+  position: relative;
+  height: 34px;
+  margin: 0 10px;
+  touch-action: none;
+}
+
+.ai-landmark-track::before,
+.ai-landmark-track-fill {
+  position: absolute;
+  top: 50%;
+  height: 6px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+}
+
+.ai-landmark-track::before {
+  right: 0;
+  left: 0;
+  background: var(--border);
+  content: "";
+}
+
+.ai-landmark-track-fill {
+  right: 0;
+  left: 0;
+  background: linear-gradient(90deg, var(--success), var(--warning) 50%, var(--error));
+}
+
+.ai-landmark-pin {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  padding: 0;
+  transform: translate(-50%, -50%) scale(1);
+  box-shadow: 0 0 0 2px currentColor, 0 1px 4px rgba(15, 23, 42, 0.35);
+  cursor: grab;
+  touch-action: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ai-landmark-pin.selected {
+  z-index: 2;
+  transform: translate(-50%, -50%) scale(1.45);
+  box-shadow: 0 0 0 3px currentColor, 0 2px 7px rgba(15, 23, 42, 0.4);
+}
+
+.ai-landmark-pin:active {
+  cursor: grabbing;
+}
+
+.ai-landmark-pin.start {
+  background: var(--success);
+  color: var(--success);
+}
+
+.ai-landmark-pin.middle {
+  background: var(--warning);
+  color: var(--warning);
+}
+
+.ai-landmark-pin.end {
+  background: var(--error);
+  color: var(--error);
+}
+
+.ai-landmark-pin:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 4px;
+}
+
+.ai-landmark-pin:disabled {
+  cursor: not-allowed;
+}
+
+.ai-landmark-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-landmark-value {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-left: 3px solid currentColor;
+  border-radius: 8px;
+  padding: 7px 8px;
+}
+
+.ai-landmark-value.start {
+  color: var(--success);
+}
+
+.ai-landmark-value.middle {
+  color: #d97706;
+}
+
+.ai-landmark-value.end {
+  color: var(--error);
+}
+
+.ai-landmark-value strong {
+  font-size: 0.72rem;
+}
+
+.ai-landmark-value span {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.ai-landmark-scrubber {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.ai-landmark-scrubber label {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.ai-landmark-scrubber input {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.ai-extra-clips {
+  display: flex;
+  flex-direction: column;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.ai-extra-clips-content {
+  order: 1;
+}
+
+.ai-extra-clips-toggle {
+  order: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  color: var(--primary);
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ai-extra-clips-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.ai-extra-clips-toggle::after {
+  content: "⌄";
+  margin-left: auto;
+  transition: transform 0.15s ease;
+}
+
+.ai-extra-clips[open] > .ai-extra-clips-toggle::after {
+  transform: rotate(180deg);
+}
+
+.ai-extra-clips-toggle:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.ai-extra-clips-counts {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.ai-extra-clips-content {
+  display: grid;
+  gap: 16px;
+  padding-top: 12px;
+}
+
+.ai-extra-clip-field + .ai-extra-clip-field {
+  border-top: 1px solid var(--border-light);
+  padding-top: 16px;
+}
+
 /* Replayable demo video in Step 2 (ExerciseAiPage) — the locally selected clip
    or the exercise's saved demo video (fetched back via GET /files/:id/content),
    framed like the scan/preview canvas so the card doesn't jump between states. */
@@ -10956,6 +11287,22 @@ tr.admin-user-row:hover .admin-row-open-hint {
 @media (max-width: 1100px) {
   .ai-author-stack {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .ai-pose-content-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .ai-checkpoint-details {
+    padding-top: 0;
+  }
+
+  .ai-pose-setup-step > .ai-landmark-setup,
+  .ai-pose-setup-step > .ai-landmark-scrubber {
+    width: 100%;
   }
 }
 
@@ -11156,6 +11503,27 @@ tr.admin-user-row:hover .admin-row-open-hint {
   margin-top: 4px;
 }
 
+.ai-bve-option-group {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.ai-bve-sensitivity {
+  display: grid;
+  gap: 8px;
+  margin-left: 26px;
+}
+
+.ai-bve-sensitivity > strong {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+}
+
+.ai-bve-sensitivity.disabled {
+  opacity: 0.5;
+}
+
 .ai-technique-option {
   display: flex;
   align-items: flex-start;
@@ -11220,6 +11588,26 @@ tr.admin-user-row:hover .admin-row-open-hint {
 
 .ai-author-stack.manual .ai-manual-criteria-card {
   display: grid;
+}
+
+.ai-author-stack.hand-tracking {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ai-author-stack.hand-tracking > section:nth-of-type(n + 3):not(.ai-manual-criteria-card) {
+  display: none;
+}
+
+.ai-author-stack.hand-tracking > .ai-manual-criteria-card {
+  display: grid;
+  grid-column: 1 / -1;
+  order: 3;
+}
+
+@media (max-width: 1100px) {
+  .ai-author-stack.hand-tracking {
+    grid-template-columns: 1fr;
+  }
 }
 
 .ai-author-stack.readonly {
