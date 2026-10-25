@@ -30,6 +30,7 @@ import {
 } from "../ai/poseScoring/exerciseAutoCalibrator";
 import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
 import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
+import { inferTechniqueFlags, techniqueFramesFromLandmarks } from "../ai/poseScoring/exerciseTechniqueFlags";
 import type { ExerciseFSMConfig, FrameFeature, AngleDefinition, PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
 import { ApiError, archiveExercise, createExercise, createExerciseVersion, getFileContent, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
 import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType, HandTrackingGameType, PatientExercise } from "../types";
@@ -314,14 +315,6 @@ export function ExerciseAiPage({
   const [targetRom, setTargetRom] = useState(90);
   const [bveThreshold, setBveThreshold] = useState(0.15);
   const [enableTrunkBve, setEnableTrunkBve] = useState(true);
-  // Technique flags stored on the poseReference (backend scoring). Seeded from
-  // the exercise being edited so re-calibrating doesn't silently drop them.
-  const [allowsTorsoMovement, setAllowsTorsoMovement] = useState(
-    exercise?.baseCriteria?.poseReference?.allowsTorsoMovement === true
-  );
-  const [checksHandProximity, setChecksHandProximity] = useState(
-    exercise?.baseCriteria?.poseReference?.checksHandProximity === true
-  );
   const [repSensitivityIndex, setRepSensitivityIndex] = useState(2);
 
   // Additional takes (raw frames kept so features can be re-derived if the
@@ -483,8 +476,6 @@ export function ExerciseAiPage({
     setTargetRom(storedPoseReference?.targetRom ?? 90);
     setBveThreshold(storedPoseReference?.bveThreshold ?? 0.15);
     setEnableTrunkBve(storedPoseReference?.enableTrunkBve === true);
-    setAllowsTorsoMovement(storedPoseReference?.allowsTorsoMovement === true);
-    setChecksHandProximity(storedPoseReference?.checksHandProximity === true);
     setMasterClips([]);
     setWrongFormClips([]);
     setPreviewIndex(0);
@@ -850,6 +841,16 @@ export function ExerciseAiPage({
    * base_criteria.poseReference and scores against). */
   const buildPoseReference = () => {
     if (!primaryDef || !secondaryDef || !fsmConfig) return null;
+    // Technique flags (hands-together check / torso-movement allowance) are no
+    // longer therapist checkboxes: they are inferred from the therapist's own
+    // demo clips (base clip + extra correct takes; wrong-form clips excluded).
+    // See ai/poseScoring/exerciseTechniqueFlags.ts for the rules.
+    const techniqueFlags = inferTechniqueFlags({
+      angleType: primaryDef.type,
+      clips: [baseFrames, ...masterClips.map((clip) => clip.frames)].map((frames) =>
+        techniqueFramesFromLandmarks(frames.map((f) => f.landmarks))
+      )
+    });
     return {
       angleDefinition: primaryDef,
       secondaryAngleDefinition: secondaryDef,
@@ -857,8 +858,8 @@ export function ExerciseAiPage({
       targetRom,
       bveThreshold,
       enableTrunkBve,
-      allowsTorsoMovement,
-      checksHandProximity,
+      allowsTorsoMovement: techniqueFlags.allowsTorsoMovement,
+      checksHandProximity: techniqueFlags.checksHandProximity,
       // Authoring labels kept server-side only, to word the per-rep
       // detailedFeedback (which joint is primary / which is the secondary).
       targetJoint: rankedCandidatesRef.current.find((c) => c.id === selectedPrimaryId)?.label ?? calibration?.primary.label,
@@ -866,7 +867,9 @@ export function ExerciseAiPage({
         ? {
             primaryCandidateId: selectedPrimaryId ?? calibration.primary.id,
             secondaryCandidateId: selectedSecondaryId ?? calibration.secondary.id,
-            rankedCandidates: calibration.rankedCandidates.map((c) => ({ id: c.id, label: c.label, range: c.range, score: c.score }))
+            rankedCandidates: calibration.rankedCandidates.map((c) => ({ id: c.id, label: c.label, range: c.range, score: c.score })),
+            // Evidence behind the two inferred technique flags (audit only).
+            techniqueFlags: techniqueFlags.evidence
           }
         : undefined,
       masterSamples: [
@@ -1896,68 +1899,42 @@ export function ExerciseAiPage({
                   </div>
                 </div>
 
-                <div className="ai-technique-grid">
-                  <div className="ai-bve-option-group">
-                    <label className={`ai-technique-option${enableTrunkBve ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
-                      <input
-                        type="checkbox"
-                        checked={enableTrunkBve}
-                        onChange={(e) => setEnableTrunkBve(e.target.checked)}
-                        disabled={!canEditPoseCriteria}
-                      />
-                      <span>
-                        <strong>คิดคะแนนหักเมื่อใช้การเอนลำตัวชดเชย (BVE)</strong>
-                        <small>ตรวจจับและหักคะแนนเมื่อผู้ป่วยใช้การเอนลำตัวช่วยแทนการเคลื่อนไหว</small>
-                      </span>
-                    </label>
-                    <div className={`ai-bve-sensitivity${enableTrunkBve ? "" : " disabled"}`}>
-                      <strong>ความเข้มงวดในการตรวจจับการเอนลำตัวชดเชย</strong>
-                      <p className="library-card-sub" style={{ margin: 0 }}>
-                        {BVE_SENSITIVITY_LEVELS.find((level) => Math.abs(bveThreshold - level.value) < 1e-6)?.desc}
-                      </p>
-                      <div className="ai-choice-row">
-                        {BVE_SENSITIVITY_LEVELS.map((level) => {
-                          const selected = enableTrunkBve && Math.abs(bveThreshold - level.value) < 1e-6;
-                          return (
-                            <button
-                              key={level.value}
-                              type="button"
-                              className={`ai-choice ${selected ? "active" : ""}`}
-                              onClick={() => setBveThreshold(level.value)}
-                              disabled={!canEditPoseCriteria || !enableTrunkBve}
-                              aria-pressed={selected}
-                            >
-                              {level.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                <div className="ai-field">
+                  <label>ความเข้มงวดในการตรวจจับการเอนลำตัวชดเชย (BVE)</label>
+                  <p className="library-card-sub" style={{ margin: 0 }}>
+                    {enableTrunkBve
+                      ? BVE_SENSITIVITY_LEVELS.find((level) => Math.abs(bveThreshold - level.value) < 1e-6)?.desc ?? "กำหนดเกณฑ์เองไว้แล้ว"
+                      : "ปิดอยู่ — ไม่หักคะแนนเมื่อผู้ป่วยเอนลำตัวช่วยแทนการเคลื่อนไหว"}
+                  </p>
+                  <div className="ai-choice-row">
+                    <button
+                      type="button"
+                      className={`ai-choice ${!enableTrunkBve ? "active" : ""}`}
+                      onClick={() => setEnableTrunkBve(false)}
+                      disabled={!canEditPoseCriteria}
+                      aria-pressed={!enableTrunkBve}
+                    >
+                      ปิด
+                    </button>
+                    {[...BVE_SENSITIVITY_LEVELS].reverse().map((level) => {
+                      const selected = enableTrunkBve && Math.abs(bveThreshold - level.value) < 1e-6;
+                      return (
+                        <button
+                          key={level.value}
+                          type="button"
+                          className={`ai-choice ${selected ? "active" : ""}`}
+                          onClick={() => {
+                            setEnableTrunkBve(true);
+                            setBveThreshold(level.value);
+                          }}
+                          disabled={!canEditPoseCriteria}
+                          aria-pressed={selected}
+                        >
+                          {level.label}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <label className={`ai-technique-option${allowsTorsoMovement ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
-                    <input
-                      type="checkbox"
-                      checked={allowsTorsoMovement}
-                      onChange={(e) => setAllowsTorsoMovement(e.target.checked)}
-                      disabled={!canEditPoseCriteria}
-                    />
-                    <span>
-                      <strong>ท่านี้ต้องขยับลำตัวช่วยตามธรรมชาติของท่า</strong>
-                      <small>ปิดการหักคะแนนจากการบิดลำตัวสำหรับท่านี้</small>
-                    </span>
-                  </label>
-                  <label className={`ai-technique-option${checksHandProximity ? " selected" : ""}${!canEditPoseCriteria ? " disabled" : ""}`}>
-                    <input
-                      type="checkbox"
-                      checked={checksHandProximity}
-                      onChange={(e) => setChecksHandProximity(e.target.checked)}
-                      disabled={!canEditPoseCriteria}
-                    />
-                    <span>
-                      <strong>ท่านี้ต้องกุม/ประกบมือไว้ตลอดท่า</strong>
-                      <small>หักคะแนนเมื่อมือแยกห่างจากกัน</small>
-                    </span>
-                  </label>
                 </div>
 
                 <div className="ai-save-actions">
