@@ -4,83 +4,52 @@
  */
 
 import type { Landmark } from '../../types/ai';
+import { computeHandOpenness } from '../handDetection';
+import {
+  classifyGripState,
+  computeHandExtension,
+  normalizeOpenness,
+  CALIBRATED_GRIP_THRESHOLDS,
+  LEGACY_GRIP_THRESHOLDS
+} from '../extractors/gripStateClassifier';
+import { loadStoredCalibration } from '../extractors/opennessCalibrator';
 
 /**
  * แปลง normalized palm center มาเป็น pixel coordinates บน canvas
- * @param palm - landmark array of palm center (typically 1 landmark at index 0)
+ * @param palm - object หรือ landmark ของจุดกึ่งกลางฝ่ามือ
  * @param canvasWidth - ความกว้างของ canvas
  * @param canvasHeight - ความสูงของ canvas
- * @returns object ที่มี x, y เป็นพิกเซล coordinates
+ * @returns object ที่มี x, y เป็นพิกเซล coordinates หรือ null หากไม่พบ
  */
 export function palmCenterToCanvasPixels(
-  palm: { x: number; y: number } | Landmark | Landmark[],
+  palm: { x: number; y: number } | Landmark | Landmark[] | null | undefined,
   canvasWidth: number,
   canvasHeight: number
-): { x: number; y: number } {
+): { x: number; y: number } | null {
+  if (!palm) return null;
   const landmark = Array.isArray(palm) ? palm[0] : palm;
+  if (!landmark || !Number.isFinite(landmark.x) || !Number.isFinite(landmark.y)) return null;
   const x = landmark.x * canvasWidth;
   const y = landmark.y * canvasHeight;
   return { x, y };
 }
 
 /**
- * จัดประเภทการจับ握 (grip) จาก hand landmark
- * @param landmarks - array of 21 hand landmarks from MediaPipe
- * @param gripType - 'open' เพื่อตรวจสอบการเปิดมือ หรือ null เพื่อตรวจสอบการปิดมือ
- * @returns 'closed' หากการจับแน่น หรือ 'open' หากมือเปิด
- */
-export function classifyGripFromLandmarks(
-  landmarks: Landmark[],
-  gripType: 'open' | null
-): 'closed' | 'open' {
-  if (!landmarks || landmarks.length < 21) return gripType === 'open' ? 'open' : 'closed';
-
-  // ใช้จุดสำคัญของนิ้วและThumb เพื่อตัดสินการจับ
-  const thumbTip = landmarks[4];
-  const thumbIp = landmarks[3];
-  const indexTip = landmarks[8];
-  const indexPip = landmarks[6];
-  const middleTip = landmarks[12];
-  const middlePip = landmarks[10];
-  const ringTip = landmarks[16];
-  const ringPip = landmarks[14];
-  const pinkyTip = landmarks[20];
-  const pinkyPip = landmarks[18];
-
-  // คำนวณระยะห่างสำคัญ
-  const thumbIndexDist = Math.hypot(
-    thumbTip.x - indexTip.x,
-    thumbTip.y - indexTip.y
-  );
-  const thumbIndexIpDist = Math.hypot(
-    thumbIp.x - indexPip.x,
-    thumbIp.y - indexPip.y
-  );
-
-  // ตรวจสอบว่า thumb ได้เคลื่อนที่ไปใกล้ index finger หรือไม่
-  const isGripClosed =
-    thumbIndexDist < 0.4 && thumbIndexIpDist < 0.45;
-
-  return isGripClosed ? 'closed' : 'open';
-}
-
-/**
  * คำนวณ center ของ palm แล้ว mirror (สะท้อน) ตามแกนแกว่ง
- * ใช้สำหรับการปรับปรุงทิศทางของการจับให้สอดคล้องกับมุมมอง
+ * ใช้สำหรับการปรับปรุงทิศทางของการจับให้สอดคล้องกับมุมมองเซลฟี่
  * @param landmarks - array of 21 hand landmarks from MediaPipe
- * @returns normalized palm center {x, y} ที่ถูก mirror dan normalize แล้ว
+ * @returns normalized palm center {x, y} ที่ถูก mirror และ normalize แล้ว หรือ null หากไม่พบมือ
  */
 export function computeMirroredPalmCenterNormalized(
-  landmarks: Landmark[]
-): { x: number; y: number } {
-  if (!landmarks || landmarks.length < 21) return { x: 0.5, y: 0.5 };
+  landmarks: Landmark[] | null | undefined
+): { x: number; y: number } | null {
+  if (!landmarks || landmarks.length < 21) return null;
 
-  // จุดศูนย์กลางของ palm มักจะอยู่ที่ข้อมือ (wrist) ที่ landmark index 0
-  // และจุดที่ 9 (mid palm) ใช้เป็น reference ในบางโมเดล
+  // จุดศูนย์กลางของ palm คือ กึ่งกลางระหว่างข้อมือ (wrist, landmark 0) และโคนนิ้วกลาง (middle MCP, landmark 9)
   const wrist = landmarks[0];
   const midPalm = landmarks[9];
+  if (!wrist || !midPalm) return null;
 
-  // คำนวณ center เป็น average ของ wrist และ mid palm
   const centerX = (wrist.x + midPalm.x) / 2;
   const centerY = (wrist.y + midPalm.y) / 2;
 
@@ -88,4 +57,34 @@ export function computeMirroredPalmCenterNormalized(
   const mirroredX = 1 - centerX;
 
   return { x: mirroredX, y: centerY };
+}
+
+/**
+ * จัดประเภทการจับ (grip) จาก hand landmark
+ * ประเมิน openness (ความกางของ 4 นิ้วเทียบกับขนาดฝ่ามือ) ร่วมกับ hysteresis กันกระพริบ
+ * รองรับทั้งกรณีสอบเทียบแล้ว (calibrated) และค่าเริ่มต้น (legacy)
+ * @param landmarks - array of 21 hand landmarks from MediaPipe
+ * @param previousGrip - สถานะก่อนหน้า ('open' | 'closed') เพื่อคงสถานะเดิมในโซน hysteresis
+ * @returns 'closed' หากกำมือ หรือ 'open' หากแบมือ
+ */
+export function classifyGripFromLandmarks(
+  landmarks: Landmark[] | null | undefined,
+  previousGrip: 'open' | 'closed' | null = null
+): 'closed' | 'open' {
+  if (!landmarks || landmarks.length < 21) {
+    return previousGrip ?? 'open';
+  }
+
+  const calib = loadStoredCalibration();
+  let openness: number;
+  let thresholds = LEGACY_GRIP_THRESHOLDS;
+  if (calib) {
+    const ext = computeHandExtension(landmarks);
+    openness = ext !== null ? normalizeOpenness(ext, calib) : 0;
+    thresholds = CALIBRATED_GRIP_THRESHOLDS;
+  } else {
+    openness = computeHandOpenness(landmarks);
+  }
+
+  return classifyGripState(openness, previousGrip, thresholds);
 }

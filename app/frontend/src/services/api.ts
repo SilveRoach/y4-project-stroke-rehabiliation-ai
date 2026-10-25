@@ -8,6 +8,7 @@ import type {
   ExerciseLibraryDifficulty,
   ExerciseTrackingType,
   ExerciseBaseCriteria,
+  HandTrackingGameType,
   PatientProgressTrend,
   TherapistPatientSummary,
   TherapistSessionLogEntry,
@@ -288,6 +289,7 @@ export interface PatientListItem {
   id: string;
   displayName: string;
   phoneNumber?: string | null;
+  profilePictureFileId?: string | null;
   status: "active" | "inactive" | "suspended";
   assignedTherapistId?: string | null;
   assignedTherapistName?: string | null;
@@ -616,6 +618,8 @@ export interface PatientTodayExercise {
   targetValueLabel: string;
   therapistInstruction: string | null;
   status: "pending" | "in_progress" | "completed" | "skipped" | "cancelled";
+  virtualGripGameType?: HandTrackingGameType;
+  baseCriteria?: any;
 }
 
 // A single active plan's own "current day" — each active plan computes this
@@ -669,6 +673,8 @@ export interface PatientScheduledExerciseInstruction {
     difficultyLevel: ExerciseLibraryDifficulty;
     movementTracking: ExerciseTrackingType;
     demoVideoFileId: string | null;
+    virtualGripGameType?: HandTrackingGameType;
+    baseCriteria?: any;
   };
 }
 

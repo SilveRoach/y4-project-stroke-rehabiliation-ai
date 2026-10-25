@@ -1893,6 +1893,28 @@ div.exercise-card:hover {
   display: block;
 }
 
+/* No-video placeholder: centred VideoOff icon + label inside a frame styled
+   like .session-demo-video (16:9 tile, same border/radius/bg) so the
+   reference panel never jumps in size when no demo video is attached. */
+.session-no-video-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 12px;
+  background: #2b2e2b;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.session-no-video-placeholder span {
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+
 .skeleton-overlay,
 .hand-overlay {
   position: absolute;
@@ -2420,6 +2442,13 @@ div.exercise-card:hover {
     background: var(--bg);
   }
 
+  /* No-video placeholder in sidebar — inherits the matching video-frame look
+     from the base rule; only the tile sizing is scoped here. */
+  .side-reference .session-no-video-placeholder {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+  }
+
   .side-reference-hint {
     margin: 0;
     color: var(--text-secondary);
@@ -2476,22 +2505,32 @@ div.exercise-card:hover {
   }
 
   /* B — score as the visual focal point of the panel. */
+  .side-score-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .side-score-item {
+    min-width: 0;
+  }
+
   .side-score-value {
     display: flex;
     align-items: baseline;
-    gap: 6px;
+    gap: 4px;
     margin: 0;
   }
 
   .side-score-value strong {
-    font-size: clamp(2.6rem, 4vw, 3.4rem);
+    font-size: clamp(1.8rem, 3vw, 2.6rem);
     line-height: 1;
     color: var(--text-primary);
   }
 
   .side-score-value span {
     color: var(--text-secondary);
-    font-size: 1.1rem;
+    font-size: 0.9rem;
     font-weight: 700;
   }
 
@@ -9778,6 +9817,24 @@ tr.admin-user-row:hover .admin-row-open-hint {
 .therapist-session-list-heading {
   flex-wrap: wrap;
   gap: 12px;
+}
+
+@media (min-width: 900px) {
+  .therapist-session-calendar-layout {
+    grid-template-columns: fit-content(480px) minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .therapist-session-calendar-layout > .pd-calendar-card {
+    width: fit-content;
+    max-width: 100%;
+    justify-self: start;
+  }
+
+  .therapist-session-calendar-layout > .pp-history-panel {
+    height: auto;
+    min-height: 0;
+  }
 }
 
 .pd-session-row.ts-session-row-clickable {
