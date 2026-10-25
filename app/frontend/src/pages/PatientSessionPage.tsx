@@ -24,12 +24,12 @@ import { VoiceControl } from "../components/VoiceControl";
 import { useAuth } from "../store/authStore";
 import {
   getPatientScheduledExerciseDemoVideo,
+  getPatientScheduledExerciseInstruction,
   getPatientScheduledExercisePoseReference,
   scoreExerciseTestRep,
   scorePoseRep
 } from "../services/api";
 import type { PatientExercise, TrackingType } from "../types";
-import { HandLandmarkerService } from "../ai/handTracking/handLandmarkerService";
 import { ObjectDetectorService } from "../ai/objectDetection/objectDetectorService";
 import { ItemTracker, LOST_THRESHOLD_FRAMES } from "../ai/objectDetection/itemTracker";
 import { PathDragFSM } from "../ai/evaluators/pathDragFSM";
@@ -224,27 +224,10 @@ function useDemoVideoUrl(scheduledExerciseId: string | null): string | null {
   return url;
 }
 
-// The demo/reference illustration (actual demo video when the exercise has one,
-// otherwise the static pose/hand SVG on the gradient tile). Rendered inside the
-// floating camera reference panel on phone/tablet AND inside the desktop
-// sidebar's "Exercise demo" section — a single shared definition so the two
-// placements can never drift (only one is visible at a time via CSS).
-function ReferenceThumb({ trackingType }: { trackingType: TrackingType }) {
-  return (
-    <span className="reference-thumb">
-      {(trackingType === "pose" || trackingType === "both") && (
-        <PoseOverlay className="reference-thumb-svg" />
-      )}
-      {(trackingType === "virtual_grip" || trackingType === "both") && (
-        <HandOverlay className="reference-thumb-svg" />
-      )}
-    </span>
-  );
-}
-
-// Wrapper that swaps the static reference thumb for the actual demo video once
-// it resolves — used by both the floating reference panel and the desktop
-// sidebar's "Exercise demo" section.
+// Wrapper that shows the actual demo video once it resolves, or a simple
+// VideoOff icon placeholder when no demo video is attached to the exercise.
+// Rendered inside the floating camera reference panel on phone/tablet AND
+// inside the desktop sidebar's "Exercise demo" section.
 function ExerciseDemoMedia({ exercise, overrideUrl }: { exercise: PatientExercise; overrideUrl?: string | null }) {
   // A test run plays the therapist's own (possibly still unsaved) base clip —
   // there is no scheduled exercise whose demo video could be fetched.
@@ -263,7 +246,14 @@ function ExerciseDemoMedia({ exercise, overrideUrl }: { exercise: PatientExercis
       />
     );
   }
-  return <ReferenceThumb trackingType={exercise.trackingType} />;
+  // No demo video — show a demo video frame with a centred no-video icon so the
+  // reference panel keeps the same 16:9 tile whether or not a demo video exists.
+  return (
+    <div className="session-no-video-placeholder" aria-label="ไม่มีวิดีโอตัวอย่าง" role="img">
+      <VideoOff size={48} strokeWidth={2} />
+      <span>ไม่มีวิดีโอตัวอย่าง</span>
+    </div>
+  );
 }
 
 // §2.5 — 2-3 canned encouragement lines the feedback panel cycles through once a
@@ -288,6 +278,7 @@ export function PatientSessionPage({
   onTogglePause,
   onFinishRecording
 }: PatientSessionPageProps) {
+  const { token } = useAuth();
   const trackingStatus = lowConfidence ? "poor" : paused ? "fair" : "good";
   const camera = useCamera(true);
   const recording = useSessionRecording(camera.stream);
@@ -305,10 +296,32 @@ export function PatientSessionPage({
     exercise.trackingType === "virtual_grip" || exercise.trackingType === "both";
   const poseTrackingEnabled =
     exercise.trackingType === "pose" || exercise.trackingType === "both";
-  // Which hand-tracking minigame this exercise uses — read from base_criteria JSON.
+  const [fetchedGameType, setFetchedGameType] = useState<HandTrackingGameType | null>(null);
+  // Which hand-tracking minigame this exercise uses — read from base_criteria JSON or fallback fetch.
   const virtualGripGameType = ((testConfig?.virtualGripGameType !== undefined && testConfig?.virtualGripGameType !== null
     ? testConfig.virtualGripGameType
-    : (exercise.virtualGripGameType ?? (exercise.baseCriteria as any)?.virtualGripGameType))) as HandTrackingGameType | undefined;
+    : (exercise.virtualGripGameType ?? (exercise.baseCriteria as any)?.virtualGripGameType ?? fetchedGameType))) as HandTrackingGameType | undefined;
+
+  // Fallback: If not passed down in props for a virtual_grip exercise, fetch from server
+  useEffect(() => {
+    if (!handTrackingEnabled || testConfig || virtualGripGameType || !token || !exercise.id) return;
+    let cancelled = false;
+    getPatientScheduledExerciseInstruction(token, exercise.id)
+      .then((res) => {
+        if (cancelled) return;
+        const gType = res.scheduledExercise.exercise.virtualGripGameType ??
+          (res.scheduledExercise.exercise.baseCriteria as any)?.virtualGripGameType;
+        if (gType) {
+          setFetchedGameType(gType);
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not fetch scheduled exercise minigame type:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [handTrackingEnabled, testConfig, virtualGripGameType, token, exercise.id]);
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const handTrackerRef = useRef<HandTracker | null>(null);
   const poseTrackerRef = useRef<PoseTracker | null>(null);
@@ -350,7 +363,6 @@ export function PatientSessionPage({
       const gameType = virtualGripGameType ?? 'ball-grip';
       if (gameType === 'falling-cup') {
         if (!fallingCupGameRef.current) {
-          handLandmarkerRef.current = handLandmarkerRef.current ?? new HandLandmarkerService();
           fallingCupGameRef.current = new FallingCupGameFSM({ ...DEFAULT_FALLING_CUP_CONFIG });
         }
       } else if (gameType === 'path-drag') {
@@ -361,7 +373,7 @@ export function PatientSessionPage({
             pathType: 'straight',
             widthLevel: 'medium',
             roundTimeSec: 30,
-            totalRounds: 5
+            totalRounds: total > 0 ? total : 5
           });
         }
       } else {
@@ -437,26 +449,35 @@ export function PatientSessionPage({
 
           // -----------------------------------------------------------------
           // Falling Cup game: grip to catch falling fruit, release into cup.
-          // Uses HandLandmarkerService + grip classification.
+          // Reuses hand landmarks (handTracker) already detected this frame.
           // -----------------------------------------------------------------
           if (
             virtualGripGameType === 'falling-cup' &&
             handTrackingEnabled &&
             sessionStartedRef.current &&
             !pausedRef.current &&
-            handLandmarkerRef.current &&
             fallingCupGameRef.current
           ) {
             try {
+              fallingCupGameRef.current.setAspect(canvas.width / Math.max(1, canvas.height));
               if (now - (fallingCupLastTickMsRef.current ?? 0) >= HAND_DETECT_INTERVAL_MS) {
                 fallingCupLastTickMsRef.current = now;
-                const cupLandmarks = handLandmarkerRef.current.detect(video, now);
-                const palm = cupLandmarks
-                  ? computeMirroredPalmCenterNormalized(cupLandmarks)
-                  : null;
-                const gripState = palm
-                  ? classifyGripFromLandmarks(cupLandmarks ?? [], 'open')
-                  : 'open';
+                const cupLandmarks = lastHandLandmarksRef.current;
+                let palm: { x: number; y: number } | null = null;
+                if (cupLandmarks) {
+                  const rawPalm = computeMirroredPalmCenterNormalized(cupLandmarks);
+                  if (rawPalm) {
+                    palm = {
+                      x: fallingCupHandFilterXRef.current.filter(rawPalm.x * canvas.width, now) / canvas.width,
+                      y: fallingCupHandFilterYRef.current.filter(rawPalm.y * canvas.height, now) / canvas.height
+                    };
+                  }
+                  fallingCupLastGripRef.current = classifyGripFromLandmarks(cupLandmarks, fallingCupLastGripRef.current);
+                } else {
+                  fallingCupHandFilterXRef.current.reset();
+                  fallingCupHandFilterYRef.current.reset();
+                }
+                const gripState = fallingCupLastGripRef.current;
                 const cupResults = fallingCupGameRef.current.update({
                   timestampMs: now,
                   handPos: palm ?? null,
@@ -464,6 +485,28 @@ export function PatientSessionPage({
                 });
                 for (const _ of cupResults) {
                   fallingCupRoundHookRef.current?.(fallingCupGameRef.current.snapshot());
+                }
+                const liveSnap = fallingCupGameRef.current.snapshot();
+                if (liveSnap.status === 'paused') {
+                  const pauseMsg =
+                    liveSnap.pauseReason === 'no-hand'
+                      ? '✋ ไม่พบมือ — ยกมือเข้ามาในกรอบกลางจอ'
+                      : liveSnap.pauseReason === 'too-high'
+                      ? '⬇️ มือสูงเกินไป — ลดมือลงมาอยู่ในกรอบกลางจอ'
+                      : liveSnap.pauseReason === 'too-low'
+                      ? '⬆️ มือต่ำเกินไป — ยกมือขึ้นมาอยู่ในกรอบกลางจอ'
+                      : 'จัดตำแหน่งมือให้อยู่ในกรอบกลางจอ';
+                  setFallingCupStatusText(pauseMsg);
+                } else if (liveSnap.status === 'playing') {
+                  if (liveSnap.heldId !== null) {
+                    setFallingCupStatusText('ลากผลไม้ไปเหนือถ้วย แล้วแบมือเพื่อปล่อย');
+                  } else {
+                    setFallingCupStatusText(
+                      gripState === 'closed'
+                        ? 'แบมือก่อนเพื่อเตรียมจับผลไม้'
+                        : 'กำมือเพื่อจับผลไม้ที่กำลังตกลงมา'
+                    );
+                  }
                 }
               }
               const cupSnap = fallingCupGameRef.current.snapshot();
@@ -502,83 +545,132 @@ export function PatientSessionPage({
               const palm = landmarks
                 ? computeMirroredPalmCenterNormalized(landmarks)
                 : null;
-              const palmCanvas = palm
-                ? palmCenterToCanvasPixels(palm, canvas.width, canvas.height)
-                : null;
 
-              // Object detection (throttled ~5fps).
-              if (
-                now - pathDragLastObjectMsRef.current >= 200 &&
-                objectDetectorRef.current.isReady
-              ) {
-                pathDragLastObjectMsRef.current = now;
-                const detections = objectDetectorRef.current.detect(video, now);
-                if (pathDragItemStateRef.current === 'selecting') {
-                  const handPixel = palm
-                    ? { x: palm.x * video.videoWidth, y: palm.y * video.videoHeight }
-                    : null;
-                  const diagonal = Math.sqrt(video.videoWidth ** 2 + video.videoHeight ** 2) || 1;
-                  const reachable = detections.filter((d) => {
-                    if (!handPixel) return true;
-                    const cx = d.boundingBox.originX + d.boundingBox.width / 2;
-                    const cy = d.boundingBox.originY + d.boundingBox.height / 2;
-                    return Math.hypot(cx - handPixel.x, cy - handPixel.y) / diagonal <= 0.35;
-                  });
-                  if (reachable.length > 0 && palmCanvas) {
-                    const nearest = reachable.reduce((best, d) => {
+              // Video dimensions and unmirrored hand pixel coordinates for object detection
+              const videoW = video.videoWidth || 640;
+              const videoH = video.videoHeight || 480;
+              const unmirroredPalmPixel = (landmarks && landmarks[0] && landmarks[9])
+                ? {
+                    x: ((landmarks[0].x + landmarks[9].x) / 2) * videoW,
+                    y: ((landmarks[0].y + landmarks[9].y) / 2) * videoH
+                  }
+                : null;
+              const videoDiagonal = Math.hypot(videoW, videoH) || 1;
+
+              // PathDragFSM and pathGameRenderer operate in 640x480 mirrored canvas space
+              const rawPathHandPoint = palm ? { x: palm.x * 640, y: palm.y * 480 } : null;
+              const pathHandPoint = rawPathHandPoint
+                ? {
+                    x: pathDragHandFilterXRef.current.filter(rawPathHandPoint.x, now),
+                    y: pathDragHandFilterYRef.current.filter(rawPathHandPoint.y, now)
+                  }
+                : null;
+              pathDragPalmCanvasRef.current = pathHandPoint;
+
+              // Grip classification with hysteresis
+              const gripClosed = landmarks
+                ? classifyGripFromLandmarks(landmarks, pathDragAttachedRef.current ? 'closed' : 'open') === 'closed'
+                : false;
+
+              // Object detection (throttled ~5fps). Runs when not holding an object.
+              if (!pathDragAttachedRef.current) {
+                if (
+                  now - pathDragLastObjectMsRef.current >= 200 &&
+                  objectDetectorRef.current.isReady
+                ) {
+                  pathDragLastObjectMsRef.current = now;
+                  const detections = objectDetectorRef.current.detect(video, now);
+                  if (pathDragItemStateRef.current === 'selecting') {
+                    const reachable = detections.filter((d) => {
+                      if (!unmirroredPalmPixel) return true;
                       const cx = d.boundingBox.originX + d.boundingBox.width / 2;
                       const cy = d.boundingBox.originY + d.boundingBox.height / 2;
-                      const d2 = Math.hypot(cx - palmCanvas.x, cy - palmCanvas.y);
-                      return d2 < (best ? Math.hypot(
-                        best.boundingBox.originX + best.boundingBox.width / 2 - palmCanvas.x,
-                        best.boundingBox.originY + best.boundingBox.height / 2 - palmCanvas.y
-                      ) : Infinity) ? d : best;
-                    }, reachable[0]);
-                    pathDragLastTrackedItemRef.current = itemTrackerRef.current.lock(nearest, now);
-                    pathDragItemStateRef.current = 'tracking';
-                  }
-                } else {
-                  const tracked = itemTrackerRef.current.update(
-                    detections,
-                    video.videoWidth,
-                    video.videoHeight,
-                    now
-                  );
-                  pathDragLastTrackedItemRef.current = tracked;
-                  if (tracked) {
-                    pathDragItemStateRef.current =
-                      tracked.framesSinceSeen > LOST_THRESHOLD_FRAMES ? 'lost' : 'tracking';
+                      return Math.hypot(cx - unmirroredPalmPixel.x, cy - unmirroredPalmPixel.y) / videoDiagonal <= 0.35;
+                    });
+                    if (reachable.length > 0 && unmirroredPalmPixel) {
+                      const nearest = reachable.reduce((best, d) => {
+                        const cx = d.boundingBox.originX + d.boundingBox.width / 2;
+                        const cy = d.boundingBox.originY + d.boundingBox.height / 2;
+                        const d2 = Math.hypot(cx - unmirroredPalmPixel.x, cy - unmirroredPalmPixel.y);
+                        return d2 < (best ? Math.hypot(
+                          best.boundingBox.originX + best.boundingBox.width / 2 - unmirroredPalmPixel.x,
+                          best.boundingBox.originY + best.boundingBox.height / 2 - unmirroredPalmPixel.y
+                        ) : Infinity) ? d : best;
+                      }, reachable[0]);
+                      pathDragLastTrackedItemRef.current = itemTrackerRef.current.lock(nearest, now);
+                      pathDragItemStateRef.current = 'tracking';
+                    }
+                  } else {
+                    const tracked = itemTrackerRef.current.update(
+                      detections,
+                      videoW,
+                      videoH,
+                      now
+                    );
+                    pathDragLastTrackedItemRef.current = tracked;
+                    if (tracked) {
+                      pathDragItemStateRef.current =
+                        tracked.framesSinceSeen > LOST_THRESHOLD_FRAMES ? 'lost' : 'tracking';
+                    }
                   }
                 }
               }
 
-              // Attached = holding object (grip closed + object tracked near hand).
-              const gripClosed = landmarks
-                ? classifyGripFromLandmarks(landmarks, null) === 'closed'
-                : false;
-              const objectNearHand =
-                pathDragLastTrackedItemRef.current &&
-                palmCanvas &&
-                Math.hypot(
-                  pathDragLastTrackedItemRef.current.centroid.x - palmCanvas.x,
-                  pathDragLastTrackedItemRef.current.centroid.y - palmCanvas.y
-                ) <= Math.hypot(canvas.width, canvas.height) * 0.15;
-              pathDragAttachedRef.current =
-                !!(gripClosed && objectNearHand && pathDragItemStateRef.current !== 'lost');
+              // Attached / Holding logic:
+              if (pathDragAttachedRef.current) {
+                // While attached, stay attached as long as the fist remains closed
+                if (!gripClosed) {
+                  pathDragAttachedRef.current = false;
+                  if (unmirroredPalmPixel) {
+                    itemTrackerRef.current.reanchor(unmirroredPalmPixel, now);
+                  }
+                }
+              } else {
+                // When not yet attached, closing hand attaches:
+                if (gripClosed && landmarks) {
+                  if (pathDragLastTrackedItemRef.current && unmirroredPalmPixel) {
+                    const distToItem = Math.hypot(
+                      pathDragLastTrackedItemRef.current.centroid.x - unmirroredPalmPixel.x,
+                      pathDragLastTrackedItemRef.current.centroid.y - unmirroredPalmPixel.y
+                    ) / videoDiagonal;
+                    if (distToItem <= 0.20) {
+                      pathDragAttachedRef.current = true;
+                    }
+                  } else {
+                    // Virtual-grip attach without a physical COCO object
+                    pathDragAttachedRef.current = true;
+                  }
+                }
+              }
 
-              pathDragPalmCanvasRef.current = palmCanvas;
-              const handPoint = palmCanvas ? { x: palmCanvas.x, y: palmCanvas.y } : null;
               const roundResult = pathDragGameRef.current.update({
                 timestampMs: now,
-                handPoint,
+                handPoint: pathHandPoint,
                 attached: pathDragAttachedRef.current
               });
               if (roundResult) {
-                pathDragRoundsRef.current.push(roundResult);
                 pathDragRoundHookRef.current?.(roundResult);
               }
               const snap = pathDragGameRef.current.snapshot();
-              if (snap.phase === 'gameOver' && !pathDragFinishedRef.current) {
+              if (snap.phase === 'ready') {
+                if (!landmarks) {
+                  setPathDragStatusText('✋ ไม่พบมือ — ยกมือเข้ามาในกล้อง');
+                } else if (!pathDragAttachedRef.current) {
+                  setPathDragStatusText('กำมือจับวัตถุ แล้วเลื่อนไปที่จุดเริ่มต้น (วงกลมเขียว)');
+                } else {
+                  setPathDragStatusText('เลื่อนวัตถุไปวางที่จุดเริ่มต้น (วงกลมเขียว) เพื่อเริ่มลาก');
+                }
+              } else if (snap.phase === 'dragging') {
+                if (!pathDragAttachedRef.current) {
+                  setPathDragStatusText('⚠️ วัตถุหลุดมือ — กำมือเพื่อจับวัตถุแล้วลากต่อ');
+                } else if (snap.onPath === false) {
+                  setPathDragStatusText('⚠️ ออกนอกเส้นทาง — ลากกลับเข้ามาในทาง');
+                } else {
+                  setPathDragStatusText('ลากวัตถุตามเส้นทางไปที่จุดสิ้นสุด (วงกลมเหลือง)');
+                }
+              } else if (snap.phase === 'roundEnd') {
+                setPathDragStatusText('จบหนึ่งรอบ พักสักครู่เตรียมเริ่มรอบถัดไป…');
+              } else if (snap.phase === 'gameOver' && !pathDragFinishedRef.current) {
                 pathDragFinishedRef.current = true;
                 setPathDragStatusText(
                   `จบเกมแล้ว — ทำสำเร็จ ${snap.roundNumber - 1}/${snap.totalRounds} รอบ`
@@ -634,32 +726,49 @@ export function PatientSessionPage({
                 console.error("grip minigame render failed", gripDrawError);
               }
             }
-            // New games: Path Drag corridor + hand marker, layered over skeleton.
-            if (virtualGripGameType === 'path-drag' && pathDragGameRef.current) {
-              try {
-                const snap = pathDragGameRef.current.snapshot();
-                drawPathGame(ctx, snap, {
-                  gripPoint: pathDragPalmCanvasRef.current,
-                  nowMs: now
-                });
-              } catch (pathDrawError) {
-                console.error("path drag render failed", pathDrawError);
+          }
+          // New games: Path Drag corridor + hand marker, layered over skeleton.
+          if (virtualGripGameType === 'path-drag' && pathDragGameRef.current) {
+            try {
+              const snap = pathDragGameRef.current.snapshot();
+              drawPathGame(ctx, snap, {
+                gripPoint: pathDragPalmCanvasRef.current,
+                nowMs: now
+              });
+              if (pathDragLastTrackedItemRef.current && video) {
+                const item = pathDragLastTrackedItemRef.current;
+                const scaleX = canvas.width / (video.videoWidth || canvas.width);
+                const scaleY = canvas.height / (video.videoHeight || canvas.height);
+                const px = canvas.width - item.centroid.x * scaleX;
+                const py = item.centroid.y * scaleY;
+                ctx.save();
+                ctx.strokeStyle = pathDragAttachedRef.current ? '#ffca28' : '#00e676';
+                ctx.fillStyle = ctx.strokeStyle;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(px, py, 22, 0, 2 * Math.PI);
+                ctx.stroke();
+                ctx.font = 'bold 13px sans-serif';
+                ctx.fillText(pathDragAttachedRef.current ? `🤝 ${item.label}` : item.label, px + 26, py + 4);
+                ctx.restore();
               }
+            } catch (pathDrawError) {
+              console.error("path drag render failed", pathDrawError);
             }
-            // Falling Cup: cups + falling objects.
-            if (virtualGripGameType === 'falling-cup' && fallingCupGameRef.current) {
-              try {
-                const cupSnap = fallingCupGameRef.current.snapshot();
-                drawFallingCupGame(
-                  ctx,
-                  cupSnap,
-                  canvas.width,
-                  canvas.height,
-                  { bandWarning: cupSnap.status === 'paused', dimOutsideBand: false }
-                );
-              } catch (cupDrawError) {
-                console.error("falling cup render failed", cupDrawError);
-              }
+          }
+          // Falling Cup: cups + falling objects.
+          if (virtualGripGameType === 'falling-cup' && fallingCupGameRef.current) {
+            try {
+              const cupSnap = fallingCupGameRef.current.snapshot();
+              drawFallingCupGame(
+                ctx,
+                cupSnap,
+                canvas.width,
+                canvas.height,
+                { bandWarning: cupSnap.status === 'paused', dimOutsideBand: cupSnap.status === 'paused' }
+              );
+            } catch (cupDrawError) {
+              console.error("falling cup render failed", cupDrawError);
             }
           }
         }
@@ -673,7 +782,7 @@ export function PatientSessionPage({
     const inits: Array<Promise<void>> = [];
     if (handTracker) inits.push(handTracker.init());
     if (poseTracker) inits.push(poseTracker.init());
-    if (handLandmarkerRef.current) inits.push(handLandmarkerRef.current.init());
+
     if (objectDetectorRef.current) inits.push(objectDetectorRef.current.init());
     Promise.all(inits)
       .then(() => {
@@ -706,11 +815,11 @@ export function PatientSessionPage({
       setPoseDetected(false);
       handTracker?.dispose();
       poseTracker?.dispose();
-      handLandmarkerRef.current?.dispose();
+
       objectDetectorRef.current?.dispose();
       handTrackerRef.current = null;
       poseTrackerRef.current = null;
-      handLandmarkerRef.current = null;
+
       objectDetectorRef.current = null;
       itemTrackerRef.current = null;
     };
@@ -745,7 +854,6 @@ export function PatientSessionPage({
   // pose-scoring endpoint (DTW/BVE/K-NN + scoreEngine live server-side). A rep
   // only counts after the scoring request SUCCEEDS.
   // -------------------------------------------------------------------------
-  const { token } = useAuth();
 
   // The exercise's stored criteria (Exercise Library base_criteria
   // .poseReference via GET /scheduled-exercises/:id/pose-reference). Kept in a
@@ -819,11 +927,10 @@ export function PatientSessionPage({
   // along a drawn path. Needs ObjectDetectorService + ItemTracker in addition
   // to hand landmarks.
   // Falling Cup: grip to catch falling fruit, release into a cup. Needs only
-  // hand landmarks (HandLandmarkerService).
+  // hand landmarks (handTracker landmarks shared this frame).
   // -------------------------------------------------------------------------
   const pathDragGameRef = useRef<PathDragFSM | null>(null);
   const fallingCupGameRef = useRef<FallingCupGameFSM | null>(null);
-  const handLandmarkerRef = useRef<HandLandmarkerService | null>(null); // falling cup only
   const objectDetectorRef = useRef<ObjectDetectorService | null>(null);  // path drag only
   const itemTrackerRef = useRef<ItemTracker | null>(null);               // path drag only
   const pathDragHandFilterXRef = useRef(new OneEuroFilter(1.5, 0.3));   // path drag hand smoothing
@@ -844,6 +951,11 @@ export function PatientSessionPage({
 
   const fallingCupFinishedRef = useRef(false);
   const fallingCupLastTickMsRef = useRef<number | null>(null);
+  const fallingCupHandFilterXRef = useRef(new OneEuroFilter(1.5, 0.3));
+  const fallingCupHandFilterYRef = useRef(new OneEuroFilter(1.5, 0.3));
+  /** Persist last valid grip state so a momentary hand-detection gap doesn't
+   * force 'open' and accidentally release a held falling object. */
+  const fallingCupLastGripRef = useRef<'open' | 'closed'>('open');
   const fallingCupRoundsRef = useRef<FallingCupSnapshot[]>([]); // one snapshot per resolved object
   const fallingCupRoundHookRef = useRef<((snap: FallingCupSnapshot) => void) | null>(null);
   const [fallingCupStatusText, setFallingCupStatusText] = useState<string | null>(null);
@@ -868,12 +980,23 @@ export function PatientSessionPage({
     // New games: reset only the selected game type.
     const gameType = virtualGripGameType ?? 'ball-grip';
     if (gameType === 'path-drag') {
-      pathDragGameRef.current?.reset({
-        pathType: 'straight',
-        widthLevel: 'medium',
-        roundTimeSec: 30,
-        totalRounds: 5
-      });
+      if (!pathDragGameRef.current) {
+        objectDetectorRef.current = objectDetectorRef.current ?? new ObjectDetectorService();
+        itemTrackerRef.current = itemTrackerRef.current ?? new ItemTracker();
+        pathDragGameRef.current = new PathDragFSM({
+          pathType: 'straight',
+          widthLevel: 'medium',
+          roundTimeSec: 30,
+          totalRounds: total > 0 ? total : 5
+        });
+      } else {
+        pathDragGameRef.current.reset({
+          pathType: 'straight',
+          widthLevel: 'medium',
+          roundTimeSec: 30,
+          totalRounds: total > 0 ? total : 5
+        });
+      }
       pathDragFinishedRef.current = false;
       pathDragRoundsRef.current = [];
       pathDragItemStateRef.current = 'selecting';
@@ -888,6 +1011,10 @@ export function PatientSessionPage({
     } else if (gameType === 'falling-cup') {
       fallingCupGameRef.current = new FallingCupGameFSM({ ...DEFAULT_FALLING_CUP_CONFIG });
       fallingCupFinishedRef.current = false;
+      fallingCupLastTickMsRef.current = null;
+      fallingCupLastGripRef.current = 'open';
+      fallingCupHandFilterXRef.current.reset();
+      fallingCupHandFilterYRef.current.reset();
       fallingCupRoundsRef.current = [];
       setFallingCupStatusText(null);
     }
@@ -1159,6 +1286,20 @@ export function PatientSessionPage({
   const localizedProgressLabel = progressDisplayLabel(progressLabel);
   const progressPercent = total > 0 ? Math.round((demoDone / total) * 100) : 0;
   const score = demoScore;
+  const fallingCupRoundScores = fallingCupRoundsRef.current.map((round, index, rounds) =>
+    round.caught > (rounds[index - 1]?.caught ?? 0) ? 100 : 0
+  );
+  const roundScores = poseRepScoresRef.current.length > 0
+    ? poseRepScoresRef.current
+    : virtualGripGameType === "falling-cup"
+    ? fallingCupRoundScores
+    : virtualGripGameType === "path-drag"
+    ? pathDragRoundsRef.current.map((round) => round.accuracyScore)
+    : gripRoundsRef.current.map((round) => round.finalRepScore);
+  const lastRoundScore = roundScores.length > 0 ? roundScores[roundScores.length - 1] : null;
+  const averageSessionScore = roundScores.length > 0
+    ? Math.round(roundScores.reduce((sum, roundScore) => sum + roundScore, 0) / roundScores.length)
+    : null;
   const trackingIcons = trackingIconsFor(exercise.trackingType);
   // movementTracking=pose: real per-rep AI feedback from the backend scoring
   // engine (Thai, generated by scoreEngine) once a rep has been scored; the
@@ -1271,8 +1412,15 @@ export function PatientSessionPage({
       // rounds (finalRepScore is 0/100 per round, so the average = success rate).
       const gripRounds = gripRoundsRef.current;
       const pathDragRounds = pathDragRoundsRef.current;
+      const fallingCupRounds = fallingCupRoundsRef.current;
+      const lastCup = fallingCupRounds.length > 0 ? fallingCupRounds[fallingCupRounds.length - 1] : null;
+      const fallingCupScore = lastCup ? Math.round((lastCup.caught / Math.max(1, lastCup.total)) * 100) : null;
       const repScores = poseRepScoresRef.current.length > 0
         ? poseRepScoresRef.current
+        : virtualGripGameType === 'falling-cup'
+        ? (fallingCupScore !== null ? [fallingCupScore] : [])
+        : virtualGripGameType === 'path-drag'
+        ? pathDragRounds.map((r) => Math.round(r.accuracyScore * 100))
         : gripRounds.map((round) => round.finalRepScore);
       const poseSummary: PoseSessionSummary | undefined = repScores.length > 0
         ? {
@@ -1280,7 +1428,10 @@ export function PatientSessionPage({
             repScores: [...repScores],
             targetReps: total,
             ...(poseRepScoresRef.current.length === 0
-              ? { gripRounds: [...gripRounds] }
+              ? {
+                  gripRounds: [...gripRounds],
+                  ...(pathDragRounds.length > 0 ? { pathDragRounds: [...pathDragRounds] } : {})
+                }
               : { poseReps: [...poseRepDetailsRef.current] })
           }
         : {
@@ -1676,14 +1827,24 @@ export function PatientSessionPage({
             </span>
           </div>
 
-          {/* B — current performance: the score is the visual focal point.
-              "—" until the first backend-scored repetition — no mock number. */}
+          {/* B — show the latest completed round and the running session average. */}
           <div className="side-section side-score">
-            <p className="side-label">คะแนนปัจจุบัน</p>
-            <p className="side-score-value">
-              <strong>{score ?? "—"}</strong>
-              <span aria-hidden="true">{score === null ? "" : "/100"}</span>
-            </p>
+            <div className="side-score-pair">
+              <div className="side-score-item">
+                <p className="side-label">คะแนนรอบที่แล้ว</p>
+                <p className="side-score-value">
+                  <strong>{lastRoundScore ?? "—"}</strong>
+                  <span aria-hidden="true">{lastRoundScore === null ? "" : "/100"}</span>
+                </p>
+              </div>
+              <div className="side-score-item">
+                <p className="side-label">คะแนนเฉลี่ย</p>
+                <p className="side-score-value">
+                  <strong>{averageSessionScore ?? "—"}</strong>
+                  <span aria-hidden="true">{averageSessionScore === null ? "" : "/100"}</span>
+                </p>
+              </div>
+            </div>
             {score === null && (
               <p className="side-score-hint">คะแนนจะแสดงหลังประเมินผลครั้งแรก</p>
             )}

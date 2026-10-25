@@ -154,7 +154,9 @@ function AppShell() {
         durationMinutes: 0,
         sets: 0,
         reps: 0,
-        difficulty: exercise.difficultyLevel === "medium" ? "Moderate" : exercise.difficultyLevel === "easy" ? "Easy" : "Hard"
+        difficulty: exercise.difficultyLevel === "medium" ? "Moderate" : exercise.difficultyLevel === "easy" ? "Easy" : "Hard",
+        virtualGripGameType: exercise.virtualGripGameType,
+        baseCriteria: exercise.baseCriteria
       });
     }
     setView("session");
@@ -411,7 +413,13 @@ function AppShell() {
         <PatientExerciseInstructionPage
           scheduledExerciseId={selectedScheduledExercise.id}
           onBack={() => setView("today")}
-          onStartExercise={() => openSession(selectedScheduledExercise)}
+          onStartExercise={(updatedExercise?: Partial<PatientTodayExercise>) => {
+            const merged = updatedExercise
+              ? { ...selectedScheduledExercise, ...updatedExercise }
+              : selectedScheduledExercise;
+            setSelectedScheduledExercise(merged);
+            openSession(merged);
+          }}
           onLogout={() => {
             logout();
             setView("login");

@@ -42,6 +42,7 @@ import { ForbiddenError, NotFoundError, ValidationError } from "../../common/err
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import * as fileService from "../files/file.service";
+import type { HandTrackingGameType } from "../exercise-program-library/exercise.service";
 
 export type SessionOutcome = "completed" | "skipped";
 export type EvaluationSource = "ai" | "pt_reviewed";
@@ -92,6 +93,8 @@ export interface PatientTodayExerciseDto {
   targetValueLabel: string;
   therapistInstruction: string | null;
   status: "pending" | "in_progress" | "completed" | "skipped" | "cancelled";
+  virtualGripGameType?: HandTrackingGameType;
+  baseCriteria?: any;
 }
 
 // A single active plan's own "current day" — computed independently per plan
@@ -142,6 +145,8 @@ export interface PatientScheduledExerciseDto {
     difficultyLevel: "easy" | "medium" | "hard";
     movementTracking: "pose" | "virtual_grip" | "none";
     demoVideoFileId: string | null;
+    virtualGripGameType?: HandTrackingGameType;
+    baseCriteria?: any;
   };
 }
 
@@ -230,17 +235,33 @@ export async function getPatientToday(patientId: string): Promise<PatientTodayDt
         dayNumber: current.index + 1,
         streak,
         therapistNote: current.day.therapistNote,
-        exercises: current.day.scheduledExercises.map((exercise) => ({
-          id: exercise.id,
-          exerciseLibraryId: exercise.exerciseLibraryId,
-          exerciseName: exercise.exerciseLibrary.name,
-          versionLabel: `v${exercise.exerciseLibrary.versionNumber}`,
-          movementTracking: exercise.exerciseLibrary.movementTracking,
-          difficultyLevel: exercise.exerciseLibrary.difficultyLevel,
-          targetValueLabel: targetValueLabel(exercise.targetValue),
-          therapistInstruction: exercise.therapistInstruction,
-          status: exercise.status
-        }))
+        exercises: current.day.scheduledExercises.map((exercise) => {
+          const rawCriteria = exercise.exerciseLibrary.baseCriteria;
+          const baseCriteria =
+            rawCriteria && typeof rawCriteria === "object" && !Array.isArray(rawCriteria)
+              ? (rawCriteria as Record<string, unknown>)
+              : null;
+          const virtualGripGameType =
+            baseCriteria?.virtualGripGameType === "path-drag" ||
+            baseCriteria?.virtualGripGameType === "falling-cup" ||
+            baseCriteria?.virtualGripGameType === "ball-grip"
+              ? (baseCriteria.virtualGripGameType as HandTrackingGameType)
+              : undefined;
+
+          return {
+            id: exercise.id,
+            exerciseLibraryId: exercise.exerciseLibraryId,
+            exerciseName: exercise.exerciseLibrary.name,
+            versionLabel: `v${exercise.exerciseLibrary.versionNumber}`,
+            movementTracking: exercise.exerciseLibrary.movementTracking,
+            difficultyLevel: exercise.exerciseLibrary.difficultyLevel,
+            targetValueLabel: targetValueLabel(exercise.targetValue),
+            therapistInstruction: exercise.therapistInstruction,
+            status: exercise.status,
+            virtualGripGameType,
+            baseCriteria: baseCriteria ?? undefined
+          };
+        })
       };
     }
 
@@ -290,6 +311,18 @@ export async function getPatientScheduledExercise(
 ): Promise<PatientScheduledExerciseDto> {
   const scheduledExercise = await findPatientScheduledExercise(patientId, scheduledExerciseId, isAdmin);
   const exercise = scheduledExercise.exerciseLibrary;
+  const rawCriteria = exercise.baseCriteria;
+  const baseCriteria =
+    rawCriteria && typeof rawCriteria === "object" && !Array.isArray(rawCriteria)
+      ? (rawCriteria as Record<string, unknown>)
+      : null;
+  const virtualGripGameType =
+    baseCriteria?.virtualGripGameType === "path-drag" ||
+    baseCriteria?.virtualGripGameType === "falling-cup" ||
+    baseCriteria?.virtualGripGameType === "ball-grip"
+      ? (baseCriteria.virtualGripGameType as HandTrackingGameType)
+      : undefined;
+
   return {
     id: scheduledExercise.id,
     exerciseLibraryId: scheduledExercise.exerciseLibraryId,
@@ -304,7 +337,9 @@ export async function getPatientScheduledExercise(
       description: exercise.description,
       difficultyLevel: exercise.difficultyLevel,
       movementTracking: exercise.movementTracking,
-      demoVideoFileId: exercise.demoVideoFileId
+      demoVideoFileId: exercise.demoVideoFileId,
+      virtualGripGameType,
+      baseCriteria: baseCriteria ?? undefined
     }
   };
 }

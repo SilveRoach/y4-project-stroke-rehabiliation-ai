@@ -23,6 +23,7 @@ export interface PatientListItem {
   id: string;
   displayName: string;
   phoneNumber?: string | null;
+  profilePictureFileId?: string | null;
   status: "active" | "inactive" | "suspended";
   assignedTherapistId?: string | null;
   assignedTherapistName?: string | null;
@@ -42,7 +43,7 @@ export interface PatientExercise {
   reps: number;
   difficulty: "Easy" | "Moderate" | "Hard";
   score?: number;
-  baseCriteria?: Array<{ label: string; value: string }> | null;
+  baseCriteria?: Array<{ label: string; value: string }> | Record<string, any> | null;
   virtualGripGameType?: HandTrackingGameType;
 }
 

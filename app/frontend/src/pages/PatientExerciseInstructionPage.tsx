@@ -7,14 +7,15 @@ import {
   ApiError,
   getPatientScheduledExerciseDemoVideo,
   getPatientScheduledExerciseInstruction,
-  type PatientScheduledExerciseInstruction
+  type PatientScheduledExerciseInstruction,
+  type PatientTodayExercise
 } from "../services/api";
 import { useAuth } from "../store/authStore";
 
 interface PatientExerciseInstructionPageProps {
   scheduledExerciseId: string;
   onBack: () => void;
-  onStartExercise: () => void;
+  onStartExercise: (exerciseData?: Partial<PatientTodayExercise>) => void;
   onLogout: () => void;
   onNavigate: (label: PatientNavLabel) => void;
 }
@@ -173,7 +174,14 @@ export function PatientExerciseInstructionPage({
             starts. */}
         {instruction && exercise && !loading && !error && (
           <div className="pei-start-bar">
-            <button type="button" className="primary-button patient-start-button pei-start-button" onClick={onStartExercise}>
+            <button
+              type="button"
+              className="primary-button patient-start-button pei-start-button"
+              onClick={() => onStartExercise({
+                virtualGripGameType: instruction.exercise.virtualGripGameType,
+                baseCriteria: instruction.exercise.baseCriteria
+              })}
+            >
               <Play size={20} fill="currentColor" /> เริ่มทำท่าบริหาร
             </button>
           </div>

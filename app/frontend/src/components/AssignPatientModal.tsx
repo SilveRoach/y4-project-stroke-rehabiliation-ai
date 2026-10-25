@@ -1,5 +1,6 @@
 import { Search, UserMinus, UserPlus, X } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
+import { useProfilePicture } from "../hooks/useProfilePicture";
 import { useAuth } from "../store/authStore";
 import type { PatientListItem, TherapistPatientSummary } from "../types";
 
@@ -8,6 +9,22 @@ interface AssignPatientModalProps {
   therapistName?: string;
   onClose: () => void;
   onAssigned: (patient: TherapistPatientSummary) => void;
+}
+
+function AssignmentPatientAvatar({ patient }: { patient: PatientListItem }) {
+  const { token } = useAuth();
+  const photoUrl = useProfilePicture(token, patient.profilePictureFileId ?? null);
+  const initials = (patient.displayName || "")
+    .split(" ")
+    .map((name) => name[0])
+    .slice(0, 2)
+    .join("");
+
+  return (
+    <span className={`therapist-avatar${photoUrl ? " with-photo" : ""}`}>
+      {photoUrl ? <img src={photoUrl} alt={`${patient.displayName}'s profile picture`} /> : initials}
+    </span>
+  );
 }
 
 export function AssignPatientModal({ therapistId, therapistName, onClose, onAssigned }: AssignPatientModalProps) {
@@ -218,13 +235,7 @@ export function AssignPatientModal({ therapistId, therapistName, onClose, onAssi
               return (
                 <div className="assign-patient-row" key={patient.id}>
                   <div className="assign-patient-row-info">
-                    <span className="therapist-avatar">
-                      {(patient.displayName || "")
-                        .split(" ")
-                        .map((n) => n[0])
-                        .slice(0, 2)
-                        .join("")}
-                    </span>
+                    <AssignmentPatientAvatar patient={patient} />
                     <strong>{patient.displayName}</strong>
                   </div>
 

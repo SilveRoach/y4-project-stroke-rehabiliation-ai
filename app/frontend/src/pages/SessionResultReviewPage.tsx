@@ -86,7 +86,11 @@ function reviewDayLabel(value: string): string {
 }
 
 function formatReviewDateTime(value: string): string {
-  return new Date(value).toLocaleString("th-TH");
+  return new Date(value).toLocaleDateString("th-TH", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
 }
 
 function formatReviewDate(value: string): string {
@@ -327,7 +331,6 @@ export function SessionResultReviewPage({ review, onBack, onLogout, onNavigate, 
                     <div className="summary-card srr-session-details">
                       <div>
                         <strong>{review.patientName}</strong>
-                        <span>{selectedExercise.exerciseName}</span>
                       </div>
                       <span>
                         {selectedAttempt.completedAtIso
@@ -471,9 +474,10 @@ function AttemptReview({
 
         <section className="summary-card srr-exercise-info">
           <div className="srr-exercise-info-heading">
-            <strong>ข้อมูลท่าบริหาร</strong>
-            {exercise.exerciseVersionLabel && <span>{exercise.exerciseVersionLabel}</span>}
+            <strong>{exercise.exerciseName}</strong>
+            {exercise.exerciseVersionLabel && <span> · {exercise.exerciseVersionLabel}</span>}
           </div>
+          <p className="srr-exercise-info-label">ข้อมูลท่าบริหาร</p>
           {exercise.description && <p>{exercise.description}</p>}
           <div className="srr-exercise-info-fields">
             {exercise.difficultyLevel && (

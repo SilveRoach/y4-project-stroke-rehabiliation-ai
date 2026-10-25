@@ -190,6 +190,12 @@ export class FallingCupGameFSM {
     this.nextSpawnAtMs = this.cfg.firstSpawnDelaySec * 1000;
   }
 
+  setAspect(aspect: number): void {
+    if (Number.isFinite(aspect) && aspect > 0) {
+      this.cfg.aspect = aspect;
+    }
+  }
+
   get config(): FallingCupConfig {
     return this.cfg;
   }
