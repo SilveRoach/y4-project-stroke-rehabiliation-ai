@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm ci",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "routes": [
+    { "src": "/api/v1/(.*)", "dest": "${VITE_API_BASE_URL}/$1" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}

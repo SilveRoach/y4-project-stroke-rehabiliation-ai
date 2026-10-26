@@ -17,7 +17,7 @@ import type {
 } from "../types";
 import type { FrameFeature, PoseReferencePublic, PoseRepScoringResult } from "../ai/poseScoring/poseScoringTypes";
 
-const BASE_URL = "/api/v1";
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "/api/v1").replace(/\/+$/, "");
 
 export interface ApiErrorBody {
   error: {
