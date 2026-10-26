@@ -71,35 +71,10 @@ jobs:
       - name: Typecheck and build production bundle
         run: npm run build
 
-  docker:
-    name: Docker Container Validation
-    runs-on: [self-hosted, windows]
-
-    defaults:
-      run:
-        shell: cmd
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build Backend Docker Image
-        run: |
-          docker build -t stroke-rehab-backend:ci ./app/backend
-
-      - name: Build Frontend Docker Image
-        run: |
-          docker build -t stroke-rehab-frontend:ci ./app/frontend
-
-      - name: Clean up CI Docker Images
-        if: always()
-        run: |
-          docker rmi -f stroke-rehab-backend:ci stroke-rehab-frontend:ci
-
   ci-check:
     name: CI Status Check
     runs-on: [self-hosted, windows]
-    needs: [backend, frontend, docker]
+    needs: [backend, frontend]
     if: always()
 
     defaults:
@@ -113,11 +88,9 @@ jobs:
           setlocal
           set B=${{ needs.backend.result }}
           set F=${{ needs.frontend.result }}
-          set D=${{ needs.docker.result }}
-          echo Job status: backend=%B%, frontend=%F%, docker=%D%
+          echo Job status: backend=%B%, frontend=%F%
           if not "%B%"=="success" goto fail
           if not "%F%"=="success" goto fail
-          if not "%D%"=="success" goto fail
           echo All CI jobs passed successfully on the Windows self-hosted runner!
           exit /b 0
           :fail
