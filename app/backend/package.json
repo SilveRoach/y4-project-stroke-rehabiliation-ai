@@ -15,7 +15,8 @@
     "prisma:seed": "tsx prisma/seed-full.ts",
     "prisma:seed:full": "tsx prisma/seed-full.ts",
     "prisma:seed:pose": "tsx prisma/seed-pose-reference.ts",
-    "prisma:seed:ai-exercises": "tsx prisma/seed-ai-exercises.ts"
+    "prisma:seed:ai-exercises": "tsx prisma/seed-ai-exercises.ts",
+    "prisma:seed:default-accounts": "tsx prisma/seed-default-accounts.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed-full.ts"
