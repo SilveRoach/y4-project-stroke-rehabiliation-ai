@@ -7,7 +7,7 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./app/backend/media:/app/media
+      - media_data:/app/media
     env_file: .env
     restart: unless-stopped
 
@@ -31,3 +31,4 @@ services:
 
 volumes:
   pgdata:
+  media_data:
