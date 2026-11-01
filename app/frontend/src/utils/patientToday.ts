@@ -86,10 +86,11 @@ export function shimScheduledExerciseToPatientExercise(exercise: ScheduledExerci
   return {
     id: exercise.id,
     name: exercise.exerciseName,
+    description: exercise.description,
     trackingType: trackingTypeFallback[exercise.movementTracking],
     targetLabel: exercise.targetValueLabel,
     status: exercise.status === "completed" ? "done" : exercise.status === "in_progress" ? "in_progress" : "not_started",
-    feedback: exercise.therapistInstruction ?? "Follow the on-screen guidance and keep your movements steady.",
+    feedback: exercise.therapistInstruction ?? "",
     progressLabel: exercise.status === "completed" ? "1 of 1" : "0 of 1",
     durationMinutes: 10,
     sets: 1,

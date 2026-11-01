@@ -33,6 +33,7 @@ export interface PatientExercise {
   id: string;
   name: string;
   nameTh?: string;
+  description?: string | null;
   trackingType: TrackingType;
   targetLabel: string;
   status: ExerciseStatus;
@@ -510,6 +511,7 @@ export interface ScheduledExercise {
   id: string;
   exerciseLibraryId: string; // points at an ExerciseLibraryItem.id
   exerciseName: string; // denormalized for display without a lookup
+  description?: string | null;
   versionLabel?: string; // e.g. "v3", mirrors ExerciseLibraryItem.versionNumber
   movementTracking: ExerciseTrackingType; // reuse existing enum, drives the row icon
   orderNumber: number;

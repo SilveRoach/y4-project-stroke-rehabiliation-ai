@@ -73,10 +73,11 @@ interface ExerciseLibraryPageProps {
 }
 
 type StatusFilter = "all" | ExerciseLibraryStatus;
+type TrackingFilter = "all" | ExerciseTrackingType;
 
 const trackingLabels: Record<ExerciseTrackingType, string> = {
   pose: "ติดตามท่าทาง",
-  virtual_grip: "วัดแรงบีบมือ",
+  virtual_grip: "ติดตามมือ",
   none: "ไม่ใช้ AI ติดตาม"
 };
 
@@ -115,6 +116,7 @@ export function ExerciseLibraryPage({
   const [error, setError] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [trackingFilter, setTrackingFilter] = useState<TrackingFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [editingExercise, setEditingExercise] = useState<ExerciseLibraryItem | "new" | null>(null);
   const [historyExercise, setHistoryExercise] = useState<ExerciseLibraryItem | null>(null);
@@ -180,6 +182,7 @@ export function ExerciseLibraryPage({
     const query = searchQuery.trim().toLocaleLowerCase();
     return exercises.filter((exercise) => {
       const matchesStatus = statusFilter === "all" || exercise.status === statusFilter;
+      const matchesTracking = trackingFilter === "all" || exercise.movementTracking === trackingFilter;
       const searchableText = [
         exercise.name,
         trackingLabels[exercise.movementTracking],
@@ -188,9 +191,9 @@ export function ExerciseLibraryPage({
       ]
         .join(" ")
         .toLocaleLowerCase();
-      return matchesStatus && (!query || searchableText.includes(query));
+      return matchesStatus && matchesTracking && (!query || searchableText.includes(query));
     });
-  }, [exercises, searchQuery, statusFilter]);
+  }, [exercises, searchQuery, statusFilter, trackingFilter]);
 
   const ownAvatarUrl = useOwnProfilePicture();
   // The exercise-library section is shared with the admin console (App routes
@@ -250,6 +253,19 @@ export function ExerciseLibraryPage({
                   <option value="active">ใช้งาน</option>
                   <option value="draft">ฉบับร่าง</option>
                   <option value="archived">เก็บถาวร</option>
+                </select>
+              </label>
+              <label className="library-status-filter">
+                <span>ชนิด</span>
+                <select
+                  value={trackingFilter}
+                  onChange={(event) => setTrackingFilter(event.target.value as TrackingFilter)}
+                  aria-label="กรองตามชนิดการติดตาม"
+                >
+                  <option value="all">ทั้งหมด</option>
+                  <option value="pose">ติดตามท่าทาง</option>
+                  <option value="virtual_grip">ติดตามมือ</option>
+                  <option value="none">ไม่ใช้ AI ติดตาม</option>
                 </select>
               </label>
               <button type="button" className="primary-button" onClick={() => setEditingExercise("new")}>
@@ -327,7 +343,7 @@ export function ExerciseLibraryPage({
                           ประวัติ
                         </button>
                       ) : (
-                        <span className="library-card-history-link" style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>ไม่มีประวัติ</span>
+                        <span className="library-card-history-link" style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}></span>
                       )}
                     </div>
 
@@ -517,7 +533,6 @@ function ExerciseDetailPanel({ exercise, onClose, onEdit, onViewHistory }: Exerc
               </span>
               <div className="library-card-badges">
                 <span className={`library-status-badge ${exercise.status}`}>{statusLabel(exercise.status)}</span>
-                <span className="library-version-badge">v{exercise.versionNumber}</span>
               </div>
             </div>
             <p className="library-history-criteria">
@@ -889,10 +904,8 @@ function ExerciseFormModal({ exercise, onClose, onSaved, onCreateNew }: Exercise
                   : exercise
                     ? !isOwner
                       ? "ดูได้อย่างเดียว (ไม่ใช่ผู้สร้าง)"
-                      : isEditingActive
-                        ? `บันทึกเป็นเวอร์ชัน v${exercise.versionNumber + 1} · ฉบับร่าง`
-                        : "บันทึกการเปลี่ยนแปลง"
-                    : "บันทึกเป็นเวอร์ชัน v1 · ฉบับร่าง"}
+                      : "บันทึกการเปลี่ยนแปลง"
+                    : "บันทึกเป็นฉบับร่าง"}
               </button>
             </>
           )}

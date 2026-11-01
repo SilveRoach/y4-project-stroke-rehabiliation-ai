@@ -1,7 +1,7 @@
 // Auth module — HTTP handlers for login, logout, token refresh.
 
 import { NextFunction, Request, Response } from "express";
-import { ValidationError } from "../../common/errors";
+import { UnauthenticatedError, ValidationError } from "../../common/errors";
 import * as authService from "./auth.service";
 
 function requireStringField(body: unknown, field: string): string {
@@ -29,6 +29,18 @@ export async function loginHandler(req: Request, res: Response, next: NextFuncti
     const password = requireStringField(req.body, "password");
     const result = await authService.login(identifier, password);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function changePasswordHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const currentPassword = requireStringField(req.body, "currentPassword");
+    const newPassword = requireStringField(req.body, "newPassword");
+    if (!req.user) throw new UnauthenticatedError();
+    await authService.changePassword(req.user.sub, currentPassword, newPassword);
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

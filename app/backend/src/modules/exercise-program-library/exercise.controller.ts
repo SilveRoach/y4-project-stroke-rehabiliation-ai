@@ -130,3 +130,15 @@ export async function archiveExerciseHandler(req: Request, res: Response, next: 
     next(err);
   }
 }
+
+// POST /exercises/:id/duplicate — clone an exercise into a new family root (v1, draft).
+export async function duplicateExerciseHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const id = requireParam(req, "id");
+    const exercise = await exerciseService.duplicateExercise(user.sub, id);
+    res.status(201).json({ exercise });
+  } catch (err) {
+    next(err);
+  }
+}

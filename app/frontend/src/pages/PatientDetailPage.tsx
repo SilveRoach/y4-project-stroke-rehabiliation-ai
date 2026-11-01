@@ -135,8 +135,9 @@ const patientGenderLabels: Record<string, string> = {
 };
 
 const patientAccountStatusLabels: Record<string, string> = {
-  active: "Active",
+  active: "ใช้งานอยู่",
   inactive: "ไม่ได้ใช้งาน",
+  disabled: "ปิดใช้งาน",
   pending: "รอดำเนินการ",
   suspended: "ระงับ"
 };
@@ -144,6 +145,20 @@ const patientAccountStatusLabels: Record<string, string> = {
 function patientValueLabel(value: string | null | undefined, labels: Record<string, string>, emptyLabel = "—"): string {
   if (!value) return emptyLabel;
   return labels[value.toLowerCase()] ?? value;
+}
+
+function patientLastLoginLabel(label: string | null | undefined): string {
+  if (!label) return "—";
+  if (label === "Today") return "วันนี้";
+  if (label === "Yesterday") return "เมื่อวาน";
+  if (label === "Never") return "ไม่เคยเข้าสู่ระบบ";
+  const daysAgo = label.match(/^(\d+) days? ago$/);
+  if (daysAgo) return `${daysAgo[1]} วันที่แล้ว`;
+  const date = new Date(label);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+  }
+  return label;
 }
 
 // Exported so the patient-facing Progress page can render the same
@@ -322,7 +337,7 @@ function daysBetweenInclusive(startLabel: string, endLabel: string): number {
 // DayDetailPanel used (patchScheduleDay / createScheduledExercise).
 const trackingLabels: Record<ExerciseTrackingType, string> = {
   pose: "ติดตามท่าทาง",
-  virtual_grip: "วัดแรงบีบมือ",
+  virtual_grip: "ติดตามมือ",
   none: "ไม่ติดตาม"
 };
 
@@ -1192,7 +1207,7 @@ export function PatientDetailPage({
                     <div><span>ส่วนสูง</span><strong>{patient.heightCm !== null ? `${patient.heightCm} ซม.` : "—"}</strong></div>
                     <div><span>น้ำหนัก</span><strong>{patient.weightKg !== null ? `${patient.weightKg} กก.` : "—"}</strong></div>
                     <div><span>สถานะบัญชี</span><strong>{patientValueLabel(patient.accountStatus, patientAccountStatusLabels)}</strong></div>
-                    <div><span>เข้าสู่ระบบล่าสุด</span><strong>{patient.lastLoginLabel || "—"}</strong></div>
+                    <div><span>เข้าสู่ระบบล่าสุด</span><strong>{patientLastLoginLabel(patient.lastLoginLabel)}</strong></div>
                   </div>
                 </div>
                 <div className="pd-patient-info-group">
@@ -2338,7 +2353,6 @@ function ExercisePickerModal({
                   <div className="pd-picker-confirm-details">
                     <div className="pd-picker-confirm-name-row">
                       <h4 className="pd-picker-confirm-name">{pendingPick.name}</h4>
-                      <span className="library-version-badge">v{pendingPick.versionNumber}</span>
                     </div>
                     {pendingPick.nameTh && (
                       <span className="pd-picker-confirm-nameth">{pendingPick.nameTh}</span>

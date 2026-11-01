@@ -62,7 +62,7 @@ function exerciseDifficultyLabel(value: string): string {
 
 function movementTrackingLabel(value: string): string {
   if (value === "pose") return "ติดตามท่าทาง";
-  if (value === "virtual_grip") return "วัดแรงบีบมือ";
+  if (value === "virtual_grip") return "ติดตามมือ";
   if (value === "none") return "ไม่ใช้ AI ติดตาม";
   return value.replace(/_/g, " ");
 }

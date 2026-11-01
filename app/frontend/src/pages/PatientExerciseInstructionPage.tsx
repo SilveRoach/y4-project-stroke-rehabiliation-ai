@@ -32,14 +32,6 @@ function targetValueLabel(value: unknown): string {
   return String(value);
 }
 
-function targetTypeLabel(targetType: PatientScheduledExerciseInstruction["targetType"]): string {
-  const labels: Record<PatientScheduledExerciseInstruction["targetType"], string> = {
-    repetitions: "จำนวนครั้ง",
-    duration: "ระยะเวลา"
-  };
-  return labels[targetType] ?? targetType;
-}
-
 export function PatientExerciseInstructionPage({
   scheduledExerciseId,
   onBack,
@@ -113,12 +105,13 @@ export function PatientExerciseInstructionPage({
       <div className="therapist-workspace">
         <header className="therapist-topbar pei-topbar">
           <div>
-            <button type="button" className="pei-back-button" onClick={onBack}>
-              <ArrowLeft size={16} />
-              <span>กลับไปหน้าวันนี้</span>
-            </button>
-            <p className="eyebrow">คำแนะนำท่าบริหาร</p>
-            <h1>{exercise?.name ?? "ท่าบริหาร"}</h1>
+            <div className="pei-heading-row">
+              <button type="button" className="pei-back-button" onClick={onBack}>
+                <ArrowLeft size={16} />
+                <span>กลับไป</span>
+              </button>
+              <p className="eyebrow">คำแนะนำท่าบริหาร</p>
+            </div>
           </div>
         </header>
 
@@ -131,10 +124,7 @@ export function PatientExerciseInstructionPage({
           <div className="today-grid">
             <section className="today-main-panel exercise-panel">
               <div className="program-heading">
-                <div><p className="eyebrow">วิดีโอตัวอย่างจากนักกายภาพบำบัด</p><h2>{exercise.name}</h2></div>
-                <span className={`difficulty-badge ${exercise.difficultyLevel === "medium" ? "moderate" : exercise.difficultyLevel}`}>
-                  {exercise.difficultyLevel === "easy" ? "ง่าย" : exercise.difficultyLevel === "medium" ? "ปานกลาง" : exercise.difficultyLevel === "hard" ? "ยาก" : exercise.difficultyLevel}
-                </span>
+                <p className="eyebrow">วิดีโอตัวอย่างจากนักกายภาพบำบัด</p>
               </div>
               {videoUrl ? (
                 <video controls className="exercise-instruction-video" src={videoUrl}>เบราว์เซอร์ของคุณไม่รองรับการเล่นวิดีโอตัวอย่าง</video>
@@ -156,9 +146,19 @@ export function PatientExerciseInstructionPage({
                 card above, rather than sitting loose in the grid. */}
             <section className="today-main-panel pei-details-panel">
               <section className="summary-card">
-                <p className="eyebrow">เป้าหมาย</p>
-                <h2>{targetValueLabel(instruction.targetValue)}</h2>
-                <p>{targetTypeLabel(instruction.targetType)}</p>
+                <h2>{exercise.name}</h2>
+                <div className="pei-target-grid">
+                  <div className="pei-target-item">
+                    <p className="eyebrow">เป้าหมาย</p>
+                    <h2>{targetValueLabel(instruction.targetValue)}</h2>
+                  </div>
+                  <div className="pei-target-item">
+                    <p className="eyebrow">ความยาก</p>
+                    <h2 className={`pei-difficulty-value ${exercise.difficultyLevel === "medium" ? "moderate" : exercise.difficultyLevel}`}>
+                      {exercise.difficultyLevel === "easy" ? "ง่าย" : exercise.difficultyLevel === "medium" ? "ปานกลาง" : exercise.difficultyLevel === "hard" ? "ยาก" : exercise.difficultyLevel}
+                    </h2>
+                  </div>
+                </div>
               </section>
               <section className="summary-card">
                 <p className="eyebrow">คำแนะนำจากนักกายภาพบำบัด</p>

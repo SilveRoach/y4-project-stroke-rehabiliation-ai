@@ -1,4 +1,4 @@
-import { Dumbbell, Settings, Shield, Users } from "lucide-react";
+import { Dumbbell, Home, Settings, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import rehabAiImage from "../assets/RehabAIimage.png";
 import { useAuth } from "../store/authStore";
@@ -32,7 +32,7 @@ interface AdminSidebarProps {
 }
 
 const navItems: Array<{ icon: ComponentType<{ size?: number }>; label: AdminNavLabel }> = [
-  { icon: Shield, label: "Dashboard" },
+  { icon: Home, label: "Dashboard" },
   { icon: Users, label: "Users" },
   // Same icon the therapist sidebar uses for this section, so the item reads
   // identically for both roles.

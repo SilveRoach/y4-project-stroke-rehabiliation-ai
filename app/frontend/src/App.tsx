@@ -146,10 +146,11 @@ function AppShell() {
       setActiveExercise({
         id: exercise.id,
         name: exercise.exerciseName,
+        description: exercise.description,
         trackingType: exercise.movementTracking === "none" ? "both" : exercise.movementTracking,
         targetLabel: exercise.targetValueLabel,
         status: exercise.status === "completed" ? "done" : exercise.status === "in_progress" ? "in_progress" : "not_started",
-        feedback: exercise.therapistInstruction ?? "ปฏิบัติตามคำแนะนำที่นักกายภาพบำบัดกำหนด",
+        feedback: exercise.therapistInstruction ?? "",
         progressLabel: exercise.targetValueLabel,
         durationMinutes: 0,
         sets: 0,
@@ -246,7 +247,7 @@ function AppShell() {
     URL.revokeObjectURL(videoBlobUrl);
     setPendingAttempt(null);
     setView("today");
-    showToast("Exercise result uploaded successfully · บันทึกผลการฝึกเรียบร้อยแล้ว");
+    showToast("บันทึกผลการฝึกเรียบร้อยแล้ว");
   };
 
   // §6.3 — Retry: discard this take (no attempt number consumed) and go back into

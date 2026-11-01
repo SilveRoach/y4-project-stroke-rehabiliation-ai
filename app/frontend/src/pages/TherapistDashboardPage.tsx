@@ -725,7 +725,11 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={weeklySessions} barSize={24}>
+                <BarChart
+                  data={weeklySessions}
+                  barSize={24}
+                  margin={{ top: 0, right: 0, left: -16, bottom: -8 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis
                     dataKey="day"
@@ -734,7 +738,12 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
                     axisLine={false}
                     tickLine={false}
                   />
-                  <YAxis tick={{ fontSize: 12, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} />
+                  <YAxis
+                    width={36}
+                    tick={{ fontSize: 12, fill: "var(--text-secondary)" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
                   <Tooltip
                     formatter={(value) => [value, "จำนวนครั้งที่ฝึก"]}
                     contentStyle={{ borderRadius: 10, border: "1px solid var(--border)", fontSize: 13 }}
@@ -747,7 +756,7 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
 
           <div className="summary-card therapist-patient-card">
             <div className="therapist-patient-toolbar">
-              <strong>ผู้ป่วย</strong>
+              <strong>ผู้ป่วยภายใต้การดูแล</strong>
               <div className="therapist-patient-toolbar-actions">
                 <div className="therapist-search">
                   <Search size={16} />
@@ -787,11 +796,11 @@ export function TherapistDashboardPage({ onLogout, onNavigate, onViewPatient }: 
               <table className="therapist-table">
                 <thead>
                   <tr>
-                    <th>ผู้ป่วย</th>
-                    <th>การวินิจฉัย</th>
+                    <th>ผู้ป่วยภายใต้การดูแล</th>
+                    <th>แผนฟื้นฟูปัจจุบัน</th>
                     <th>การฝึกล่าสุด</th>
-                    <th>การทำตามแผน</th>
-                    <th>ความก้าวหน้า</th>
+                    <th>การทำตามแผนปัจจุบัน</th>
+                    <th>อัตราการทำตามแผนทั้งหมด</th>
                     <th>สถานะ</th>
                   </tr>
                 </thead>

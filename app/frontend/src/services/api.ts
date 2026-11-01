@@ -116,6 +116,17 @@ export function logout(token: string): Promise<void> {
   });
 }
 
+export function changeUserPassword(
+  token: string,
+  payload: { currentPassword: string; newPassword: string }
+): Promise<void> {
+  return apiRequest<void>("/auth/change-password", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token },
+    body: JSON.stringify(payload)
+  });
+}
+
 export interface CreateUserPayload {
   role: "therapist" | "admin" | "patient";
   // For Therapist/Admin, a chosen login username. For Patient, the login
@@ -612,6 +623,7 @@ export interface PatientTodayExercise {
   id: string;
   exerciseLibraryId: string;
   exerciseName: string;
+  description?: string | null;
   versionLabel: string;
   movementTracking: ExerciseTrackingType;
   difficultyLevel: ExerciseLibraryDifficulty;
@@ -1130,6 +1142,18 @@ export function createScheduledExercise(
   });
 }
 
+// POST /exercises/:id/duplicate — clone an exercise into a new family root (v1, draft).
+export function duplicateExercise(
+  token: string,
+  exerciseId: string
+): Promise<{ exercise: any }> {
+  return apiRequest<{ exercise: any }>(`/exercises/${exerciseId}/duplicate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+// PATCH /exercises/:id
 export function patchScheduledExercise(
   token: string,
   exerciseId: string,

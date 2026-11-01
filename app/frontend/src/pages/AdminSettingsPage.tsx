@@ -2,6 +2,7 @@ import { AlertCircle, Camera, Pencil, Phone, Save, Shield, User, X } from "lucid
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { AdminSidebar } from "../components/AdminSidebar";
+import { ChangePasswordDialog } from "../components/ChangePasswordDialog";
 import type { AdminNavLabel } from "../components/AdminSidebar";
 import { useProfilePicture, useProfilePictureUpload } from "../hooks/useProfilePicture";
 import { ApiError, getUserProfile, updateUserProfile, type UserProfile } from "../services/api";
@@ -319,6 +320,7 @@ export function AdminSettingsPage({ onLogout, onNavigateDashboard, onNavigateUse
                   >
                     <Pencil size={14} /> แก้ไขโปรไฟล์
                   </button>
+                  <ChangePasswordDialog token={token} />
                 </>
               )}
             </div>

@@ -9,7 +9,7 @@
 // Layout mirrors the import's two-column workspace; styling stays on this
 // project's color scheme (creation-section-card / CSS variables).
 
-import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Hand, History, Loader2, Minus, Pause, Play, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Hand, History, Loader2, Minus, Pause, Play, Plus, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
@@ -32,7 +32,7 @@ import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
 import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
 import { inferTechniqueFlags, techniqueFramesFromLandmarks } from "../ai/poseScoring/exerciseTechniqueFlags";
 import type { ExerciseFSMConfig, FrameFeature, AngleDefinition, PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
-import { ApiError, archiveExercise, createExercise, createExerciseVersion, getFileContent, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
+import { ApiError, archiveExercise, createExercise, createExerciseVersion, duplicateExercise, getFileContent, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
 import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType, HandTrackingGameType, PatientExercise } from "../types";
 import { PatientSessionPage } from "./PatientSessionPage";
 import type { SessionTestConfig } from "./PatientSessionPage";
@@ -359,6 +359,9 @@ export function ExerciseAiPage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedExerciseName, setSavedExerciseName] = useState<string | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState<"publish" | "archive" | null>(null);
+  const [duplicateBusy, setDuplicateBusy] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<"save" | "duplicate" | null>(null);
 
   // "Test exercise" run — mounts PatientSessionPage with the criteria
   // currently on screen while THIS component stays mounted (so scanned clips,
@@ -908,15 +911,15 @@ export function ExerciseAiPage({
   //     (name/description/difficulty) and merges poseReference into its base
   //     criteria: PATCH in place when it is still a draft, or a new draft
   //     version when it is active (BR-6 — active versions are immutable).
-  const handleSave = async () => {
-    if (!token || !isOwner || isArchived) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (!token || !isOwner || isArchived) return false;
     if (isPoseExercise && !hasValidMovementLandmarks) {
       setSaveError(
         timelineFrames.length < 3
           ? "ข้อมูลโครงกระดูกต้องมีอย่างน้อย 3 เฟรมเพื่อกำหนดจุดตรวจสอบทั้งสามจุด"
           : "กำหนดจุดตรวจสอบท่าเริ่มต้น จุดสูงสุด และการกลับสู่ท่าเริ่มต้นตามลำดับก่อนบันทึก"
       );
-      return;
+      return false;
     }
     const poseReference =
       (calibration
@@ -941,7 +944,7 @@ export function ExerciseAiPage({
             : undefined) ?? undefined;
     if (isPoseExercise && !poseReference) {
       setSaveError("สแกนวิดีโอสาธิตเพื่อสร้างข้อมูลอ้างอิงท่าทางก่อนบันทึก");
-      return;
+      return false;
     }
     setSaveBusy(true);
     setSaveError(null);
@@ -981,15 +984,11 @@ export function ExerciseAiPage({
               : { repetitions: repetitions ? Number(repetitions) : undefined },
           demoVideoFileId: uploadedClipId ?? targetExercise.demoVideoFileId ?? null
         };
-        if (targetExercise.status === "draft") {
-          await updateExerciseDraft(token, targetExercise.id, payload);
-          targetExercise.baseCriteria = payload.baseCriteria;
-          setSavedExerciseName(targetExercise.name);
-        } else {
-          const { exercise: created } = await createExerciseVersion(token, targetExercise.id, payload);
-          setSavedExerciseName(`${created.name} (new draft v${created.versionNumber})`);
-        }
-        return;
+        // Always update the exercise in place — no new version created regardless of status
+        await updateExerciseDraft(token, targetExercise.id, payload);
+        targetExercise.baseCriteria = payload.baseCriteria;
+        setSavedExerciseName(targetExercise.name);
+        return true;
       }
 
       if (isPoseExercise && !uploadedClipId) {
@@ -1014,10 +1013,19 @@ export function ExerciseAiPage({
       });
       setSavedExerciseName(exerciseName.trim());
       onCreated(exerciseName.trim());
+      return true;
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
+      return false;
     } finally {
       setSaveBusy(false);
+    }
+  };
+
+  const handleConfirmSave = async () => {
+    const success = await handleSave();
+    if (success) {
+      setConfirmAction(null);
     }
   };
 
@@ -1033,6 +1041,30 @@ export function ExerciseAiPage({
       setSaveError(err instanceof ApiError ? err.message : action === "publish" ? "เผยแพร่ท่าบริหารไม่สำเร็จ" : "เก็บท่าบริหารเข้าคลังไม่สำเร็จ");
     } finally {
       setLifecycleBusy(null);
+    }
+  };
+
+  const handleDuplicate = async (): Promise<boolean> => {
+    if (!targetExercise || !token) return false;
+    setDuplicateBusy(true);
+    setDuplicateError(null);
+    try {
+      const res = await duplicateExercise(token, targetExercise.id);
+      const newName = res.exercise?.name || `${targetExercise.name} (copy)`;
+      onCreated(newName);
+      return true;
+    } catch (err) {
+      setDuplicateError(err instanceof ApiError ? err.message : "สร้างสำเนาไม่สำเร็จ กรุณาลองอีกครั้ง");
+      return false;
+    } finally {
+      setDuplicateBusy(false);
+    }
+  };
+
+  const handleConfirmDuplicate = async () => {
+    const success = await handleDuplicate();
+    if (success) {
+      setConfirmAction(null);
     }
   };
 
@@ -1291,8 +1323,7 @@ export function ExerciseAiPage({
               <History size={16} />
               <div>
                 <strong>
-                  ประวัติเวอร์ชัน · v{targetExercise.versionNumber}
-                  {targetExercise.versions.length > 1 ? ` จาก ${targetExercise.versions.length}` : ""} · {targetExercise.name}
+                  ประวัติเวอร์ชัน · {targetExercise.name}
                 </strong>
                 <div>
                   สร้างเมื่อ {targetExercise.createdAtLabel} โดย {targetExercise.createdByName || "นักกายภาพบำบัด"} ·{" "}
@@ -1305,7 +1336,7 @@ export function ExerciseAiPage({
           {targetExercise && (
             <div className={`ai-lifecycle-bar ${targetExercise.status}`}>
               <div>
-                <strong>{targetExercise.name} · v{targetExercise.versionNumber}</strong>
+                <strong>{targetExercise.name}</strong>
                 <span>{targetExercise.status === "active" ? "กำลังใช้งาน — การบันทึกการแก้ไขจะสร้างฉบับร่างเวอร์ชันใหม่" : targetExercise.status === "draft" ? "ฉบับร่าง — การเปลี่ยนแปลงจะบันทึกในเวอร์ชันนี้" : "เก็บถาวร — เวอร์ชันนี้ดูได้อย่างเดียว"}</span>
               </div>
               {isOwner && !isArchived && (
@@ -1831,11 +1862,11 @@ export function ExerciseAiPage({
                   {targetExercise ? (
                     <>
                       <strong>
-                        กำลังแก้ไข: {targetExercise.name} · v{targetExercise.versionNumber}
+                        กำลังแก้ไข: {targetExercise.name}
                       </strong>
                       <span>
                         {targetExercise.status === "active"
-                          ? `บันทึกแล้วจะสร้างฉบับร่าง v${targetExercise.versionNumber + 1} โดยฉบับที่ใช้งานอยู่จะไม่เปลี่ยนแปลง`
+                          ? `บันทึกการเปลี่ยนแปลงลงในฉบับร่างนี้`
                           : targetExercise.status === "archived"
                             ? "เวอร์ชันเก็บถาวรเปิดดูได้อย่างเดียว"
                             : "บันทึกการเปลี่ยนแปลงลงในฉบับร่างนี้"}
@@ -1941,22 +1972,43 @@ export function ExerciseAiPage({
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={handleSave}
-                    disabled={!canSave || saveBusy}
+                    onClick={() => {
+                      setSaveError(null);
+                      setConfirmAction("save");
+                    }}
+                    disabled={!canSave || saveBusy || duplicateBusy}
                   >
                     {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
-                    {targetExercise?.status === "active"
-                      ? `บันทึกเป็นฉบับร่าง v${targetExercise.versionNumber + 1}`
-                      : targetExercise
-                        ? "บันทึกการเปลี่ยนแปลง"
-                        : "สร้างท่าบริหาร"}
+                    {targetExercise
+                      ? "บันทึกการเปลี่ยนแปลง"
+                      : "สร้างท่าบริหาร"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button ai-duplicate-button"
+                    onClick={() => {
+                      setDuplicateError(null);
+                      setConfirmAction("duplicate");
+                    }}
+                    disabled={!targetExercise || duplicateBusy || saveBusy || (!isOwner && Boolean(targetExercise))}
+                    title={
+                      !isOwner && Boolean(targetExercise)
+                        ? "เฉพาะผู้สร้างเท่านั้นที่สร้างสำเนาได้"
+                        : targetExercise
+                          ? "สร้างสำเนาของท่าบริหารนี้"
+                          : "เลือกหรือบันทึกท่าบริหารก่อนสร้างใหม่จากนี้"
+                    }
+                  >
+                    {duplicateBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+                    สร้างใหม่จากนี้
                   </button>
                 </div>
 
                 {saveError && <p className="ai-error">{saveError}</p>}
+                {duplicateError && <p className="ai-error">{duplicateError}</p>}
                 {savedExerciseName && (
                   <p className="ai-success">
-                    <CheckCircle2 size={16} /> สร้าง “{savedExerciseName}” เป็นฉบับร่างแล้ว — เผยแพร่ได้จากคลังท่าบริหาร
+                    <CheckCircle2 size={16} /> บันทึก “{savedExerciseName}” สำเร็จ
                   </p>
                 )}
               </section>
@@ -1983,17 +2035,149 @@ export function ExerciseAiPage({
                   </label>
                 )}
                 <div className="ai-save-actions">
-                  <button type="button" className="primary-button" onClick={handleSave} disabled={!canSave || saveBusy}>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => {
+                      setSaveError(null);
+                      setConfirmAction("save");
+                    }}
+                    disabled={!canSave || saveBusy || duplicateBusy}
+                  >
                     {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
-                    {targetExercise?.status === "active" ? `บันทึกเป็นฉบับร่าง v${targetExercise.versionNumber + 1}` : targetExercise ? "บันทึกการเปลี่ยนแปลง" : "สร้างฉบับร่าง"}
+                    {targetExercise ? "บันทึกการเปลี่ยนแปลง" : "สร้างฉบับร่าง"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button ai-duplicate-button"
+                    onClick={() => {
+                      setDuplicateError(null);
+                      setConfirmAction("duplicate");
+                    }}
+                    disabled={!targetExercise || duplicateBusy || saveBusy || (!isOwner && Boolean(targetExercise))}
+                    title={
+                      !isOwner && Boolean(targetExercise)
+                        ? "เฉพาะผู้สร้างเท่านั้นที่สร้างสำเนาได้"
+                        : targetExercise
+                          ? "สร้างสำเนาของท่าบริหารนี้"
+                          : "เลือกหรือบันทึกท่าบริหารก่อนสร้างใหม่จากนี้"
+                    }
+                  >
+                    {duplicateBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+                    สร้างใหม่จากนี้
                   </button>
                 </div>
                 {saveError && <p className="ai-error">{saveError}</p>}
+                {duplicateError && <p className="ai-error">{duplicateError}</p>}
               </section>
 
           </div>
         </main>
       </div>
+
+      {confirmAction && (
+        <div
+          className="therapist-panel-scrim"
+          onClick={() => {
+            if (!saveBusy && !duplicateBusy) {
+              setConfirmAction(null);
+            }
+          }}
+        >
+          <div
+            className="pd-modal pd-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="exercise-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="therapist-detail-header">
+              <strong id="exercise-confirm-title">
+                {confirmAction === "save"
+                  ? targetExercise
+                    ? "ยืนยันการบันทึกการเปลี่ยนแปลง"
+                    : "ยืนยันการสร้างท่าบริหาร"
+                  : "ยืนยันการสร้างใหม่จากนี้"}
+              </strong>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setConfirmAction(null)}
+                disabled={saveBusy || duplicateBusy}
+                aria-label="ปิด"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="pd-confirm-message">
+              {confirmAction === "save" ? (
+                targetExercise ? (
+                  <>
+                    ต้องการบันทึกการเปลี่ยนแปลงของท่าบริหาร <strong>{exerciseName.trim() || targetExercise.name}</strong> หรือไม่?
+                  </>
+                ) : (
+                  <>
+                    ต้องการสร้างท่าบริหาร <strong>{exerciseName.trim() || "ท่าบริหารใหม่"}</strong> เป็นฉบับร่างใหม่หรือไม่?
+                  </>
+                )
+              ) : (
+                <>
+                  ต้องการสร้างท่าบริหารใหม่โดยคัดลอกข้อมูลจาก <strong>{targetExercise?.name}</strong> หรือไม่?
+                  ระบบจะสร้างเป็นท่าบริหารฉบับร่างใหม่ในคลังท่าบริหาร
+                </>
+              )}
+            </p>
+
+            {confirmAction === "save" && saveError && (
+              <p className="ai-error" style={{ margin: "0 0 12px" }}>
+                {saveError}
+              </p>
+            )}
+            {confirmAction === "duplicate" && duplicateError && (
+              <p className="ai-error" style={{ margin: "0 0 12px" }}>
+                {duplicateError}
+              </p>
+            )}
+
+            <div className="pd-confirm-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setConfirmAction(null)}
+                disabled={saveBusy || duplicateBusy}
+              >
+                ยกเลิก
+              </button>
+              {confirmAction === "save" ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleConfirmSave}
+                  disabled={saveBusy}
+                >
+                  {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
+                  {saveBusy
+                    ? "กำลังบันทึก…"
+                    : targetExercise
+                      ? "ยืนยันและบันทึก"
+                      : "ยืนยันและสร้าง"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleConfirmDuplicate}
+                  disabled={duplicateBusy}
+                >
+                  {duplicateBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+                  {duplicateBusy ? "กำลังสร้างสำเนา…" : "ยืนยันและสร้างใหม่"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

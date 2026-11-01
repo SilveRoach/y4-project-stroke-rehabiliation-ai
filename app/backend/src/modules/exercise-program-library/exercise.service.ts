@@ -331,9 +331,6 @@ export async function updateExerciseDraft(
   if (row.createdBy !== therapistId) {
     throw new ForbiddenError("You can only edit your own exercises.");
   }
-  if (row.status !== "draft") {
-    throw new ConflictError("Only a draft version can be edited in place — publish or version it instead.");
-  }
 
   const clean = sanitizeInput(withInheritedPoseReference(input, [row]));
   await validateDemoVideoFile(therapistId, clean.demoVideoFileId ?? null);
@@ -454,5 +451,68 @@ export async function archiveExercise(therapistId: string, id: string): Promise<
   }
 
   const family = await fetchFamily(familyRootId(row));
+  return buildItem(family);
+}
+
+// --- POST /exercises/:id/duplicate -------------------------------------------
+// Clone an existing exercise into a brand-new family root (v1, draft). The
+// copied exercise keeps the same name but appends " (copy)" — if that exact
+// name is already taken by another v1 root it becomes " (copy 2)", and so on.
+// The copy starts as draft so it can be edited or published later without
+// touching the source exercise at all.
+export async function duplicateExercise(
+  therapistId: string,
+  id: string
+): Promise<ExerciseLibraryItemDto> {
+  const source = await fetchRowById(id);
+  if (!source) throw new NotFoundError("Exercise not found.");
+  if (source.createdBy !== therapistId) {
+    throw new ForbiddenError("You can only duplicate your own exercises.");
+  }
+
+  // Find a unique name: try "name (copy)", then "name (copy 2)", etc.
+  let candidateName = `${source.name} (copy)`;
+  let suffix = 2;
+  while (true) {
+    const existing = await prisma.exerciseLibrary.findFirst({
+      where: {
+        name: candidateName,
+        versionNumber: 1,
+        parentExerciseId: null
+      }
+    });
+    if (!existing) break;
+    candidateName = `${source.name} (copy ${suffix})`;
+    suffix += 1;
+  }
+
+  const clean = sanitizeInput({
+    name: candidateName,
+    description: source.description ?? undefined,
+    movementTracking: source.movementTracking,
+    difficultyLevel: source.difficultyLevel,
+    baseCriteria: source.baseCriteria as Record<string, unknown>,
+    demoVideoFileId: source.demoVideoFileId ?? undefined
+  });
+
+  await validateDemoVideoFile(therapistId, clean.demoVideoFileId ?? null);
+
+  const created = await prisma.exerciseLibrary.create({
+    data: {
+      parentExerciseId: null,
+      versionNumber: 1,
+      name: clean.name,
+      description: clean.description || null,
+      movementTracking: clean.movementTracking,
+      difficultyLevel: clean.difficultyLevel,
+      baseCriteria: clean.baseCriteria as Prisma.InputJsonValue,
+      demoVideoFileId: clean.demoVideoFileId,
+      status: "draft",
+      createdBy: therapistId
+    },
+    include: WITH_CREATOR
+  });
+
+  const family = await fetchFamily(familyRootId(created));
   return buildItem(family);
 }

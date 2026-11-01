@@ -1,4 +1,4 @@
-import { ArrowUp, Check, Dumbbell, Hand, LogOut, Play, RotateCcw, Signal, SignalZero, Smile, Square, TimerReset, Video, VideoOff, X } from "lucide-react";
+import { ArrowUp, Check, Dumbbell, Hand, LogOut, Play, RotateCcw, Signal, SignalZero, Square, TimerReset, Video, VideoOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useCamera } from "../hooks/useCamera";
 import { useSessionRecording } from "../hooks/useSessionRecording";
@@ -21,6 +21,8 @@ import { classifyGripState, computeGripVisibleFrame, computeHandOpenness, comput
 import { drawBallGrip } from "../ai/grip/ballGripRenderer";
 import type { BallGripRepResult } from "../ai/grip/ballGripScoring";
 import { VoiceControl } from "../components/VoiceControl";
+import { PathDragHud } from "../components/PathDragHud";
+import { FallingCupHud } from "../components/FallingCupHud";
 import { useAuth } from "../store/authStore";
 import {
   getPatientScheduledExerciseDemoVideo,
@@ -35,6 +37,7 @@ import { ItemTracker, LOST_THRESHOLD_FRAMES } from "../ai/objectDetection/itemTr
 import { PathDragFSM } from "../ai/evaluators/pathDragFSM";
 import { FallingCupGameFSM, DEFAULT_FALLING_CUP_CONFIG, type FallingCupSnapshot } from "../ai/evaluators/fallingCupGameFSM";
 import { drawPathGame } from "../ai/render/pathGameRenderer";
+import { computePathGameViewport, mapVideoPointToPath } from "../ai/pathGame/pathGameViewport";
 import { drawFallingCupGame } from "../ai/render/fallingCupRenderer";
 import { computePathGameSummary } from "../ai/scoring/pathGameScoreEngine";
 import { computeFallingCupGameSummary } from "../ai/scoring/fallingCupGameScoreEngine";
@@ -111,12 +114,6 @@ export interface PoseSessionSummary {
   /** Present for pose sessions: the server's full per-rep results. */
   poseReps?: PoseRepScoringResult[];
 }
-
-const trackingCopy = {
-  good: "ดี",
-  fair: "พอใช้",
-  poor: "แย่"
-} as const;
 
 // REAL TRACKING — detect() is throttled to ~15fps (rather than every rAF tick)
 // because tasks-vision's detectForVideo runs WASM synchronously on the main
@@ -279,7 +276,6 @@ export function PatientSessionPage({
   onFinishRecording
 }: PatientSessionPageProps) {
   const { token } = useAuth();
-  const trackingStatus = lowConfidence ? "poor" : paused ? "fair" : "good";
   const camera = useCamera(true);
   const recording = useSessionRecording(camera.stream);
   const { done: initialDone, total } = parseProgress(exercise.progressLabel);
@@ -290,38 +286,45 @@ export function PatientSessionPage({
   //   pose/both         → PoseLandmarker (green upper-body skeleton with yellow
   //                       joints, ai/poseDetection.ts, reference
   //                       skeletonRenderer.ts style)
-  // Both trackers load their models during the pre-roll (as soon as the camera
-  // is streaming), so the overlay is ready by the time Start is pressed.
+  // Trackers and their models start only after the patient presses Start.
   const handTrackingEnabled =
     exercise.trackingType === "virtual_grip" || exercise.trackingType === "both";
   const poseTrackingEnabled =
     exercise.trackingType === "pose" || exercise.trackingType === "both";
   const [fetchedGameType, setFetchedGameType] = useState<HandTrackingGameType | null>(null);
+  const [fetchedExerciseDescription, setFetchedExerciseDescription] = useState<string | null>(null);
   // Which hand-tracking minigame this exercise uses — read from base_criteria JSON or fallback fetch.
   const virtualGripGameType = ((testConfig?.virtualGripGameType !== undefined && testConfig?.virtualGripGameType !== null
     ? testConfig.virtualGripGameType
     : (exercise.virtualGripGameType ?? (exercise.baseCriteria as any)?.virtualGripGameType ?? fetchedGameType))) as HandTrackingGameType | undefined;
 
-  // Fallback: If not passed down in props for a virtual_grip exercise, fetch from server
+  // Fetch missing game configuration and exercise description from the scheduled exercise.
   useEffect(() => {
-    if (!handTrackingEnabled || testConfig || virtualGripGameType || !token || !exercise.id) return;
+    const needsGameType = handTrackingEnabled && !virtualGripGameType;
+    const needsDescription = !exercise.description?.trim();
+    if ((!needsGameType && !needsDescription) || testConfig || !token || !exercise.id) return;
     let cancelled = false;
     getPatientScheduledExerciseInstruction(token, exercise.id)
       .then((res) => {
         if (cancelled) return;
-        const gType = res.scheduledExercise.exercise.virtualGripGameType ??
-          (res.scheduledExercise.exercise.baseCriteria as any)?.virtualGripGameType;
-        if (gType) {
-          setFetchedGameType(gType);
+        if (needsGameType) {
+          const gType = res.scheduledExercise.exercise.virtualGripGameType ??
+            (res.scheduledExercise.exercise.baseCriteria as any)?.virtualGripGameType;
+          if (gType) {
+            setFetchedGameType(gType);
+          }
+        }
+        if (needsDescription && res.scheduledExercise.exercise.description?.trim()) {
+          setFetchedExerciseDescription(res.scheduledExercise.exercise.description);
         }
       })
       .catch((err) => {
-        console.warn("Could not fetch scheduled exercise minigame type:", err);
+        console.warn("Could not fetch scheduled exercise details:", err);
       });
     return () => {
       cancelled = true;
     };
-  }, [handTrackingEnabled, testConfig, virtualGripGameType, token, exercise.id]);
+  }, [handTrackingEnabled, testConfig, virtualGripGameType, token, exercise.id, exercise.description]);
   const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const handTrackerRef = useRef<HandTracker | null>(null);
   const poseTrackerRef = useRef<PoseTracker | null>(null);
@@ -332,6 +335,7 @@ export function PatientSessionPage({
   const lastPoseLandmarksRef = useRef<PoseLandmark[] | null>(null);
   const [handDetected, setHandDetected] = useState(false);
   const [poseDetected, setPoseDetected] = useState(false);
+  const [sessionStarted, setSessionStarted] = useState(false);
   // Tracking model load lifecycle, surfaced in the overlay caption — the
   // MediaPipe WASM + .task model load from CDN on first use, and a failure
   // here used to be swallowed silently (live video, but no skeleton and no
@@ -339,7 +343,11 @@ export function PatientSessionPage({
   const [trackingLoadState, setTrackingLoadState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
-    if ((!handTrackingEnabled && !poseTrackingEnabled) || camera.status !== "streaming") return;
+    if (
+      (!handTrackingEnabled && !poseTrackingEnabled) ||
+      camera.status !== "streaming" ||
+      !sessionStarted
+    ) return;
     const handTracker = handTrackingEnabled
       ? handTrackerRef.current ?? new HandTracker()
       : null;
@@ -397,6 +405,25 @@ export function PatientSessionPage({
         }
         const ctx = canvas.getContext("2d");
         const now = performance.now();
+        const pathViewport = computePathGameViewport(
+          video.videoWidth,
+          video.videoHeight,
+          canvas.clientWidth,
+          canvas.clientHeight,
+          canvas.width,
+          canvas.height
+        );
+        const fallingCupFrame = mirrorVisibleFrame(
+          computeGripVisibleFrame(
+            video.videoWidth,
+            video.videoHeight,
+            canvas.clientWidth,
+            canvas.clientHeight
+          )
+        );
+        const fallingCupViewportWidth = canvas.width * (fallingCupFrame.x1 - fallingCupFrame.x0);
+        const fallingCupViewportHeight = canvas.height * (fallingCupFrame.y1 - fallingCupFrame.y0);
+        const fallingCupCupScale = canvas.clientWidth < 600 ? 0.75 : 1;
         if (ctx && now - lastDetectMsRef.current >= HAND_DETECT_INTERVAL_MS) {
           lastDetectMsRef.current = now;
           if (handTracker) {
@@ -459,7 +486,10 @@ export function PatientSessionPage({
             fallingCupGameRef.current
           ) {
             try {
-              fallingCupGameRef.current.setAspect(canvas.width / Math.max(1, canvas.height));
+              fallingCupGameRef.current.setAspect(
+                fallingCupViewportWidth / Math.max(1, fallingCupViewportHeight)
+              );
+              fallingCupGameRef.current.setCupScale(fallingCupCupScale);
               if (now - (fallingCupLastTickMsRef.current ?? 0) >= HAND_DETECT_INTERVAL_MS) {
                 fallingCupLastTickMsRef.current = now;
                 const cupLandmarks = lastHandLandmarksRef.current;
@@ -467,9 +497,19 @@ export function PatientSessionPage({
                 if (cupLandmarks) {
                   const rawPalm = computeMirroredPalmCenterNormalized(cupLandmarks);
                   if (rawPalm) {
+                    const viewportPalm = {
+                      x: (rawPalm.x - fallingCupFrame.x0) / (fallingCupFrame.x1 - fallingCupFrame.x0),
+                      y: (rawPalm.y - fallingCupFrame.y0) / (fallingCupFrame.y1 - fallingCupFrame.y0)
+                    };
                     palm = {
-                      x: fallingCupHandFilterXRef.current.filter(rawPalm.x * canvas.width, now) / canvas.width,
-                      y: fallingCupHandFilterYRef.current.filter(rawPalm.y * canvas.height, now) / canvas.height
+                      x: fallingCupHandFilterXRef.current.filter(
+                        viewportPalm.x * fallingCupViewportWidth,
+                        now
+                      ) / fallingCupViewportWidth,
+                      y: fallingCupHandFilterYRef.current.filter(
+                        viewportPalm.y * fallingCupViewportHeight,
+                        now
+                      ) / fallingCupViewportHeight
                     };
                   }
                   fallingCupLastGripRef.current = classifyGripFromLandmarks(cupLandmarks, fallingCupLastGripRef.current);
@@ -487,6 +527,14 @@ export function PatientSessionPage({
                   fallingCupRoundHookRef.current?.(fallingCupGameRef.current.snapshot());
                 }
                 const liveSnap = fallingCupGameRef.current.snapshot();
+                if (
+                  now - lastFallingCupHudUpdateMsRef.current >= 200 ||
+                  cupResults.length > 0 ||
+                  liveSnap.status === "finished"
+                ) {
+                  lastFallingCupHudUpdateMsRef.current = now;
+                  setFallingCupSnapshot(liveSnap);
+                }
                 if (liveSnap.status === 'paused') {
                   const pauseMsg =
                     liveSnap.pauseReason === 'no-hand'
@@ -498,7 +546,9 @@ export function PatientSessionPage({
                       : 'จัดตำแหน่งมือให้อยู่ในกรอบกลางจอ';
                   setFallingCupStatusText(pauseMsg);
                 } else if (liveSnap.status === 'playing') {
-                  if (liveSnap.heldId !== null) {
+                  if (!cupLandmarks) {
+                    setFallingCupStatusText('ไม่พบมือ — เกมยังดำเนินต่อ');
+                  } else if (liveSnap.heldId !== null) {
                     setFallingCupStatusText('ลากผลไม้ไปเหนือถ้วย แล้วแบมือเพื่อปล่อย');
                   } else {
                     setFallingCupStatusText(
@@ -512,6 +562,7 @@ export function PatientSessionPage({
               const cupSnap = fallingCupGameRef.current.snapshot();
               if (cupSnap.status === 'finished' && !fallingCupFinishedRef.current) {
                 fallingCupFinishedRef.current = true;
+                setFallingCupSnapshot(cupSnap);
                 setFallingCupStatusText(
                   `จบเกมแล้ว — จับได้ ${cupSnap.caught}/${cupSnap.total} ชิ้น`
                 );
@@ -558,11 +609,16 @@ export function PatientSessionPage({
               const videoDiagonal = Math.hypot(videoW, videoH) || 1;
 
               // PathDragFSM and pathGameRenderer operate in 640x480 mirrored canvas space
-              const rawPathHandPoint = palm ? { x: palm.x * 640, y: palm.y * 480 } : null;
-              const pathHandPoint = rawPathHandPoint
+              const pathHandPoint = palm
                 ? {
-                    x: pathDragHandFilterXRef.current.filter(rawPathHandPoint.x, now),
-                    y: pathDragHandFilterYRef.current.filter(rawPathHandPoint.y, now)
+                    x: pathDragHandFilterXRef.current.filter(
+                      mapVideoPointToPath(palm, pathViewport, canvas.width, canvas.height).x,
+                      now
+                    ),
+                    y: pathDragHandFilterYRef.current.filter(
+                      mapVideoPointToPath(palm, pathViewport, canvas.width, canvas.height).y,
+                      now
+                    )
                   }
                 : null;
               pathDragPalmCanvasRef.current = pathHandPoint;
@@ -652,6 +708,11 @@ export function PatientSessionPage({
                 pathDragRoundHookRef.current?.(roundResult);
               }
               const snap = pathDragGameRef.current.snapshot();
+              if (now - lastPathHudUpdateMsRef.current >= 250 || snap.phase !== lastPathHudPhaseRef.current) {
+                lastPathHudUpdateMsRef.current = now;
+                lastPathHudPhaseRef.current = snap.phase;
+                setPathDragSnapshot(snap);
+              }
               if (snap.phase === 'ready') {
                 if (!landmarks) {
                   setPathDragStatusText('✋ ไม่พบมือ — ยกมือเข้ามาในกล้อง');
@@ -672,6 +733,10 @@ export function PatientSessionPage({
                 setPathDragStatusText('จบหนึ่งรอบ พักสักครู่เตรียมเริ่มรอบถัดไป…');
               } else if (snap.phase === 'gameOver' && !pathDragFinishedRef.current) {
                 pathDragFinishedRef.current = true;
+                if (!completionNotifiedRef.current) {
+                  completionNotifiedRef.current = true;
+                  setSessionCompleteNotice(true);
+                }
                 setPathDragStatusText(
                   `จบเกมแล้ว — ทำสำเร็จ ${snap.roundNumber - 1}/${snap.totalRounds} รอบ`
                 );
@@ -718,13 +783,14 @@ export function PatientSessionPage({
           }
           if (lastHandLandmarksRef.current) {
             drawHandSkeleton(ctx, lastHandLandmarksRef.current, canvas.width, canvas.height);
-            // Virtual-grip ball + target ring, layered over the hand skeleton.
-            if ((!virtualGripGameType || virtualGripGameType === 'ball-grip') && gripGameRef.current) {
-              try {
-                drawBallGrip(ctx, gripGameRef.current.snapshot(), canvas.width, canvas.height);
-              } catch (gripDrawError) {
-                console.error("grip minigame render failed", gripDrawError);
-              }
+          }
+          // Keep the ball and target visible even when the hand tracker loses
+          // the hand; only the hand skeleton depends on detected landmarks.
+          if ((!virtualGripGameType || virtualGripGameType === 'ball-grip') && gripGameRef.current) {
+            try {
+              drawBallGrip(ctx, gripGameRef.current.snapshot(), canvas.width, canvas.height);
+            } catch (gripDrawError) {
+              console.error("grip minigame render failed", gripDrawError);
             }
           }
           // New games: Path Drag corridor + hand marker, layered over skeleton.
@@ -733,7 +799,8 @@ export function PatientSessionPage({
               const snap = pathDragGameRef.current.snapshot();
               drawPathGame(ctx, snap, {
                 gripPoint: pathDragPalmCanvasRef.current,
-                nowMs: now
+                nowMs: now,
+                viewport: pathViewport
               });
               if (pathDragLastTrackedItemRef.current && video) {
                 const item = pathDragLastTrackedItemRef.current;
@@ -760,13 +827,25 @@ export function PatientSessionPage({
           if (virtualGripGameType === 'falling-cup' && fallingCupGameRef.current) {
             try {
               const cupSnap = fallingCupGameRef.current.snapshot();
+              const viewportX = fallingCupFrame.x0 * canvas.width;
+              const viewportY = fallingCupFrame.y0 * canvas.height;
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(viewportX, viewportY, fallingCupViewportWidth, fallingCupViewportHeight);
+              ctx.clip();
+              ctx.translate(viewportX, viewportY);
               drawFallingCupGame(
                 ctx,
                 cupSnap,
-                canvas.width,
-                canvas.height,
-                { bandWarning: cupSnap.status === 'paused', dimOutsideBand: cupSnap.status === 'paused' }
+                fallingCupViewportWidth,
+                fallingCupViewportHeight,
+                {
+                  bandWarning: cupSnap.status === 'paused',
+                  dimOutsideBand: cupSnap.status === 'paused',
+                  cupScale: fallingCupCupScale
+                }
               );
+              ctx.restore();
             } catch (cupDrawError) {
               console.error("falling cup render failed", cupDrawError);
             }
@@ -823,13 +902,12 @@ export function PatientSessionPage({
       objectDetectorRef.current = null;
       itemTrackerRef.current = null;
     };
-  }, [handTrackingEnabled, poseTrackingEnabled, virtualGripGameType, camera.status, camera.videoRef]);
+  }, [handTrackingEnabled, poseTrackingEnabled, virtualGripGameType, camera.status, camera.videoRef, sessionStarted]);
 
   // §2.1 — a brief "get positioned in frame" state before the tracking HUD/controls
   // appear, instead of jumping straight from a live camera feed into the full
   // session UI. Pure client-side UI state; resets whenever a different exercise's
   // session is opened (App.tsx swaps `exercise`, not this page).
-  const [sessionStarted, setSessionStarted] = useState(false);
   const [sessionCompleteNotice, setSessionCompleteNotice] = useState(false);
   const completionNotifiedRef = useRef(false);
   // §10 (responsive redesign) — the demo/reference thumbnail collapses into a
@@ -863,6 +941,8 @@ export function PatientSessionPage({
   // Live status line for the camera overlay (starting-position prompt,
   // hold countdown, "performing rep", scoring, next-rep countdown).
   const [poseStatusText, setPoseStatusText] = useState<string | null>(null);
+  const [poseRoundScoreNotice, setPoseRoundScoreNotice] = useState<number | null>(null);
+  const [poseCaptionScore, setPoseCaptionScore] = useState<number | null>(null);
   // Latest successful per-rep backend feedback (from scoreEngine).
   const [repFeedback, setRepFeedback] = useState<string | null>(null);
 
@@ -948,6 +1028,9 @@ export function PatientSessionPage({
   const pathDragRoundsRef = useRef<PathRoundResult[]>([]);
   const pathDragRoundHookRef = useRef<((round: PathRoundResult) => void) | null>(null);
   const [pathDragStatusText, setPathDragStatusText] = useState<string | null>(null);
+  const [pathDragSnapshot, setPathDragSnapshot] = useState<PathGameSnapshot | null>(null);
+  const lastPathHudUpdateMsRef = useRef(0);
+  const lastPathHudPhaseRef = useRef<PathGameSnapshot["phase"] | null>(null);
 
   const fallingCupFinishedRef = useRef(false);
   const fallingCupLastTickMsRef = useRef<number | null>(null);
@@ -959,6 +1042,8 @@ export function PatientSessionPage({
   const fallingCupRoundsRef = useRef<FallingCupSnapshot[]>([]); // one snapshot per resolved object
   const fallingCupRoundHookRef = useRef<((snap: FallingCupSnapshot) => void) | null>(null);
   const [fallingCupStatusText, setFallingCupStatusText] = useState<string | null>(null);
+  const [fallingCupSnapshot, setFallingCupSnapshot] = useState<FallingCupSnapshot | null>(null);
+  const lastFallingCupHudUpdateMsRef = useRef(0);
 
   const handStatusText =
     virtualGripGameType === 'path-drag'
@@ -1008,6 +1093,9 @@ export function PatientSessionPage({
       pathDragLastDetectMsRef.current = 0;
       pathDragLastObjectMsRef.current = 0;
       setPathDragStatusText(null);
+      setPathDragSnapshot(null);
+      lastPathHudUpdateMsRef.current = 0;
+      lastPathHudPhaseRef.current = null;
     } else if (gameType === 'falling-cup') {
       fallingCupGameRef.current = new FallingCupGameFSM({ ...DEFAULT_FALLING_CUP_CONFIG });
       fallingCupFinishedRef.current = false;
@@ -1017,6 +1105,8 @@ export function PatientSessionPage({
       fallingCupHandFilterYRef.current.reset();
       fallingCupRoundsRef.current = [];
       setFallingCupStatusText(null);
+      setFallingCupSnapshot(fallingCupGameRef.current.snapshot());
+      lastFallingCupHudUpdateMsRef.current = 0;
     }
   }
 
@@ -1043,6 +1133,8 @@ export function PatientSessionPage({
     scoringHoldRef.current = false;
     setRepFeedback(null);
     setPoseStatusText(null);
+    setPoseRoundScoreNotice(null);
+    setPoseCaptionScore(null);
     lastPoseCaptionRef.current = "";
     landmarkFiltersRef.current = [];
     resetGripSession();
@@ -1124,6 +1216,11 @@ export function PatientSessionPage({
     if (score !== null) {
       setDemoScore(score);
       poseRepScoresRef.current.push(score);
+      setPoseCaptionScore(null);
+      setPoseRoundScoreNotice(score);
+      window.setTimeout(() => {
+        if (cycle === repCycleRef.current) setPoseRoundScoreNotice(null);
+      }, 3000);
     }
     setRepFeedback(feedback);
     setPoseStatusText(countedStatus);
@@ -1269,6 +1366,11 @@ export function PatientSessionPage({
     if (caption !== lastPoseCaptionRef.current) {
       lastPoseCaptionRef.current = caption;
       setPoseStatusText(caption);
+      if (caption === "กำลังทำท่าบริหาร") {
+        const scores = poseRepScoresRef.current;
+        const latestScore = scores[scores.length - 1];
+        if (latestScore !== undefined) setPoseCaptionScore(latestScore);
+      }
     }
 
     if (output.repCompleted && output.completedRep) {
@@ -1284,6 +1386,10 @@ export function PatientSessionPage({
   // camera HUD and the sidebar target section render from this).
   const progressLabel = total > 0 ? `${demoDone} / ${total}` : exercise.progressLabel;
   const localizedProgressLabel = progressDisplayLabel(progressLabel);
+  const mobileRoundProgressLabel = total > 0
+    ? `รอบที่ ${demoDone}/${total}`
+    : `รอบที่ ${localizedProgressLabel}`;
+  const showMobileRoundProgress = poseTrackingEnabled || handTrackingEnabled;
   const progressPercent = total > 0 ? Math.round((demoDone / total) * 100) : 0;
   const score = demoScore;
   const fallingCupRoundScores = fallingCupRoundsRef.current.map((round, index, rounds) =>
@@ -1297,16 +1403,23 @@ export function PatientSessionPage({
     ? pathDragRoundsRef.current.map((round) => round.accuracyScore)
     : gripRoundsRef.current.map((round) => round.finalRepScore);
   const lastRoundScore = roundScores.length > 0 ? roundScores[roundScores.length - 1] : null;
+  const poseCountdownMatch = poseTrackingEnabled
+    ? poseStatusText?.match(/^เริ่มครั้งถัดไปใน (\d+)…$/) ?? null
+    : null;
   const averageSessionScore = roundScores.length > 0
     ? Math.round(roundScores.reduce((sum, roundScore) => sum + roundScore, 0) / roundScores.length)
     : null;
   const trackingIcons = trackingIconsFor(exercise.trackingType);
-  // movementTracking=pose: real per-rep AI feedback from the backend scoring
-  // engine (Thai, generated by scoreEngine) once a rep has been scored; the
-  // canned demo messages only apply to non-pose exercises.
-  const feedbackText = poseTrackingEnabled || handTrackingEnabled
-    ? repFeedback ?? exercise.feedback
-    : demoFeedbackMessages(exercise)[feedbackIndex] ?? exercise.feedback;
+  const therapistFeedback = exercise.feedback?.trim() ?? "";
+  const descriptionFallback = exercise.description?.trim() || fetchedExerciseDescription?.trim() || "";
+  const feedbackUsesDescription = !therapistFeedback && Boolean(descriptionFallback);
+  const feedbackText = feedbackUsesDescription
+    ? descriptionFallback
+    : poseTrackingEnabled || handTrackingEnabled
+    ? therapistFeedback
+    : demoFeedbackMessages(exercise)[feedbackIndex] ?? therapistFeedback;
+  const showTrackingWarning = lowConfidence && !poseTrackingEnabled;
+  const showScoredFeedbackIcon = Boolean(repFeedback) && !poseTrackingEnabled && !handTrackingEnabled;
 
   // Virtual-grip round finished (point, miss, timeout or lost tracking) —
   // advance the shared rep counter / green bar and the running game score
@@ -1390,6 +1503,10 @@ export function PatientSessionPage({
     if (snap.status === 'finished') {
       const cycle = repCycleRef.current;
       fallingCupFinishedRef.current = true;
+      if (!completionNotifiedRef.current) {
+        completionNotifiedRef.current = true;
+        setSessionCompleteNotice(true);
+      }
       setFallingCupStatusText(`จบเกมแล้ว — จับได้ ${snap.caught}/${snap.total} ชิ้น`);
       window.setTimeout(() => {
         if (cycle === repCycleRef.current) stopRef.current();
@@ -1486,6 +1603,8 @@ export function PatientSessionPage({
     demoDoneRef.current = demoDone;
     poseRepScoresRef.current = [];
     poseRepDetailsRef.current = [];
+    setPoseRoundScoreNotice(null);
+    setPoseCaptionScore(null);
     // New session = time discontinuity — landmark filters start fresh.
     landmarkFiltersRef.current = [];
     resetGripSession();
@@ -1551,6 +1670,8 @@ export function PatientSessionPage({
     demoDoneRef.current = initialDone;
     poseRepScoresRef.current = [];
     poseRepDetailsRef.current = [];
+    setPoseRoundScoreNotice(null);
+    setPoseCaptionScore(null);
     setRepFeedback(null);
     lastPoseCaptionRef.current = "";
     landmarkFiltersRef.current = [];
@@ -1595,19 +1716,23 @@ export function PatientSessionPage({
             </div>
           )}
 
-          {/* REAL tracking overlay canvas — mounted as soon as the camera is
-              streaming (not only after Start), so the live skeleton is visible
-              during the preroll too and the patient can see the tracker working
-              while positioning themselves. The preroll (framing guide, z-index 3)
-              layers above it; rep tracking itself stays gated on Start. */}
-          {(poseTrackingEnabled || handTrackingEnabled) && camera.status === "streaming" && (
+          {/* Tracking starts with the session, so no skeleton or game appears
+              during the pre-start framing prompt. */}
+          {sessionStarted && (poseTrackingEnabled || handTrackingEnabled) && camera.status === "streaming" && (
             <canvas
               ref={skeletonCanvasRef}
               className="hand-tracking-overlay"
               aria-hidden="true"
             />
           )}
-
+          {virtualGripGameType === "falling-cup" &&
+            fallingCupSnapshot &&
+            fallingCupSnapshot.status !== "paused" && (
+            <FallingCupHud
+              snapshot={fallingCupSnapshot}
+              className="falling-cup-hud-mobile"
+            />
+          )}
           <header className="session-topbar">
             <div className="session-topbar-info">
               <strong className="session-topbar-title">
@@ -1620,7 +1745,7 @@ export function PatientSessionPage({
                     push the Exit button off-screen on narrow phones. */}
                 <span className="session-topbar-name">{exercise.name}</span>
               </strong>
-              <span>{exercise.nameTh ? `${exercise.nameTh} · ` : ""}{localizedProgressLabel}</span>
+              {exercise.nameTh && <span>{exercise.nameTh}</span>}
             </div>
             <button className="session-icon-button" onClick={handleExit} aria-label="ออกจากเซสชัน">
               <LogOut size={18} />
@@ -1649,23 +1774,13 @@ export function PatientSessionPage({
 
           {sessionStarted && (
             <>
-              <div className={`tracking-status ${trackingStatus}`} role="status">
-                <span />
-                การติดตาม: {trackingCopy[trackingStatus]}
-              </div>
-
               {/* §10/§12 — the old circular progress badge was removed: the bottom
                   progress line is the single camera HUD progress indicator (the
                   desktop side panel has its own target section). */}
 
               <div className={`reference-panel${referenceOpen ? " open" : ""}`}>
                 <ExerciseDemoMedia exercise={exercise} overrideUrl={testConfig?.demoVideoUrl} />
-                <span>ท่าอ้างอิง</span>
               </div>
-              {/* Compact floating toggle: the reference thumb stays hidden behind
-                  this button on phone/tablet so it never covers the patient's
-                  tracking area. On desktop (≥1100px) CSS hides BOTH this toggle
-                  and the floating panel — the demo lives in the sidebar there. */}
               <button
                 type="button"
                 className="reference-toggle"
@@ -1673,44 +1788,72 @@ export function PatientSessionPage({
                 aria-expanded={referenceOpen}
                 aria-label={referenceOpen ? "ซ่อนท่าอ้างอิง" : "แสดงท่าอ้างอิง"}
               >
-                <Play size={13} />
-                ดูตัวอย่าง
+                <Play size={18} />
+                <span>ดูวิดีโอตัวอย่าง</span>
               </button>
-
-              {/* The live skeleton canvas itself is mounted above (as soon as the
-                  camera streams) so it is visible during the preroll as well. */}
-              <div className="overlay-caption" role="status">
-                {(poseTrackingEnabled || handTrackingEnabled) && trackingLoadState === "error"
-                  ? "ไม่สามารถเริ่มการติดตามได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต"
-                  : (poseTrackingEnabled || handTrackingEnabled) && trackingLoadState === "loading"
-                  ? "กำลังโหลดระบบติดตาม…"
-                  : poseTrackingEnabled && poseStatusText
-                  ? poseStatusText
-                  : handTrackingEnabled && handStatusText
-                  ? handStatusText
-                  : handTrackingEnabled && handDetected
-                  ? "กำลังติดตามมือ"
-                  : poseTrackingEnabled && poseDetected
-                  ? "กำลังติดตามท่าทาง"
-                  : handTrackingEnabled
-                  ? "ยกมือให้กล้องมองเห็น"
-                  : poseTrackingEnabled
-                  ? "ถอยออกมาเพื่อให้กล้องเห็นร่างกายทั้งหมด"
-                  : "ท่าอ้างอิง"}
+              <div className={`session-caption-row${poseTrackingEnabled ? " pose-tracking-caption" : ""}`}>
+                {!(virtualGripGameType === "path-drag" && pathDragSnapshot) &&
+                  !(virtualGripGameType === "falling-cup" && fallingCupSnapshot) && (
+                    <>
+                      {poseRoundScoreNotice !== null && (
+                        <div className="pose-countdown-text" role="status" aria-live="polite">
+                          {poseRoundScoreNotice}/100
+                        </div>
+                      )}
+                      <div className="overlay-caption" role="status">
+                        {poseTrackingEnabled ? (
+                          <div className="pose-caption-content">
+                            <span className="pose-caption-status">
+                              {poseCountdownMatch ? "กลับสู่ท่าเริ่มต้น" : poseStatusText ?? "เข้าสู่ท่าเริ่มต้น"}
+                            </span>
+                            {poseCaptionScore !== null && (
+                              <span className="pose-caption-score">คะแนนรอบที่แล้ว {poseCaptionScore}/100</span>
+                            )}
+                          </div>
+                        ) : (poseTrackingEnabled || handTrackingEnabled) && trackingLoadState === "error"
+                        ? "ไม่สามารถเริ่มการติดตามได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต"
+                        : (poseTrackingEnabled || handTrackingEnabled) && trackingLoadState === "loading"
+                        ? "กำลังโหลดระบบติดตาม…"
+                        : handTrackingEnabled && handStatusText
+                        ? handStatusText
+                        : handTrackingEnabled && handDetected
+                        ? "กำลังติดตามมือ"
+                        : poseTrackingEnabled && poseDetected
+                        ? "กำลังติดตามท่าทาง"
+                        : handTrackingEnabled
+                        ? "ยกมือให้กล้องมองเห็น"
+                        : poseTrackingEnabled
+                        ? "ถอยออกมาเพื่อให้กล้องเห็นร่างกายทั้งหมด"
+                        : "ท่าอ้างอิง"}
+                      </div>
+                      {poseCountdownMatch && (
+                        <div className="pose-countdown-text pose-countdown-text-bottom" role="status" aria-live="assertive">
+                          เตรียมพร้อม {poseCountdownMatch[1]}
+                        </div>
+                      )}
+                    </>
+                  )}
               </div>
-
+              {virtualGripGameType === "path-drag" && pathDragSnapshot && (
+                <PathDragHud
+                  snapshot={pathDragSnapshot}
+                  className="path-drag-hud-mobile"
+                />
+              )}
               {paused && <div className="session-state">หยุดชั่วคราว</div>}
 
               <div className="session-bottom-stack">
                 {/* §9 — compact feedback chip instead of the old large permanent
                     feedback panel: icon indicates state (✓ good / ↑ correction
                     needed) so it doesn't rely on color alone. */}
-                <div className={`feedback-chip ${lowConfidence ? "warning" : ""}`} role="status" aria-live="polite">
-                  <span className="feedback-chip-icon" aria-hidden="true">
-                    {lowConfidence ? <ArrowUp size={14} /> : <Check size={14} />}
-                  </span>
-                  <p>
-                    {lowConfidence
+                <div className={`feedback-chip ${showTrackingWarning ? "warning" : ""}`} role="status" aria-live="polite">
+                  {(showTrackingWarning || showScoredFeedbackIcon) && (
+                    <span className="feedback-chip-icon" aria-hidden="true">
+                      {showTrackingWarning ? <ArrowUp size={14} /> : <Check size={14} />}
+                    </span>
+                  )}
+                  <p className={feedbackUsesDescription ? "feedback-description" : undefined}>
+                    {showTrackingWarning
                       ? "ถอยออกมาอีกนิดเพื่อให้แขนอยู่ในกรอบกล้อง"
                       : feedbackText}
                   </p>
@@ -1719,12 +1862,24 @@ export function PatientSessionPage({
                 {/* §8 — single primary progress representation on the camera:
                     "X of Y" count + bar. The score chip is hidden on phones
                     (CSS) where the spec deprioritizes it, visible on tablet+. */}
-                <div className="session-progress-line" role="status" aria-label={`ความคืบหน้าของเซสชัน: ${localizedProgressLabel}`}>
+                <div
+                  className={`session-progress-line${showMobileRoundProgress ? " round-progress-line" : ""}`}
+                  role="status"
+                  aria-label={`ความคืบหน้าของเซสชัน: ${localizedProgressLabel}`}
+                >
                   <span className="session-progress-score">
                     {/* "—" until a real backend score exists — no mock number. */}
                     {score === null ? <strong>—</strong> : <><strong>{score}</strong> คะแนน</>}
                   </span>
+                  {showMobileRoundProgress && (
+                    <span className="session-progress-average">
+                      คะแนนเฉลี่ย {averageSessionScore ?? 0}/100
+                    </span>
+                  )}
                   <span className="session-progress-count">{localizedProgressLabel}</span>
+                  {showMobileRoundProgress && (
+                    <span className="session-progress-count-mobile">{mobileRoundProgressLabel}</span>
+                  )}
                   <span className="session-progress-track" aria-hidden="true">
                     <span className="session-progress-fill" style={{ width: `${progressPercent}%` }} />
                   </span>
@@ -1763,7 +1918,7 @@ export function PatientSessionPage({
           )}
           {sessionCompleteNotice && (
             <div className="session-complete-notice" role="status" aria-live="assertive">
-              <Smile size={88} strokeWidth={1.8} aria-hidden="true" />
+              <Check size={88} strokeWidth={2.5} aria-hidden="true" />
               <strong>จบเซสชันแล้ว!</strong>
               <span>ทำได้ดีมาก</span>
             </div>
@@ -1778,11 +1933,6 @@ export function PatientSessionPage({
           <div className="side-section side-heading">
             <p className="eyebrow">เซสชันฝึก</p>
             <div className="side-name-row">
-              <span className="side-tracking-icons" aria-hidden="true">
-                {trackingIcons.map((Icon, index) => (
-                  <Icon key={index} size={16} />
-                ))}
-              </span>
               <h1 className="side-exercise-name">{exercise.name}</h1>
             </div>
             {exercise.nameTh && <p className="side-name-th">{exercise.nameTh}</p>}
@@ -1793,7 +1943,7 @@ export function PatientSessionPage({
               the floating phone/tablet panel; sized 16:9 and responsive to the
               sidebar width via CSS. */}
           <div className="side-section side-reference">
-            <p className="side-label">ท่าอ้างอิง</p>
+            <p className="side-label">วิดีโอตัวอย่าง</p>
             <ExerciseDemoMedia exercise={exercise} overrideUrl={testConfig?.demoVideoUrl} />
           </div>
 
@@ -1804,6 +1954,22 @@ export function PatientSessionPage({
             <p className="side-label">คำแนะนำนักกายภาพ</p>
             <p className="side-instruction-text">{exercise.feedback}</p>
           </div>
+
+          {virtualGripGameType === "falling-cup" &&
+            fallingCupSnapshot &&
+            fallingCupSnapshot.status !== "paused" && (
+            <FallingCupHud
+              snapshot={fallingCupSnapshot}
+              className="falling-cup-hud-desktop"
+            />
+          )}
+
+          {virtualGripGameType === "path-drag" && pathDragSnapshot && (
+            <PathDragHud
+              snapshot={pathDragSnapshot}
+              className="path-drag-hud-desktop"
+            />
+          )}
 
           {/* C — target/progress: repetition counter ("1 / 10") + the green
               completion bar, placed ABOVE the score so the patient reads how far
@@ -1853,11 +2019,13 @@ export function PatientSessionPage({
           {/* D — live feedback (same state/text as the camera feedback chip) */}
           <div className="side-section side-feedback">
             <p className="side-label">คำแนะนำ</p>
-            <div className={`side-feedback-body ${lowConfidence ? "warning" : ""}`} role="status" aria-live="polite">
-              <span className="feedback-chip-icon" aria-hidden="true">
-                {lowConfidence ? <ArrowUp size={15} /> : <Check size={15} />}
-              </span>
-              <p>{lowConfidence
+            <div className={`side-feedback-body ${showTrackingWarning ? "warning" : ""}`} role="status" aria-live="polite">
+              {(showTrackingWarning || showScoredFeedbackIcon) && (
+                <span className="feedback-chip-icon" aria-hidden="true">
+                  {showTrackingWarning ? <ArrowUp size={15} /> : <Check size={15} />}
+                </span>
+              )}
+              <p className={feedbackUsesDescription ? "feedback-description" : undefined}>{showTrackingWarning
                 ? "ถอยออกมาอีกนิดเพื่อให้แขนอยู่ในกรอบกล้อง"
                 : feedbackText}</p>
             </div>
@@ -1867,26 +2035,30 @@ export function PatientSessionPage({
               session-ending Finish action, visually distinct. Same handlers as
               the on-camera controls (handleStop keeps its existing behavior). */}
           <div className="side-section side-controls">
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={handleTogglePause}
-            >
-              {paused ? <TimerReset size={16} /> : <Square size={16} />}
-              {paused ? "เล่นต่อ" : "หยุดชั่วคราว"}
-            </button>
-            <button type="button" className="secondary-button" onClick={handleRestart}>
-              <RotateCcw size={16} />
-              เริ่มใหม่
-            </button>
-            <button
-              type="button"
-              className="primary-button full-width finish-button"
-              onClick={sessionStarted ? handleStop : handleStart}
-              disabled={!sessionStarted && camera.status !== "streaming"}
-            >
-              {sessionStarted ? "จบเซสชัน" : "เริ่ม"}
-            </button>
+            <div className="side-control-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={handleTogglePause}
+              >
+                {paused ? <TimerReset size={16} /> : <Square size={16} />}
+                {paused ? "เล่นต่อ" : "หยุดชั่วคราว"}
+              </button>
+              <button type="button" className="secondary-button" onClick={handleRestart}>
+                <RotateCcw size={16} />
+                เริ่มใหม่
+              </button>
+            </div>
+            <div className="side-control-finish">
+              <button
+                type="button"
+                className="primary-button full-width finish-button"
+                onClick={sessionStarted ? handleStop : handleStart}
+                disabled={!sessionStarted && camera.status !== "streaming"}
+              >
+                {sessionStarted ? "จบการฝึก" : "เริ่ม"}
+              </button>
+            </div>
           </div>
         </aside>
       </div>
