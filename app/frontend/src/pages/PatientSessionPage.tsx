@@ -1617,7 +1617,7 @@ export function PatientSessionPage({
         : virtualGripGameType === 'falling-cup'
         ? (fallingCupScore !== null ? [fallingCupScore] : [])
         : virtualGripGameType === 'path-drag'
-        ? pathDragRounds.map((r) => Math.round(r.accuracyScore * 100))
+        ? pathDragRounds.map((r) => r.accuracyScore)
         : gripRounds.map((round) => round.finalRepScore);
       const poseSummary: PoseSessionSummary | undefined = repScores.length > 0
         ? {
