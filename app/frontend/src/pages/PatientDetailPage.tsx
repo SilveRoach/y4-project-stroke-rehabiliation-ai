@@ -37,7 +37,6 @@ import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import {
   ApiError,
-  getTherapistSessions,
   getPatientPlans,
   createPatientPlan,
   patchPlan,
@@ -711,72 +710,6 @@ export function PatientDetailPage({
       setPlansLoading(false);
     }
   };
-
-  // Real session history — GET /therapists/:id/sessions (modules/session-results/*),
-  // the same endpoint/service TherapistSessionsPage.tsx already uses, reused here
-  // instead of adding a new per-patient route. That endpoint already scopes its
-  // results to patients currently assigned to the calling (self) therapist, so
-  // filtering its result down to this one patient client-side isn't relying on
-  // the UI alone for authorization — a therapist can never receive another
-  // therapist's patient sessions from this call in the first place.
-  // The list is scoped to the CURRENTLY SELECTED PLAN: once the plan list has
-  // settled, the query passes ?patientId=<this patient>&planId=<selected plan>,
-  // so only that plan's completed/skipped schedule days come back (the
-  // patientId+planId client-side filter below is belt-and-braces for the same
-  // invariant). This also sidesteps the endpoint's recent-50 cap being spread
-  // across all patients — the cap now applies to this one plan's days.
-  const [sessionHistory, setSessionHistory] = useState<SessionHistoryEntry[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [sessionsError, setSessionsError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!token || !user) return;
-    // Wait for the plan list to settle so the query can be scoped to the
-    // selected plan (selectedPlanId is only known after GET /patients/:id/plans).
-    if (plansLoading) return;
-    if (!selectedPlanId) {
-      // No plan selected (patient has no plans) → no schedule days → no sessions.
-      setSessionHistory([]);
-      setSessionsError(null);
-      setSessionsLoading(false);
-      return;
-    }
-    let cancelled = false;
-
-    setSessionsLoading(true);
-    setSessionsError(null);
-
-    getTherapistSessions(token, user.id, { patientId: patient.id, planId: selectedPlanId })
-      .then((data) => {
-        if (!cancelled) {
-          setSessionHistory(
-            data.sessions.filter(
-              (session) => session.patientId === patient.id && session.rehabilitationPlanId === selectedPlanId
-            )
-          );
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setSessionsError(err instanceof ApiError ? err.message : "โหลดประวัติการฝึกไม่สำเร็จ กรุณาลองอีกครั้ง");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSessionsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token, user, patient.id, selectedPlanId, plansLoading]);
-
-  // No medical-history backend exists against the current schema — newdb2.txt's
-  // redesign dropped patient_medical_history / medical_history_attachments
-  // entirely (see schema.prisma's header note), even though api-design.md still
-  // documents GET/POST /patients/:id/medical-history from the prior design.
-  // hasEarlierSessions has no real source yet (no pagination endpoint for
-  // session/medical resources), so keep it fixed at false rather than fabricating data.
-  const hasEarlierSessions = false;
 
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? plans[0] ?? null;
 
@@ -1798,72 +1731,6 @@ export function PatientDetailPage({
             )}
           </div>
 
-          {/* 3. Session history — now full width. REMOVED in this pass: the old
-              side-by-side "Plan Medical Attachments" card (attachment list,
-              View/Remove actions, "Attach file" button) and its dedicated
-              AddAttachmentModal/FileViewModal dialogs. Plan-level attachment
-              management still exists inside the View / edit / create plan modal. */}
-          <div className="summary-card pd-session-card">
-              <div className="therapist-chart-heading">
-                <div>
-                  <strong>ประวัติการฝึก</strong>
-                  <p>
-                    {sessionsLoading
-                      ? "กำลังโหลด…"
-                      : `บันทึกการฝึกแล้ว ${sessionHistory.length} ครั้ง`}
-                  </p>
-                </div>
-              </div>
-
-              {sessionsError && (
-                <p className="pd-empty-note" role="alert">
-                  {sessionsError}
-                </p>
-              )}
-
-              {sessionsLoading ? (
-                <p className="pd-empty-note">กำลังโหลดประวัติการฝึก…</p>
-              ) : sessionHistory.length === 0 ? (
-                <p className="pd-empty-note">ยังไม่มีประวัติการฝึก</p>
-              ) : (
-                <>
-                  <div className="pd-session-list">
-                    {sessionHistory.map((session) => (
-                      <div key={session.id} className="pd-session-row">
-                        <div>
-                          <span>
-                            {displayDateValue(session.dateLabel)} &middot; {displayDayLabel(session.dayLabel)}
-                          </span>
-                          <small>ฝึกท่าบริหารแล้ว {session.exercisesAttempted} ท่า</small>
-                        </div>
-                        <div className="pd-session-actions">
-                          {session.outcome === "skipped" ? (
-                            <span className="pd-session-skipped">ข้าม</span>
-                          ) : (
-                            <span className="pd-session-score">คะแนนเฉลี่ย {session.avgScore}</span>
-                          )}
-                          {session.evaluationSource && (
-                            <span className={`pd-session-source ${session.evaluationSource}`}>
-                              {session.evaluationSource === "ai" ? "ประเมินโดย AI" : "ประเมินโดยนักกายภาพบำบัด"}
-                            </span>
-                          )}
-                          {/* Real: routes to SessionResultReviewPage (§2.7), which
-                              was only a static mockup (session-result-review.html)
-                              until now. */}
-                          <button type="button" className="text-action" onClick={() => onReviewSession(session)}>
-                            ตรวจสอบผล <ChevronRight size={12} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {/* Stub: no earlier-session pagination endpoint exists yet — kept
-                      as inert text matching the mockup rather than a toggle with
-                      nothing to reveal. */}
-                  {hasEarlierSessions && <p className="pd-show-more">แสดงประวัติการฝึกก่อนหน้า</p>}
-                </>
-              )}
-          </div>
         </main>
       </div>
 

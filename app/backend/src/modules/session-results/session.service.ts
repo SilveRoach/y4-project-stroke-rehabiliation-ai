@@ -125,6 +125,7 @@ export interface PatientTodayPlanDto {
 
 export interface PatientTodayDto {
   patient: { id: string; displayName: string; avatarInitials: string; profilePictureFileId: string | null };
+  todayDate: string;
   // Every active plan, for the "All Plans" / per-plan selector — empty array
   // when the patient has no active plan at all.
   activePlans: { id: string; name: string }[];
@@ -215,7 +216,12 @@ export async function getPatientToday(patientId: string): Promise<PatientTodayDt
   // a missed day the next pending day is tomorrow), which leaked tomorrow's
   // exercises into the Home page's list. A plan with nothing scheduled today
   // simply gets a null today block (no exercises shown for it today).
-  const todayIsoStr = isoDate(new Date());
+  const todayIsoStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
   const planDtos: PatientTodayPlanDto[] = plans.map((plan) => {
     const candidates = plan.scheduleDays
       .map((day, index) => ({ day, index }))
@@ -283,6 +289,7 @@ export async function getPatientToday(patientId: string): Promise<PatientTodayDt
 
   return {
     patient: { id: patient.userId, displayName: name, avatarInitials: initialsFromName(name), profilePictureFileId: patient.user.profilePictureFileId },
+    todayDate: todayIsoStr,
     activePlans: plans.map((plan) => ({ id: plan.id, name: plan.name })),
     plans: planDtos,
     stats: { averageScore: scores.length > 0 ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null, completedSessions }

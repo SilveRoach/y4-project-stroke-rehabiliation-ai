@@ -281,7 +281,9 @@ export function ExerciseAiPage({
   const [difficulty, setDifficulty] = useState<Difficulty>(exercise?.difficultyLevel ?? "medium");
   const [repetitions, setRepetitions] = useState(exercise?.baseCriteria.repetitions?.toString() ?? "10");
   const [holdSeconds, setHoldSeconds] = useState(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
-  const [targetGripStrength, setTargetGripStrength] = useState(exercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+  const [ballGripRoundTimeSeconds, setBallGripRoundTimeSeconds] = useState(
+    exercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8"
+  );
   const [virtualGripGameType, setVirtualGripGameType] = useState<HandTrackingGameType | null>(exercise?.baseCriteria?.virtualGripGameType ?? null);
 
   // Demo-clip scanning state. Only ONE clip can scan at a time (the scanner
@@ -452,7 +454,7 @@ export function ExerciseAiPage({
     setDifficulty(exercise?.difficultyLevel ?? "medium");
     setRepetitions(exercise?.baseCriteria.repetitions?.toString() ?? "10");
     setHoldSeconds(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
-    setTargetGripStrength(exercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+    setBallGripRoundTimeSeconds(exercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8");
     setVirtualGripGameType(exercise?.baseCriteria?.virtualGripGameType ?? null);
     setSavedExerciseName(null);
   }, [exercise, initialName, initialTracking]);
@@ -467,7 +469,7 @@ export function ExerciseAiPage({
     setDifficulty(targetExercise?.difficultyLevel ?? "medium");
     setRepetitions(targetExercise?.baseCriteria.repetitions?.toString() ?? "10");
     setHoldSeconds(targetExercise?.baseCriteria.holdSeconds?.toString() ?? "5");
-    setTargetGripStrength(targetExercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+    setBallGripRoundTimeSeconds(targetExercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8");
     setVirtualGripGameType(targetExercise?.baseCriteria?.virtualGripGameType ?? null);
     setBaseClip(null);
     setCalibration(null);
@@ -913,6 +915,14 @@ export function ExerciseAiPage({
   //     version when it is active (BR-6 — active versions are immutable).
   const handleSave = async (): Promise<boolean> => {
     if (!token || !isOwner || isArchived) return false;
+    if (
+      movementTracking === "virtual_grip" &&
+      virtualGripGameType === "ball-grip" &&
+      (!Number.isInteger(Number(ballGripRoundTimeSeconds)) || Number(ballGripRoundTimeSeconds) < 1)
+    ) {
+      setSaveError("กำหนดเวลาในแต่ละรอบอย่างน้อย 1 วินาที");
+      return false;
+    }
     if (isPoseExercise && !hasValidMovementLandmarks) {
       setSaveError(
         timelineFrames.length < 3
@@ -976,10 +986,11 @@ export function ExerciseAiPage({
               }
             : movementTracking === "virtual_grip"
               ? {
-                  targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined,
                   repetitions: repetitions ? Number(repetitions) : undefined,
-                  holdSeconds: holdSeconds ? Number(holdSeconds) : undefined,
-                  virtualGripGameType: virtualGripGameType ?? undefined
+                  virtualGripGameType: virtualGripGameType ?? undefined,
+                  ...(virtualGripGameType === "ball-grip"
+                    ? { ballGripRoundTimeSeconds: Number(ballGripRoundTimeSeconds) }
+                    : {})
                 }
               : { repetitions: repetitions ? Number(repetitions) : undefined },
           demoVideoFileId: uploadedClipId ?? targetExercise.demoVideoFileId ?? null
@@ -1003,10 +1014,11 @@ export function ExerciseAiPage({
           ? { repetitions: repetitions ? Number(repetitions) : undefined, holdSeconds: holdSeconds ? Number(holdSeconds) : undefined, targetAngleDeg: targetRom, poseReference }
           : movementTracking === "virtual_grip"
             ? {
-                targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined,
                 repetitions: repetitions ? Number(repetitions) : undefined,
-                holdSeconds: holdSeconds ? Number(holdSeconds) : undefined,
                 virtualGripGameType: virtualGripGameType ?? undefined,
+                ...(virtualGripGameType === "ball-grip"
+                  ? { ballGripRoundTimeSeconds: Number(ballGripRoundTimeSeconds) }
+                  : {})
               }
             : { repetitions: repetitions ? Number(repetitions) : undefined },
         demoVideoFileId: uploadedClipId
@@ -1202,7 +1214,16 @@ export function ExerciseAiPage({
         difficulty: difficulty === "easy" ? "Easy" : difficulty === "medium" ? "Moderate" : "Hard",
         virtualGripGameType: movementTracking === "virtual_grip" ? (virtualGripGameType ?? undefined) : undefined
       },
-      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl, virtualGripGameType: movementTracking === "virtual_grip" ? virtualGripGameType : null },
+      testConfig: {
+        poseReference,
+        exerciseLibraryId: targetExercise?.id ?? null,
+        demoVideoUrl,
+        virtualGripGameType: movementTracking === "virtual_grip" ? virtualGripGameType : null,
+        ballGripRoundTimeSeconds:
+          movementTracking === "virtual_grip" && virtualGripGameType === "ball-grip"
+            ? Number(ballGripRoundTimeSeconds)
+            : undefined
+      },
       ownsDemoVideoUrl: Boolean(baseClip)
     });
     setTestPaused(false);
@@ -2013,7 +2034,7 @@ export function ExerciseAiPage({
                 )}
               </section>
 
-              <section className="creation-section-card ai-manual-criteria-card ai-card-full">
+              <section className="creation-section-card ai-manual-criteria-card">
                 <div className="ai-card-step-tag">
                   ขั้นตอนที่ {isHandTrackingExercise ? 3 : 2} · เกณฑ์ท่าบริหาร
                 </div>
@@ -2024,14 +2045,17 @@ export function ExerciseAiPage({
                     <p className="library-card-sub">กำหนดเกณฑ์ที่จะใช้เมื่อมอบหมายกิจกรรมนี้ให้ผู้ป่วย</p>
                   </div>
                 </div>
-                {movementTracking === "virtual_grip" && (
-                  <label className="ai-field">แรงบีบมือเป้าหมาย
-                    <input className="ai-input" type="number" min="0" value={targetGripStrength} onChange={(event) => setTargetGripStrength(event.target.value)} disabled={isArchived || !isOwner} />
-                  </label>
-                )}
-                {movementTracking === "virtual_grip" && (
-                  <label className="ai-field">ระยะเวลาค้างไว้ (วินาที)
-                    <input className="ai-input" type="number" min="0" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} disabled={isArchived || !isOwner} />
+                {movementTracking === "virtual_grip" && virtualGripGameType === "ball-grip" && (
+                  <label className="ai-field">เวลาในแต่ละรอบ (วินาที)
+                    <input
+                      className="ai-input"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={ballGripRoundTimeSeconds}
+                      onChange={(event) => setBallGripRoundTimeSeconds(event.target.value)}
+                      disabled={isArchived || !isOwner}
+                    />
                   </label>
                 )}
                 <div className="ai-save-actions">

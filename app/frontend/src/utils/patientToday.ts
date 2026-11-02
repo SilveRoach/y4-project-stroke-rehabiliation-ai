@@ -189,9 +189,10 @@ function isoAfter(iso: string, days: number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function buildExerciseDateStatusMap(plans: PatientTodayPlan[]): Map<string, DayCellStatus> {
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+export function buildExerciseDateStatusMap(
+  plans: PatientTodayPlan[],
+  todayIso: string
+): Map<string, DayCellStatus> {
   const statusMap = new Map<string, DayCellStatus>();
   const outrank = (current: DayCellStatus | undefined, next: DayCellStatus): DayCellStatus => {
     if (current === "completed" || next === "completed") return "completed";

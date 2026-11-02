@@ -661,6 +661,7 @@ export interface PatientTodayPlan {
 
 export interface PatientTodayData {
   patient: { id: string; displayName: string; avatarInitials: string; profilePictureFileId?: string | null };
+  todayDate: string;
   activePlans: { id: string; name: string }[];
   plans: PatientTodayPlan[];
   stats: { averageScore: number | null; completedSessions: number };

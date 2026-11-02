@@ -322,6 +322,7 @@ export interface ExerciseBaseCriteria {
   targetGripStrength?: number;
   repetitions?: number;
   holdSeconds?: number;
+  ballGripRoundTimeSeconds?: number;
   /**
    * AI pose-reference authored in the AI workspace (CreateExerciseView flow):
    * angle definitions + FSM rep criteria + master/wrong-form feature samples

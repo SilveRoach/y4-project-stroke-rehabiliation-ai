@@ -106,12 +106,6 @@ export function drawFallingCupGame(
   ctx.lineTo(width, bandBottomPx);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.font = `bold 13px sans-serif`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = bandColor;
-  ctx.fillText('โซนมือ — ให้มืออยู่ในกรอบนี้', 10, bandTopPx + 6);
-
   // 3) ช่องทางปล่อยเหนือถ้วย: คอลัมน์โปร่งแสงจากล่างโซนมือถึงปากถ้วย บอกว่าปล่อยตรงไหนจะลงถ้วย
   ctx.fillStyle = 'rgba(41,182,246,0.12)';
   ctx.fillRect(cupCx - mouthHalfPx, bandBottomPx, mouthHalfPx * 2, rimYPx - bandBottomPx);

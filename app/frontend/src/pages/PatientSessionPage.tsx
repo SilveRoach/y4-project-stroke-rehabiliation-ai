@@ -16,7 +16,7 @@ import {
 } from "../ai/poseScoring/posePipeline";
 import type { PoseReferencePublic, PoseRepScoringResult } from "../ai/poseScoring/poseScoringTypes";
 import { OneEuroFilter } from "../ai/poseScoring/oneEuroFilter";
-import { VirtualBallGripFSM, type GripState } from "../ai/grip/ballGripFSM";
+import { DEFAULT_BALL_GRIP_CONFIG, VirtualBallGripFSM, type GripState } from "../ai/grip/ballGripFSM";
 import { classifyGripState, computeGripVisibleFrame, computeHandOpenness, computeMirroredPalmCenter, mirrorVisibleFrame } from "../ai/grip/ballGripInput";
 import { drawBallGrip } from "../ai/grip/ballGripRenderer";
 import type { BallGripRepResult } from "../ai/grip/ballGripScoring";
@@ -31,7 +31,7 @@ import {
   scoreExerciseTestRep,
   scorePoseRep
 } from "../services/api";
-import type { PatientExercise, TrackingType } from "../types";
+import type { ExerciseBaseCriteria, PatientExercise, TrackingType } from "../types";
 import { ObjectDetectorService } from "../ai/objectDetection/objectDetectorService";
 import { ItemTracker, LOST_THRESHOLD_FRAMES } from "../ai/objectDetection/itemTracker";
 import { PathDragFSM } from "../ai/evaluators/pathDragFSM";
@@ -82,6 +82,8 @@ export interface SessionTestConfig {
   demoVideoUrl?: string | null;
   /** Which hand-tracking minigame to test (only for virtual_grip exercises). */
   virtualGripGameType?: HandTrackingGameType | null;
+  /** Ball Grip round duration authored in ExerciseAiPage, in seconds. */
+  ballGripRoundTimeSeconds?: number;
 }
 
 interface PatientSessionPageProps {
@@ -297,6 +299,15 @@ export function PatientSessionPage({
   const virtualGripGameType = ((testConfig?.virtualGripGameType !== undefined && testConfig?.virtualGripGameType !== null
     ? testConfig.virtualGripGameType
     : (exercise.virtualGripGameType ?? (exercise.baseCriteria as any)?.virtualGripGameType ?? fetchedGameType))) as HandTrackingGameType | undefined;
+  const exerciseBaseCriteria = !Array.isArray(exercise.baseCriteria)
+    ? exercise.baseCriteria as ExerciseBaseCriteria | null | undefined
+    : undefined;
+  const configuredBallGripRoundTime = testConfig?.ballGripRoundTimeSeconds ??
+    exerciseBaseCriteria?.ballGripRoundTimeSeconds ??
+    DEFAULT_BALL_GRIP_CONFIG.roundTimeLimitSeconds;
+  const ballGripRoundTimeSeconds = Number.isInteger(configuredBallGripRoundTime) && configuredBallGripRoundTime >= 1
+    ? configuredBallGripRoundTime
+    : DEFAULT_BALL_GRIP_CONFIG.roundTimeLimitSeconds;
 
   // Fetch missing game configuration and exercise description from the scheduled exercise.
   useEffect(() => {
@@ -387,8 +398,12 @@ export function PatientSessionPage({
       } else {
         // ball-grip (default)
         if (!gripGameRef.current) {
-          gripGameRef.current = new VirtualBallGripFSM();
+          gripGameRef.current = new VirtualBallGripFSM({
+            ...DEFAULT_BALL_GRIP_CONFIG,
+            roundTimeLimitSeconds: ballGripRoundTimeSeconds
+          });
         }
+        gripGameRef.current.setRoundTimeLimit(ballGripRoundTimeSeconds);
       }
     }
 
@@ -1054,6 +1069,7 @@ export function PatientSessionPage({
 
   // Fresh grip game state (new session / restart / exercise switch).
   function resetGripSession() {
+    gripGameRef.current?.setRoundTimeLimit(ballGripRoundTimeSeconds);
     gripGameRef.current?.reset();
     gripStateRef.current = null;
     lastGripTickMsRef.current = null;

@@ -128,12 +128,16 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
   }, [visiblePlans]);
   const todayIso = useMemo(() => {
     const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  }, []);
+    return today?.todayDate ??
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }, [today?.todayDate]);
   // Per-date completion status (completed/missing/none) for the same visible
   // plans the dot-presence set above already tracks — drives the strip's
   // green/red/dark-gray fill, distinct from exerciseDates' plain yes/no.
-  const dateStatusMap = useMemo(() => buildExerciseDateStatusMap(visiblePlans), [visiblePlans]);
+  const dateStatusMap = useMemo(
+    () => buildExerciseDateStatusMap(visiblePlans, todayIso),
+    [visiblePlans, todayIso]
+  );
   // Reshape the visible plans into the PatientRehabPlan shape the Progress page's
   // month calendar consumes — same adapter (buildScheduleCalendarPlan) the
   // Progress page uses, so the Today page's month view renders identically.
@@ -392,7 +396,7 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
                   hasPlanDay && cell.otherMonth ? "adjacent" : "",
                   !hasPlanDay ? (cell.otherMonth ? "other" : cell.outside ? "outside" : "empty") : "",
                   cell.dayIndex !== null ? "clickable" : "",
-                  cell.dayIndex !== null && cell.dayIndex === (selectedDayIndex ?? currentDayIndex(calendarPlan.days)) ? "selected" : ""
+                  cell.dayIndex !== null && cell.dayIndex === (selectedDayIndex ?? currentDayIndex(calendarPlan.days, todayIso)) ? "selected" : ""
                 ].join(" ").trim();
                 return (
                   <button
