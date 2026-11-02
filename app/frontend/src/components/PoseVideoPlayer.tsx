@@ -7,13 +7,15 @@ interface PoseVideoPlayerProps {
   src: string;
   className?: string;
   trackingType?: ExerciseTrackingType | TrackingType;
+  overlayAlreadyIncluded?: boolean;
 }
 
-/** Replays a recorded camera video with the exercise's locally re-derived tracking overlay. */
+/** Replays a recording, re-deriving tracking overlays only for legacy camera-only videos. */
 export function PoseVideoPlayer({
   src,
   className = "sud-video",
-  trackingType = "pose"
+  trackingType = "pose",
+  overlayAlreadyIncluded = false
 }: PoseVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -22,6 +24,11 @@ export function PoseVideoPlayer({
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
+
+    if (overlayAlreadyIncluded) {
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
 
     const poseTracker = trackingType === "pose" || trackingType === "both" ? new PoseTracker() : null;
     const handTracker = trackingType === "virtual_grip" || trackingType === "both" ? new HandTracker() : null;
@@ -105,7 +112,7 @@ export function PoseVideoPlayer({
       video.removeEventListener("ended", onPause);
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
     };
-  }, [src, trackingType]);
+  }, [src, trackingType, overlayAlreadyIncluded]);
 
   return (
     <div className="pose-video-player">

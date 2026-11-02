@@ -25,6 +25,8 @@ export interface ReviewVideoPlayerProps {
   hasError: boolean;
   /** Movement tracking type for AI overlay */
   trackingType?: ExerciseTrackingType | TrackingType;
+  /** Skip re-drawing overlays when the uploaded recording already includes them. */
+  overlayAlreadyIncluded?: boolean;
   /** Optional placeholder label */
   placeholderLabel?: string;
 }
@@ -109,9 +111,11 @@ export function VideoErrorState({ label = "โหลดวิดีโอไม�
 export function VideoElement({
   src,
   trackingType = "pose",
+  overlayAlreadyIncluded = false,
 }: {
   src: string;
   trackingType?: ExerciseTrackingType | TrackingType;
+  overlayAlreadyIncluded?: boolean;
 }) {
   return (
     <div className="rvp-player-wrap">
@@ -119,6 +123,7 @@ export function VideoElement({
         src={src}
         className="rvp-video"
         trackingType={trackingType}
+        overlayAlreadyIncluded={overlayAlreadyIncluded}
       />
     </div>
   );
@@ -131,6 +136,7 @@ export function ReviewVideoPlayer({
   isLoading,
   hasError,
   trackingType = "pose",
+  overlayAlreadyIncluded = false,
   placeholderLabel = "ไม่มีวิดีโอ",
 }: ReviewVideoPlayerProps) {
   return (
@@ -148,7 +154,11 @@ export function ReviewVideoPlayer({
 
       {/* State C: Video loaded */}
       {!isLoading && !hasError && src && (
-        <VideoElement src={src} trackingType={trackingType} />
+        <VideoElement
+          src={src}
+          trackingType={trackingType}
+          overlayAlreadyIncluded={overlayAlreadyIncluded}
+        />
       )}
     </VideoViewport>
   );

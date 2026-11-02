@@ -811,6 +811,7 @@ export interface ScheduleDayReviewData {
       completedAtIso: string | null;
       aiEvaluatedAtIso: string | null;
       aiMetrics: Array<{ label: string; value: string }> | null;
+      videoIncludesOverlay: boolean;
       currentScore: number | null;
       currentScoreSource: "ai" | "pt" | "manual" | null;
       therapistReviewed: boolean;
@@ -839,6 +840,7 @@ export async function submitExerciseResult(
   payload: {
     aiScore?: number;
     aiFeedback?: string;
+    videoIncludesOverlay?: boolean;
     /** label -> value chips (shown in the review page), e.g. { "จำนวนครั้งที่ทำ": "8/10" }. */
     aiMetrics?: Record<string, string>;
     /** Structured per-session numbers: repsCompleted, targetReps, repScores. */
@@ -853,6 +855,7 @@ export async function submitExerciseResult(
   body.append("file", video, fileName);
   if (payload.aiScore !== undefined) body.append("aiScore", String(payload.aiScore));
   if (payload.aiFeedback !== undefined) body.append("aiFeedback", payload.aiFeedback);
+  if (payload.videoIncludesOverlay !== undefined) body.append("videoIncludesOverlay", String(payload.videoIncludesOverlay));
   if (payload.aiMetrics !== undefined) body.append("aiMetrics", JSON.stringify(payload.aiMetrics));
   if (payload.performanceData !== undefined) body.append("performanceData", JSON.stringify(payload.performanceData));
 

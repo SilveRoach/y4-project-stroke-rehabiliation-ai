@@ -2,6 +2,7 @@ import { ArrowUp, Check, Dumbbell, Hand, LogOut, Play, RotateCcw, Signal, Signal
 import { useEffect, useRef, useState } from "react";
 import { useCamera } from "../hooks/useCamera";
 import { useSessionRecording } from "../hooks/useSessionRecording";
+import { useSessionVideoComposition } from "../hooks/useSessionVideoComposition";
 import type { RecordingResult } from "../hooks/useSessionRecording";
 import { HandTracker, drawHandSkeleton, type Landmark } from "../ai/handDetection";
 import { PoseTracker, drawSkeleton, type PoseLandmark } from "../ai/poseDetection";
@@ -286,7 +287,13 @@ export function PatientSessionPage({
 }: PatientSessionPageProps) {
   const { token } = useAuth();
   const camera = useCamera(true);
-  const recording = useSessionRecording(camera.stream);
+  const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
+  const videoComposition = useSessionVideoComposition(
+    camera.videoRef,
+    skeletonCanvasRef,
+    camera.status === "streaming"
+  );
+  const recording = useSessionRecording(videoComposition.stream);
   const { done: initialDone, total } = parseProgress(exercise.progressLabel);
 
   // REAL TRACKING — replaces the static SVG overlay mockups with live MediaPipe
@@ -374,7 +381,6 @@ export function PatientSessionPage({
       cancelled = true;
     };
   }, [handTrackingEnabled, testConfig, virtualGripGameType, token, exercise.id, exercise.description]);
-  const skeletonCanvasRef = useRef<HTMLCanvasElement>(null);
   const handTrackerRef = useRef<HandTracker | null>(null);
   const poseTrackerRef = useRef<PoseTracker | null>(null);
   const runningRef = useRef(false);
@@ -694,6 +700,16 @@ export function PatientSessionPage({
                   const targetDetections = pathDragTargetLabel
                     ? detections.filter((d) => d.label === pathDragTargetLabel)
                     : detections;
+                  const bestDetection = detections.reduce(
+                    (best: DetectedObject | null, detection) =>
+                      detection.score > (best?.score ?? 0) ? detection : best,
+                    null
+                  );
+                  setPathDragDetectionLabel(bestDetection
+                    ? `${bestDetection.label} · ${Math.round(bestDetection.score * 100)}%`
+                    : pathDragTargetLabel
+                    ? `ไม่พบวัตถุ (เป้าหมาย: ${pathDragTargetLabel})`
+                    : "ยังไม่พบวัตถุ");
                   if (pathDragItemStateRef.current === 'selecting') {
                     const reachable = targetDetections.filter((d) => {
                       if (!unmirroredPalmPixel) return true;
@@ -937,6 +953,9 @@ export function PatientSessionPage({
         if (cancelled) return;
         console.error("Tracking model load failed (skeleton overlay disabled)", initError);
         setTrackingLoadState("error");
+        if (virtualGripGameType === 'path-drag') {
+          setPathDragDetectionLabel("โหลด AI ตรวจจับไม่สำเร็จ");
+        }
       });
 
     return () => {
@@ -1086,6 +1105,7 @@ export function PatientSessionPage({
   const pathDragRoundsRef = useRef<PathRoundResult[]>([]);
   const pathDragRoundHookRef = useRef<((round: PathRoundResult) => void) | null>(null);
   const [pathDragStatusText, setPathDragStatusText] = useState<string | null>(null);
+  const [pathDragDetectionLabel, setPathDragDetectionLabel] = useState("กำลังโหลด AI ตรวจจับ");
   const [pathDragSnapshot, setPathDragSnapshot] = useState<PathGameSnapshot | null>(null);
   const lastPathHudUpdateMsRef = useRef(0);
   const lastPathHudPhaseRef = useRef<PathGameSnapshot["phase"] | null>(null);
@@ -1147,6 +1167,7 @@ export function PatientSessionPage({
       pathDragAttachedRef.current = false;
       pathDragLastTrackedItemRef.current = null;
       pathDragLastCandidatesRef.current = [];
+      setPathDragDetectionLabel("กำลังโหลด AI ตรวจจับ");
       pathDragHandFilterXRef.current.reset();
       pathDragHandFilterYRef.current.reset();
       pathDragLastDetectMsRef.current = 0;
@@ -1652,6 +1673,7 @@ export function PatientSessionPage({
   };
 
   const handleStart = () => {
+    if (!recording.isSupported) return;
     setSessionCompleteNotice(false);
     setSessionStarted(true);
     recording.start();
@@ -1825,9 +1847,23 @@ export function PatientSessionPage({
             <div className="session-preroll">
               <p>จัดตำแหน่งตัวให้อยู่ในกรอบกล้อง</p>
               <FramingGuide />
-              <button type="button" className="primary-button" onClick={handleStart}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleStart}
+                disabled={!recording.isSupported || Boolean(videoComposition.error)}
+              >
                 เริ่ม
               </button>
+              {videoComposition.error ? (
+                <p className="session-recording-error" role="alert">{videoComposition.error}</p>
+              ) : !recording.isSupported ? (
+                <p className="session-recording-error" role="status">
+                  {typeof MediaRecorder === "undefined"
+                    ? "เบราว์เซอร์นี้ไม่รองรับการบันทึกวิดีโอ กรุณาใช้ Chrome หรือ Edge เวอร์ชันล่าสุด"
+                    : "กำลังเตรียมวิดีโอสำหรับบันทึก…"}
+                </p>
+              ) : null}
             </div>
           )}
 
@@ -1896,6 +1932,7 @@ export function PatientSessionPage({
               {virtualGripGameType === "path-drag" && pathDragSnapshot && (
                 <PathDragHud
                   snapshot={pathDragSnapshot}
+                  detectionLabel={pathDragDetectionLabel}
                   className="path-drag-hud-mobile"
                 />
               )}
@@ -2026,6 +2063,7 @@ export function PatientSessionPage({
           {virtualGripGameType === "path-drag" && pathDragSnapshot && (
             <PathDragHud
               snapshot={pathDragSnapshot}
+              detectionLabel={pathDragDetectionLabel}
               className="path-drag-hud-desktop"
             />
           )}

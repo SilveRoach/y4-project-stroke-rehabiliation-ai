@@ -60,6 +60,7 @@ function mapRealReviewToExercises(real: ScheduleDayReviewData): SessionExerciseR
       aiScore: attempt.aiScore ?? undefined,
       aiFeedback: attempt.aiFeedback ?? undefined,
       aiMetrics: attempt.aiMetrics ?? undefined,
+      videoIncludesOverlay: attempt.videoIncludesOverlay,
       aiEvaluatedAtLabel: attempt.aiEvaluatedAtIso
         ? new Date(attempt.aiEvaluatedAtIso).toLocaleString("th-TH")
         : undefined,
@@ -931,6 +932,7 @@ function AttemptReview({
             isLoading={videoLoading}
             hasError={videoError}
             trackingType={exercise.movementTracking}
+            overlayAlreadyIncluded
             placeholderLabel={videoLabel}
           />
         </div>

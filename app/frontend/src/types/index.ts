@@ -667,6 +667,7 @@ export interface ExercisePerformanceAttempt {
   // assumption already applied to MedicalHistoryRecord.details and
   // ExerciseLibraryItem.baseCriteria (UI_MOCKUP_PLAN_NEWDB.md ยง4).
   aiMetrics?: Array<{ label: string; value: string }>;
+  videoIncludesOverlay?: boolean;
   aiEvaluatedAtLabel?: string;
 
   ptScore?: number;

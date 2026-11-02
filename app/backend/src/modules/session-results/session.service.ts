@@ -386,6 +386,7 @@ export async function submitExerciseResult(
     aiFeedback?: string | null;
     aiMetrics?: Record<string, unknown>;
     performanceData?: Record<string, unknown>;
+    videoIncludesOverlay?: boolean;
   },
   isAdmin = false
 ): Promise<SubmittedExerciseResultDto> {
@@ -409,6 +410,10 @@ export async function submitExerciseResult(
   const attemptNumber = (latestAttempt?.attemptNumber ?? 0) + 1;
 
   const aiScore = typeof input.aiScore === "number" && Number.isFinite(input.aiScore) ? input.aiScore : null;
+  const performanceData = {
+    ...input.performanceData,
+    ...(input.videoIncludesOverlay !== undefined ? { videoIncludesOverlay: input.videoIncludesOverlay } : {})
+  };
 
   const { updatedExercise, result, day } = await prisma.$transaction(async (tx) => {
     const created = await tx.exercisePerformanceResult.create({
@@ -422,7 +427,7 @@ export async function submitExerciseResult(
         // Rep count & friends — without these the row only knew the score, so a
         // 3-of-10-reps session looked identical to a complete one.
         ...(input.aiMetrics ? { aiMetrics: input.aiMetrics as Prisma.InputJsonObject } : {}),
-        ...(input.performanceData ? { performanceData: input.performanceData as Prisma.InputJsonObject } : {}),
+        ...(Object.keys(performanceData).length > 0 ? { performanceData: performanceData as Prisma.InputJsonObject } : {}),
         aiEvaluatedAt: new Date(),
         evaluationSource: "ai"
       }
@@ -620,6 +625,11 @@ export async function getScheduleDayReview(dayId: string, therapistId: string, i
         completedAtIso: result.completedAt ? result.completedAt.toISOString() : null,
         aiEvaluatedAtIso: result.aiEvaluatedAt ? result.aiEvaluatedAt.toISOString() : null,
         aiMetrics: mapAiMetrics(result.aiMetrics),
+        videoIncludesOverlay:
+          result.performanceData !== null &&
+          typeof result.performanceData === "object" &&
+          !Array.isArray(result.performanceData) &&
+          result.performanceData.videoIncludesOverlay === true,
         currentScore: currentAttemptScore(result),
         currentScoreSource: activeAttemptSource(result),
         therapistReviewed:

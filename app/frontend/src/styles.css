@@ -1719,6 +1719,18 @@ div.exercise-card:hover {
   min-width: 180px;
 }
 
+.session-preroll .session-recording-error {
+  position: absolute;
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(90%, 420px);
+  margin: 0;
+  color: #ffffff;
+  font-size: 0.85rem;
+  text-shadow: 0 1px 3px #000000;
+}
+
 .session-complete-notice {
   position: absolute;
   inset: 0;
@@ -1849,6 +1861,38 @@ div.exercise-card:hover {
   display: grid;
   justify-items: center;
   gap: 2px;
+}
+
+.path-drag-hud-detection {
+  display: grid;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.path-drag-hud-detection span {
+  color: inherit;
+}
+
+.path-drag-hud-detection strong {
+  color: var(--text-primary);
+  font-size: inherit;
+  font-weight: 800;
+}
+
+.path-drag-hud-mobile .path-drag-hud-detection {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 4px;
+  color: rgba(255, 255, 255, 0.86);
+  line-height: 1.35;
+}
+
+.path-drag-hud-mobile .path-drag-hud-detection strong {
+  color: #ffffff;
 }
 
 .falling-cup-hud-mobile .falling-cup-hud-summary,

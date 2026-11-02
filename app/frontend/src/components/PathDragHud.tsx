@@ -2,9 +2,11 @@ import type { PathGameSnapshot } from "../types";
 
 export function PathDragHud({
   snapshot,
+  detectionLabel,
   className = ""
 }: {
   snapshot: PathGameSnapshot;
+  detectionLabel: string;
   className?: string;
 }) {
   const timerRunning = snapshot.phase === "ready" || snapshot.phase === "dragging";
@@ -19,6 +21,10 @@ export function PathDragHud({
         <span className={`path-drag-hud-time ${timeState}`}>
           {timerRunning ? "เหลือ" : "เวลา"} {seconds} วิ
         </span>
+      </div>
+      <div className="path-drag-hud-detection" role="status" aria-live="polite">
+        <span>AI ตรวจพบวัตถุ</span>
+        <strong>{detectionLabel}</strong>
       </div>
     </section>
   );

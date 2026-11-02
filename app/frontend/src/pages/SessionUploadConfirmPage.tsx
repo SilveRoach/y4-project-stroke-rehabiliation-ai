@@ -54,6 +54,7 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
         aiScore: attempt.aiScore,
         aiFeedback: attempt.aiFeedback,
         aiMetrics: Object.fromEntries(attempt.aiMetrics.map((metric) => [metric.label, metric.value])),
+        videoIncludesOverlay: true,
         ...(attempt.repsCompleted !== undefined
           ? {
               performanceData: {
@@ -85,7 +86,11 @@ export function SessionUploadConfirmPage({ attempt, attemptNumber, onConfirm, on
         <div className="srr-layout">
           <div className="srr-video-col">
             <p className="pd-record-attachments-label">วิดีโอของคุณ · ครั้งที่ {attemptNumber} (เมื่อยืนยัน)</p>
-            <PoseVideoPlayer src={attempt.videoBlobUrl} trackingType={attempt.trackingType} />
+              <PoseVideoPlayer
+                src={attempt.videoBlobUrl}
+                trackingType={attempt.trackingType}
+                overlayAlreadyIncluded
+              />
           </div>
 
           <div>
