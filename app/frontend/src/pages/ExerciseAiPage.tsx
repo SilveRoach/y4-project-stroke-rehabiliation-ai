@@ -59,6 +59,17 @@ interface ExerciseAiPageProps {
   isVersionView?: boolean;
 }
 
+const PATH_DRAG_TARGET_OPTIONS = [
+  { value: 'bottle', label: 'ขวด (Bottle)' },
+  { value: 'cup', label: 'แก้ว (Cup)' },
+  { value: 'sports ball', label: 'ลูกบอล (Sports ball)' },
+  { value: 'book', label: 'หนังสือ (Book)' },
+  { value: 'cell phone', label: 'โทรศัพท์มือถือ (Cell phone)' },
+  { value: 'remote', label: 'รีโมต (Remote)' },
+  { value: 'teddy bear', label: 'ตุ๊กตาหมี (Teddy bear)' },
+  { value: 'toothbrush', label: 'แปรงสีฟัน (Toothbrush)' }
+] as const;
+
 type Difficulty = Extract<ExerciseLibraryDifficulty, "easy" | "medium" | "hard">;
 
 interface ScannedClip {
@@ -284,6 +295,18 @@ export function ExerciseAiPage({
   const [ballGripRoundTimeSeconds, setBallGripRoundTimeSeconds] = useState(
     exercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8"
   );
+  const [fallingCupFallSpeed, setFallingCupFallSpeed] = useState(
+    exercise?.baseCriteria.fallingCupFallSpeed?.toString() ?? "0.10"
+  );
+  const [fallingCupSpawnIntervalSeconds, setFallingCupSpawnIntervalSeconds] = useState(
+    exercise?.baseCriteria.fallingCupSpawnIntervalSeconds?.toString() ?? "5"
+  );
+  const [pathDragTargetLabel, setPathDragTargetLabel] = useState(
+    exercise?.baseCriteria.pathDragTargetLabel ?? ""
+  );
+  const [pathDragRoundTimeSeconds, setPathDragRoundTimeSeconds] = useState(
+    exercise?.baseCriteria.pathDragRoundTimeSeconds?.toString() ?? "30"
+  );
   const [virtualGripGameType, setVirtualGripGameType] = useState<HandTrackingGameType | null>(exercise?.baseCriteria?.virtualGripGameType ?? null);
 
   // Demo-clip scanning state. Only ONE clip can scan at a time (the scanner
@@ -455,6 +478,10 @@ export function ExerciseAiPage({
     setRepetitions(exercise?.baseCriteria.repetitions?.toString() ?? "10");
     setHoldSeconds(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
     setBallGripRoundTimeSeconds(exercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8");
+    setFallingCupFallSpeed(exercise?.baseCriteria.fallingCupFallSpeed?.toString() ?? "0.10");
+    setFallingCupSpawnIntervalSeconds(exercise?.baseCriteria.fallingCupSpawnIntervalSeconds?.toString() ?? "5");
+    setPathDragTargetLabel(exercise?.baseCriteria.pathDragTargetLabel ?? "");
+    setPathDragRoundTimeSeconds(exercise?.baseCriteria.pathDragRoundTimeSeconds?.toString() ?? "30");
     setVirtualGripGameType(exercise?.baseCriteria?.virtualGripGameType ?? null);
     setSavedExerciseName(null);
   }, [exercise, initialName, initialTracking]);
@@ -470,6 +497,10 @@ export function ExerciseAiPage({
     setRepetitions(targetExercise?.baseCriteria.repetitions?.toString() ?? "10");
     setHoldSeconds(targetExercise?.baseCriteria.holdSeconds?.toString() ?? "5");
     setBallGripRoundTimeSeconds(targetExercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8");
+    setFallingCupFallSpeed(targetExercise?.baseCriteria.fallingCupFallSpeed?.toString() ?? "0.10");
+    setFallingCupSpawnIntervalSeconds(targetExercise?.baseCriteria.fallingCupSpawnIntervalSeconds?.toString() ?? "5");
+    setPathDragTargetLabel(targetExercise?.baseCriteria.pathDragTargetLabel ?? "");
+    setPathDragRoundTimeSeconds(targetExercise?.baseCriteria.pathDragRoundTimeSeconds?.toString() ?? "30");
     setVirtualGripGameType(targetExercise?.baseCriteria?.virtualGripGameType ?? null);
     setBaseClip(null);
     setCalibration(null);
@@ -923,6 +954,23 @@ export function ExerciseAiPage({
       setSaveError("กำหนดเวลาในแต่ละรอบอย่างน้อย 1 วินาที");
       return false;
     }
+    if (
+      movementTracking === "virtual_grip" &&
+      virtualGripGameType === "falling-cup" &&
+      (!Number.isFinite(Number(fallingCupFallSpeed)) || Number(fallingCupFallSpeed) < 0.05 || Number(fallingCupFallSpeed) > 0.2 ||
+        !Number.isFinite(Number(fallingCupSpawnIntervalSeconds)) || Number(fallingCupSpawnIntervalSeconds) < 2 || Number(fallingCupSpawnIntervalSeconds) > 10)
+    ) {
+      setSaveError("ความเร็วตกต้องอยู่ระหว่าง 0.05–0.20 และช่วงเวลาปล่อยวัตถุต้องอยู่ระหว่าง 2–10 วินาที");
+      return false;
+    }
+    if (
+      movementTracking === "virtual_grip" && virtualGripGameType === "path-drag" &&
+      (!pathDragTargetLabel || !Number.isInteger(Number(pathDragRoundTimeSeconds)) ||
+        Number(pathDragRoundTimeSeconds) < 5 || Number(pathDragRoundTimeSeconds) > 120)
+    ) {
+      setSaveError("เลือกวัตถุและกำหนดเวลาในแต่ละรอบระหว่าง 5–120 วินาทีสำหรับเกมลากตามเส้นทาง");
+      return false;
+    }
     if (isPoseExercise && !hasValidMovementLandmarks) {
       setSaveError(
         timelineFrames.length < 3
@@ -990,7 +1038,14 @@ export function ExerciseAiPage({
                   virtualGripGameType: virtualGripGameType ?? undefined,
                   ...(virtualGripGameType === "ball-grip"
                     ? { ballGripRoundTimeSeconds: Number(ballGripRoundTimeSeconds) }
-                    : {})
+                    : virtualGripGameType === "falling-cup"
+                      ? {
+                          fallingCupFallSpeed: Number(fallingCupFallSpeed),
+                          fallingCupSpawnIntervalSeconds: Number(fallingCupSpawnIntervalSeconds)
+                        }
+                      : virtualGripGameType === "path-drag"
+                        ? { pathDragTargetLabel, pathDragRoundTimeSeconds: Number(pathDragRoundTimeSeconds) }
+                      : {})
                 }
               : { repetitions: repetitions ? Number(repetitions) : undefined },
           demoVideoFileId: uploadedClipId ?? targetExercise.demoVideoFileId ?? null
@@ -1018,7 +1073,14 @@ export function ExerciseAiPage({
                 virtualGripGameType: virtualGripGameType ?? undefined,
                 ...(virtualGripGameType === "ball-grip"
                   ? { ballGripRoundTimeSeconds: Number(ballGripRoundTimeSeconds) }
-                  : {})
+                  : virtualGripGameType === "falling-cup"
+                    ? {
+                        fallingCupFallSpeed: Number(fallingCupFallSpeed),
+                        fallingCupSpawnIntervalSeconds: Number(fallingCupSpawnIntervalSeconds)
+                      }
+                    : virtualGripGameType === "path-drag"
+                      ? { pathDragTargetLabel, pathDragRoundTimeSeconds: Number(pathDragRoundTimeSeconds) }
+                    : {})
               }
             : { repetitions: repetitions ? Number(repetitions) : undefined },
         demoVideoFileId: uploadedClipId
@@ -1222,6 +1284,22 @@ export function ExerciseAiPage({
         ballGripRoundTimeSeconds:
           movementTracking === "virtual_grip" && virtualGripGameType === "ball-grip"
             ? Number(ballGripRoundTimeSeconds)
+            : undefined,
+        fallingCupFallSpeed:
+          movementTracking === "virtual_grip" && virtualGripGameType === "falling-cup"
+            ? Number(fallingCupFallSpeed)
+            : undefined,
+        fallingCupSpawnIntervalSeconds:
+          movementTracking === "virtual_grip" && virtualGripGameType === "falling-cup"
+            ? Number(fallingCupSpawnIntervalSeconds)
+            : undefined,
+        pathDragTargetLabel:
+          movementTracking === "virtual_grip" && virtualGripGameType === "path-drag"
+            ? pathDragTargetLabel
+            : undefined,
+        pathDragRoundTimeSeconds:
+          movementTracking === "virtual_grip" && virtualGripGameType === "path-drag"
+            ? Number(pathDragRoundTimeSeconds)
             : undefined
       },
       ownsDemoVideoUrl: Boolean(baseClip)
@@ -1327,8 +1405,20 @@ export function ExerciseAiPage({
             <div className="ai-banner ai-banner-success">
               <CheckCircle2 size={20} />
               <div>
-                <strong>สร้างท่าบริหารสำเร็จ</strong>
-                <div>บันทึก “{savedExerciseName}” เป็นฉบับร่างแล้ว สามารถเผยแพร่ได้จากคลังท่าบริหาร</div>
+                <strong>
+                  {targetExercise
+                    ? "บันทึกการเปลี่ยนแปลงสำเร็จ"
+                    : movementTracking === "virtual_grip"
+                      ? "สร้างเกมฝึกสำเร็จ"
+                      : "สร้างท่าบริหารสำเร็จ"}
+                </strong>
+                <div>
+                  {targetExercise
+                    ? `บันทึกการเปลี่ยนแปลงของ “${savedExerciseName}” แล้ว`
+                    : movementTracking === "virtual_grip"
+                      ? `บันทึกการตั้งค่าเกม “${savedExerciseName}” เป็นฉบับร่างแล้ว สามารถเผยแพร่ได้จากคลังท่าบริหาร`
+                      : `บันทึก “${savedExerciseName}” เป็นฉบับร่างแล้ว สามารถเผยแพร่ได้จากคลังท่าบริหาร`}
+                </div>
               </div>
             </div>
           )}
@@ -2036,13 +2126,13 @@ export function ExerciseAiPage({
 
               <section className="creation-section-card ai-manual-criteria-card">
                 <div className="ai-card-step-tag">
-                  ขั้นตอนที่ {isHandTrackingExercise ? 3 : 2} · เกณฑ์ท่าบริหาร
+                  ขั้นตอนที่ {isHandTrackingExercise ? 3 : 2} · {movementTracking === "virtual_grip" ? "การตั้งค่าเกม" : "เกณฑ์ท่าบริหาร"}
                 </div>
                 <div className="creation-section-header">
                   {movementTracking === "virtual_grip" ? <Hand size={20} /> : <Dumbbell size={20} />}
                   <div>
-                    <strong>{movementTracking === "virtual_grip" ? "เกณฑ์การวัดแรงบีบมือ" : "เกณฑ์ท่าบริหาร"}</strong>
-                    <p className="library-card-sub">กำหนดเกณฑ์ที่จะใช้เมื่อมอบหมายกิจกรรมนี้ให้ผู้ป่วย</p>
+                    <strong>{movementTracking === "virtual_grip" ? "การตั้งค่าเกมติดตามมือ" : "เกณฑ์ท่าบริหาร"}</strong>
+                    <p className="library-card-sub">{movementTracking === "virtual_grip" ? "กำหนดรูปแบบและความยากของเกมก่อนมอบหมายกิจกรรมนี้ให้ผู้ป่วย" : "กำหนดเกณฑ์ที่จะใช้เมื่อมอบหมายกิจกรรมนี้ให้ผู้ป่วย"}</p>
                   </div>
                 </div>
                 {movementTracking === "virtual_grip" && virtualGripGameType === "ball-grip" && (
@@ -2057,6 +2147,64 @@ export function ExerciseAiPage({
                       disabled={isArchived || !isOwner}
                     />
                   </label>
+                )}
+                {movementTracking === "virtual_grip" && virtualGripGameType === "falling-cup" && (
+                  <>
+                    <label className="ai-field">ความเร็วการตก (0.05–0.20)
+                      <input
+                        className="ai-input"
+                        type="number"
+                        min="0.05"
+                        max="0.20"
+                        step="0.01"
+                        value={fallingCupFallSpeed}
+                        onChange={(event) => setFallingCupFallSpeed(event.target.value)}
+                        disabled={isArchived || !isOwner}
+                      />
+                    </label>
+                    <label className="ai-field">ช่วงเวลาปล่อยวัตถุ (วินาที)
+                      <input
+                        className="ai-input"
+                        type="number"
+                        min="2"
+                        max="10"
+                        step="0.5"
+                        value={fallingCupSpawnIntervalSeconds}
+                        onChange={(event) => setFallingCupSpawnIntervalSeconds(event.target.value)}
+                        disabled={isArchived || !isOwner}
+                      />
+                    </label>
+                  </>
+                )}
+                {movementTracking === "virtual_grip" && virtualGripGameType === "path-drag" && (
+                  <>
+                    <label className="ai-field">วัตถุที่ให้ AI ตรวจจับ
+                      <select
+                        className="ai-input"
+                        value={pathDragTargetLabel}
+                        onChange={(event) => setPathDragTargetLabel(event.target.value)}
+                        disabled={isArchived || !isOwner}
+                      >
+                        <option value="">— เลือกวัตถุ —</option>
+                        {PATH_DRAG_TARGET_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <span className="library-card-sub">AI จะตรวจจับและติดตามเฉพาะวัตถุที่เลือก</span>
+                    </label>
+                    <label className="ai-field">เวลาในแต่ละรอบ (วินาที)
+                      <input
+                        className="ai-input"
+                        type="number"
+                        min="5"
+                        max="120"
+                        step="1"
+                        value={pathDragRoundTimeSeconds}
+                        onChange={(event) => setPathDragRoundTimeSeconds(event.target.value)}
+                        disabled={isArchived || !isOwner}
+                      />
+                    </label>
+                  </>
                 )}
                 <div className="ai-save-actions">
                   <button

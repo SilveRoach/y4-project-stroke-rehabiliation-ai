@@ -84,6 +84,13 @@ export interface SessionTestConfig {
   virtualGripGameType?: HandTrackingGameType | null;
   /** Ball Grip round duration authored in ExerciseAiPage, in seconds. */
   ballGripRoundTimeSeconds?: number;
+  /** Falling Cup pace authored in ExerciseAiPage. */
+  fallingCupFallSpeed?: number;
+  fallingCupSpawnIntervalSeconds?: number;
+  /** Object category selected by the therapist for Path Drag. */
+  pathDragTargetLabel?: string;
+  /** Path Drag time limit authored in ExerciseAiPage, in seconds. */
+  pathDragRoundTimeSeconds?: number;
 }
 
 interface PatientSessionPageProps {
@@ -308,6 +315,37 @@ export function PatientSessionPage({
   const ballGripRoundTimeSeconds = Number.isInteger(configuredBallGripRoundTime) && configuredBallGripRoundTime >= 1
     ? configuredBallGripRoundTime
     : DEFAULT_BALL_GRIP_CONFIG.roundTimeLimitSeconds;
+  const configuredFallingCupFallSpeed = testConfig?.fallingCupFallSpeed ??
+    exerciseBaseCriteria?.fallingCupFallSpeed ??
+    DEFAULT_FALLING_CUP_CONFIG.fallSpeed;
+  const fallingCupFallSpeed = Number.isFinite(configuredFallingCupFallSpeed) &&
+    configuredFallingCupFallSpeed >= 0.05 && configuredFallingCupFallSpeed <= 0.2
+    ? configuredFallingCupFallSpeed
+    : DEFAULT_FALLING_CUP_CONFIG.fallSpeed;
+  const configuredFallingCupSpawnInterval = testConfig?.fallingCupSpawnIntervalSeconds ??
+    exerciseBaseCriteria?.fallingCupSpawnIntervalSeconds ??
+    DEFAULT_FALLING_CUP_CONFIG.spawnIntervalSec;
+  const fallingCupSpawnIntervalSeconds = Number.isFinite(configuredFallingCupSpawnInterval) &&
+    configuredFallingCupSpawnInterval >= 2 && configuredFallingCupSpawnInterval <= 10
+    ? configuredFallingCupSpawnInterval
+    : DEFAULT_FALLING_CUP_CONFIG.spawnIntervalSec;
+  const fallingCupConfig = {
+    ...DEFAULT_FALLING_CUP_CONFIG,
+    fallSpeed: fallingCupFallSpeed,
+    // Keep the post-release animation proportional to the authored falling pace.
+    dropSpeed: fallingCupFallSpeed * 3,
+    spawnIntervalSec: fallingCupSpawnIntervalSeconds
+  };
+  const configuredPathDragTargetLabel = testConfig?.pathDragTargetLabel ?? exerciseBaseCriteria?.pathDragTargetLabel;
+  const pathDragTargetLabel = typeof configuredPathDragTargetLabel === 'string' && configuredPathDragTargetLabel.trim()
+    ? configuredPathDragTargetLabel.trim()
+    : null;
+  const configuredPathDragRoundTime = testConfig?.pathDragRoundTimeSeconds ??
+    exerciseBaseCriteria?.pathDragRoundTimeSeconds ?? 30;
+  const pathDragRoundTimeSeconds = Number.isInteger(configuredPathDragRoundTime) &&
+    configuredPathDragRoundTime >= 5 && configuredPathDragRoundTime <= 120
+    ? configuredPathDragRoundTime
+    : 30;
 
   // Fetch missing game configuration and exercise description from the scheduled exercise.
   useEffect(() => {
@@ -382,7 +420,7 @@ export function PatientSessionPage({
       const gameType = virtualGripGameType ?? 'ball-grip';
       if (gameType === 'falling-cup') {
         if (!fallingCupGameRef.current) {
-          fallingCupGameRef.current = new FallingCupGameFSM({ ...DEFAULT_FALLING_CUP_CONFIG });
+          fallingCupGameRef.current = new FallingCupGameFSM(fallingCupConfig);
         }
       } else if (gameType === 'path-drag') {
         if (!pathDragGameRef.current) {
@@ -391,7 +429,7 @@ export function PatientSessionPage({
           pathDragGameRef.current = new PathDragFSM({
             pathType: 'straight',
             widthLevel: 'medium',
-            roundTimeSec: 30,
+            roundTimeSec: pathDragRoundTimeSeconds,
             totalRounds: total > 0 ? total : 5
           });
         }
@@ -651,8 +689,13 @@ export function PatientSessionPage({
                 ) {
                   pathDragLastObjectMsRef.current = now;
                   const detections = objectDetectorRef.current.detect(video, now);
+                  // A therapist-selected category is authoritative: do not let a
+                  // nearby but unrelated detection become the drag object.
+                  const targetDetections = pathDragTargetLabel
+                    ? detections.filter((d) => d.label === pathDragTargetLabel)
+                    : detections;
                   if (pathDragItemStateRef.current === 'selecting') {
-                    const reachable = detections.filter((d) => {
+                    const reachable = targetDetections.filter((d) => {
                       if (!unmirroredPalmPixel) return true;
                       const cx = d.boundingBox.originX + d.boundingBox.width / 2;
                       const cy = d.boundingBox.originY + d.boundingBox.height / 2;
@@ -673,7 +716,7 @@ export function PatientSessionPage({
                     }
                   } else {
                     const tracked = itemTrackerRef.current.update(
-                      detections,
+                      targetDetections,
                       videoW,
                       videoH,
                       now
@@ -1087,14 +1130,14 @@ export function PatientSessionPage({
         pathDragGameRef.current = new PathDragFSM({
           pathType: 'straight',
           widthLevel: 'medium',
-          roundTimeSec: 30,
+          roundTimeSec: pathDragRoundTimeSeconds,
           totalRounds: total > 0 ? total : 5
         });
       } else {
         pathDragGameRef.current.reset({
           pathType: 'straight',
           widthLevel: 'medium',
-          roundTimeSec: 30,
+          roundTimeSec: pathDragRoundTimeSeconds,
           totalRounds: total > 0 ? total : 5
         });
       }
@@ -1113,7 +1156,7 @@ export function PatientSessionPage({
       lastPathHudUpdateMsRef.current = 0;
       lastPathHudPhaseRef.current = null;
     } else if (gameType === 'falling-cup') {
-      fallingCupGameRef.current = new FallingCupGameFSM({ ...DEFAULT_FALLING_CUP_CONFIG });
+      fallingCupGameRef.current = new FallingCupGameFSM(fallingCupConfig);
       fallingCupFinishedRef.current = false;
       fallingCupLastTickMsRef.current = null;
       fallingCupLastGripRef.current = 'open';

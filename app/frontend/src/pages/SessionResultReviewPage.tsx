@@ -11,11 +11,10 @@ import {
   ChevronRight,
   Save,
   UserRound,
-  Video
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { PoseVideoPlayer } from "../components/PoseVideoPlayer";
+import { ReviewVideoPlayer } from "../components/ReviewVideoPlayer";
 import { TherapistSidebar } from "../components/TherapistSidebar";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { useProfilePicture } from "../hooks/useProfilePicture";
@@ -110,6 +109,47 @@ function criterionLabel(value: string): string {
 
 function isHoldSecondsCriterion(value: string): boolean {
   return value.trim().toLowerCase().replace(/_/g, " ") === "hold seconds";
+}
+
+type ReviewParameter = { label: string; value: string };
+
+function minigameTrackingParameters(
+  criteria: ReviewParameter[] | null | undefined
+): ReviewParameter[] | null {
+  if (!criteria?.length) return null;
+  const byKey = new Map(criteria.map((criterion) => [criterion.label.trim().toLowerCase(), criterion.value]));
+  const gameType = byKey.get("virtual grip game type")?.trim().toLowerCase();
+  if (!gameType) return null;
+
+  const valueFor = (key: string) => byKey.get(key);
+  const withSeconds = (value: string | undefined) => value === undefined ? null : `${value} วินาที`;
+
+  if (gameType === "ball-grip") {
+    const roundTime = valueFor("ball grip round time seconds");
+    return [
+      { label: "เกมฝึก", value: "จับลูกบอลเสมือน (Ball Grip)" },
+      ...(roundTime === undefined ? [] : [{ label: "เวลาในแต่ละรอบ", value: withSeconds(roundTime)! }])
+    ];
+  }
+  if (gameType === "falling-cup") {
+    const fallSpeed = valueFor("falling cup fall speed");
+    const spawnInterval = valueFor("falling cup spawn interval seconds");
+    return [
+      { label: "เกมฝึก", value: "จับถ้วยตกลงมา (Falling Cup)" },
+      ...(fallSpeed === undefined ? [] : [{ label: "ความเร็วการตก", value: fallSpeed }]),
+      ...(spawnInterval === undefined ? [] : [{ label: "ช่วงเวลาปล่อยวัตถุ", value: withSeconds(spawnInterval)! }])
+    ];
+  }
+  if (gameType === "path-drag") {
+    const targetObject = valueFor("path drag target label");
+    const roundTime = valueFor("path drag round time seconds");
+    return [
+      { label: "เกมฝึก", value: "ลากตามเส้นทาง (Path Drag)" },
+      ...(targetObject === undefined ? [] : [{ label: "วัตถุที่ให้ AI ตรวจจับ", value: targetObject }]),
+      ...(roundTime === undefined ? [] : [{ label: "เวลาในแต่ละรอบ", value: withSeconds(roundTime)! }])
+    ];
+  }
+  return null;
 }
 
 function reviewDayLabel(value: string): string {
@@ -832,12 +872,16 @@ function AttemptReview({
     ? ptScoreDraft
     : "—";
   const aiScoreRange = attemptAiScoreRange(exercise);
+  // Minigames display their own saved settings here, rather than a mixed list
+  // of generic exercise criteria that do not apply to that game.
+  const trackingParameters = minigameTrackingParameters(exercise.baseCriteria) ?? exercise.baseCriteria ?? [];
   // Stream the patient's recorded attempt video: the real attempt carries a
   // server files-row id (referenceVideoFileId) — fetch the bytes via the auth'd
   // GET /files/:fileId/content endpoint and render a real player. Mock attempts
   // (no file id) keep the placeholder box.
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoError, setVideoError] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(false);
 
   useEffect(() => {
     const fileId = attempt.referenceVideoFileId ?? null;
@@ -850,14 +894,16 @@ function AttemptReview({
     let objectUrl: string | null = null;
     setVideoUrl(null);
     setVideoError(false);
+    setVideoLoading(true);
     getFileContent(token, fileId)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setVideoUrl(objectUrl);
+        setVideoLoading(false);
       })
       .catch(() => {
-        if (!cancelled) setVideoError(true);
+        if (!cancelled) { setVideoError(true); setVideoLoading(false); }
       });
     return () => {
       cancelled = true;
@@ -879,19 +925,14 @@ function AttemptReview({
         <ReviewSectionTitle>
           ตรวจสอบผลการฝึก
         </ReviewSectionTitle>
-        <div className="srr-video-col">
-          {videoUrl ? (
-            <PoseVideoPlayer
-              src={videoUrl}
-              className="srr-review-video"
-              trackingType={exercise.movementTracking}
-            />
-          ) : (
-            <div className="srr-video-placeholder">
-              {!videoError && <Video size={26} />}
-              <span>{videoLabel}</span>
-            </div>
-          )}
+        <div className="srr-video-col" style={{ width: "100%", alignSelf: "stretch" }}>
+          <ReviewVideoPlayer
+            src={videoUrl}
+            isLoading={videoLoading}
+            hasError={videoError}
+            trackingType={exercise.movementTracking}
+            placeholderLabel={videoLabel}
+          />
         </div>
 
         <div className="srr-exercise-info">
@@ -921,7 +962,7 @@ function AttemptReview({
           )}
           <details className="srr-ai-parameters">
             <summary>AI Tracking Parameters</summary>
-            {(attempt.aiMetrics?.length || exercise.baseCriteria?.length || attempt.aiEvaluatedAtLabel) ? (
+            {(attempt.aiMetrics?.length || trackingParameters.length || attempt.aiEvaluatedAtLabel) ? (
               <div className="srr-ai-parameters-grid">
                 {attempt.aiMetrics?.map((metric) => (
                   <div className="srr-ai-parameter-item" key={metric.label}>
@@ -929,7 +970,7 @@ function AttemptReview({
                     <strong>{metric.value}</strong>
                   </div>
                 ))}
-                {exercise.baseCriteria?.map((criterion) => (
+                {trackingParameters.map((criterion) => (
                   <div className="srr-ai-parameter-item" key={criterion.label}>
                     <span>{criterionLabel(criterion.label)}</span>
                     <strong>{isHoldSecondsCriterion(criterion.label) ? aiScoreRange : criterion.value}</strong>

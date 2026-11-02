@@ -323,6 +323,14 @@ export interface ExerciseBaseCriteria {
   repetitions?: number;
   holdSeconds?: number;
   ballGripRoundTimeSeconds?: number;
+  /** Falling Cup's normal falling speed, in screen heights per second. */
+  fallingCupFallSpeed?: number;
+  /** Falling Cup's interval between object spawns, in seconds. */
+  fallingCupSpawnIntervalSeconds?: number;
+  /** COCO category the therapist selected for Path Drag object detection. */
+  pathDragTargetLabel?: string;
+  /** Path Drag time limit for each round, in seconds. */
+  pathDragRoundTimeSeconds?: number;
   /**
    * AI pose-reference authored in the AI workspace (CreateExerciseView flow):
    * angle definitions + FSM rep criteria + master/wrong-form feature samples

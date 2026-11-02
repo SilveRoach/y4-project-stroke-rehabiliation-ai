@@ -8292,18 +8292,21 @@ div.exercise-card:hover {
   display: grid;
   place-items: center;
   width: 100%;
-  height: min(calc(38vh + 80px), 440px);
-  min-height: 300px;
+  min-height: 0;
+  height: auto;
+  aspect-ratio: 16 / 9;
   border-radius: 12px;
   background: #000000;
   color: #ffffff;
 }
 
 .srr-video-col .pose-video-player {
+  position: relative;
+  display: block;
   width: 100%;
-  height: min(calc(38vh + 80px), 440px);
-  min-height: 300px;
-  aspect-ratio: auto;
+  min-height: 0;
+  height: auto;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: 12px;
   background: #000000;
@@ -8918,10 +8921,11 @@ div.exercise-card:hover {
 }
 
 .srr-media-exercise-card {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   grid-column: 1;
-  grid-template-columns: minmax(0, 1.15fr) minmax(240px, 0.85fr);
-  align-items: start;
+  width: 100%;
+  align-items: stretch;
   gap: 14px;
 }
 
@@ -9272,8 +9276,7 @@ div.exercise-card:hover {
 
   .srr-video-placeholder,
   .srr-video-col .pose-video-player {
-    height: min(calc(42vh + 80px), 380px);
-    min-height: 260px;
+    /* aspect-ratio: 16/9 is already set; no fixed height override needed */
   }
 }
 
@@ -9415,7 +9418,7 @@ div.exercise-card:hover {
 .srr-review-workspace {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.95fr);
   align-items: start;
   gap: 14px 16px;
   min-width: 0;
@@ -9717,7 +9720,8 @@ div.exercise-card:hover {
 .srr-media-exercise-card > .srr-section-title,
 .srr-media-exercise-card > .srr-video-col,
 .srr-media-exercise-card > .srr-exercise-info {
-  grid-column: 1;
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .srr-attempt-chips {
@@ -9730,11 +9734,15 @@ div.exercise-card:hover {
 .srr-media-exercise-card {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  align-items: stretch;
   gap: 12px;
 }
 
 .srr-video-col {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   gap: 8px;
   min-width: 0;
 }
@@ -9791,14 +9799,18 @@ div.exercise-card:hover {
 }
 
 .srr-video-col .pose-video-player {
+  position: relative;
   display: block;
+  width: 100%;
   min-height: 0;
   height: auto;
   aspect-ratio: 16 / 9;
+  overflow: hidden;
   background: #090d14;
 }
 
 .srr-video-col .pose-video-player .srr-review-video {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -10266,9 +10278,9 @@ div.exercise-card:hover {
 
   .srr-video-placeholder,
   .srr-video-col .pose-video-player {
+    /* responsive: aspect-ratio already 16/9; keep height auto */
     min-height: 0;
     height: auto;
-    aspect-ratio: 16 / 9;
   }
 
   .srr-metrics-grid {
@@ -13776,8 +13788,17 @@ tr.admin-user-row:hover .admin-row-open-hint {
 
 .ai-author-stack.hand-tracking > .ai-manual-criteria-card {
   display: grid;
-  grid-column: 1;
+  /* Game settings are the only second-step card for every hand-tracking
+     minigame, so let it use the empty right-hand column too. */
+  grid-column: 1 / -1;
   order: 3;
+}
+
+/* Keep controls compact inside the full-width game-settings card. The card
+   can use the workspace width for its explanation and actions without making
+   every timer, speed, or object selector unnecessarily long. */
+.ai-author-stack.hand-tracking .ai-manual-criteria-card .ai-input {
+  width: min(100%, 360px);
 }
 
 @media (max-width: 1100px) {
@@ -14153,4 +14174,136 @@ tr.admin-user-row:hover .admin-row-open-hint {
 .session-voice .voice-control-btn {
   pointer-events: auto;
   touch-action: manipulation;
+}
+
+
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ReviewVideoPlayer  (rvp-*)
+   Namespace is new — zero conflicts with existing rules.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Spinner animation */
+@keyframes rvp-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Icon circle (placeholder / error) ───────────────────────────────────── */
+.rvp-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #1f61db;
+  flex-shrink: 0;
+}
+
+.rvp-icon-wrap--error {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* ── Text label under icon ────────────────────────────────────────────────── */
+.rvp-label {
+  color: #8a9ab8;
+  font-size: 0.75rem;
+}
+
+/* ── Loading spinner ─────────────────────────────────────────────────────── */
+.rvp-spinner {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgb(255 255 255 / 15%);
+  border-top-color: #4f8ef7;
+  border-radius: 50%;
+  animation: rvp-spin 0.9s linear infinite;
+}
+
+/* ── Player wrapper: fills the viewport absolutely ───────────────────────── */
+.rvp-player-wrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * pose-video-player base CSS sets aspect-ratio: 3/4 and width: 100%.
+ * When inside .rvp-player-wrap we override all sizing so it fills the
+ * wrapper completely, regardless of the base rules.
+ */
+.rvp-player-wrap > .pose-video-player {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: unset !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow: hidden;
+}
+
+/*
+ * The <video> element: fills the pose-video-player absolutely.
+ * object-fit:contain means any source aspect ratio is letterboxed
+ * (portrait → pillarboxed, ultrawide → letterboxed) — never cropped.
+ */
+.rvp-player-wrap .rvp-video {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  object-position: center !important;
+  background: #000000 !important;
+  aspect-ratio: unset !important;
+  border-radius: 0 !important;
+}
+
+/* Canvas tracking overlay: same bounds as the video */
+.rvp-player-wrap .pose-video-overlay {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  pointer-events: none;
+}
+
+/* ── Viewport: permanent 16:9 container filling 100% of card width ─────────── */
+.rvp-viewport {
+  position: relative;
+  display: block;
+  width: 100% !important;
+  aspect-ratio: 16 / 9 !important;
+  background-color: #000000;
+  border-radius: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+/* Full card width guarantee for video container */
+.srr-media-exercise-card {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  align-items: stretch !important;
+}
+
+.srr-media-exercise-card > .srr-video-col,
+.srr-video-col {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  align-self: stretch !important;
+  grid-column: 1 / -1 !important;
+}
+
+.rvp-viewport {
+  width: 100% !important;
+  align-self: stretch !important;
+  aspect-ratio: 16 / 9 !important;
 }
