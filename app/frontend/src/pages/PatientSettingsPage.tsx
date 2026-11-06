@@ -2,6 +2,7 @@ import { AlertCircle, Camera, CheckCircle2, LogOut, Pencil, Phone, Save, User, X
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { PatientBottomNav } from "../components/PatientBottomNav";
+import { ChangePasswordDialog } from "../components/ChangePasswordDialog";
 import { PatientSidebar } from "../components/PatientSidebar";
 import type { PatientNavLabel } from "../components/PatientSidebar";
 import { useProfilePicture, useProfilePictureUpload } from "../hooks/useProfilePicture";
@@ -487,6 +488,7 @@ export function PatientSettingsPage({ onLogout, onNavigate }: PatientSettingsPag
                     >
                       <Pencil size={14} /> แก้ไขโปรไฟล์
                     </button>
+                    <ChangePasswordDialog token={token} />
                   </>
                 )}
               </div>

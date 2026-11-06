@@ -17,6 +17,7 @@ import {
   archiveExerciseHandler,
   createExerciseHandler,
   createExerciseVersionHandler,
+  duplicateExerciseHandler,
   getExerciseByIdHandler,
   getExerciseLibraryHandler,
   publishExerciseHandler,
@@ -41,3 +42,4 @@ exerciseRouter.patch("/exercises/:id/publish", requireAuth, requireRole("therapi
 exerciseRouter.post("/exercises/:id/publish", requireAuth, requireRole("therapist"), publishExerciseHandler);
 exerciseRouter.patch("/exercises/:id/archive", requireAuth, requireRole("therapist"), archiveExerciseHandler);
 exerciseRouter.post("/exercises/:id/archive", requireAuth, requireRole("therapist"), archiveExerciseHandler);
+exerciseRouter.post("/exercises/:id/duplicate", requireAuth, requireRole("therapist"), duplicateExerciseHandler);

@@ -2,6 +2,7 @@ import { Pencil, Phone, Save, ShieldCheck, User, X, Camera } from "lucide-react"
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
+import { ChangePasswordDialog } from "../components/ChangePasswordDialog";
 import type { TherapistNavLabel } from "../components/TherapistSidebar";
 import { useProfilePicture, useProfilePictureUpload } from "../hooks/useProfilePicture";
 import { ApiError, getUserProfile, updateUserProfile, type UpdateProfilePayload, type UserProfile } from "../services/api";
@@ -28,9 +29,8 @@ import { initialsFromName } from "../utils/displayName";
 //     had nowhere real to save to.
 //   - "Therapist since" now reads the real `users.created_at` instead of a
 //     hardcoded mock date.
-//   - There's no self-service password-change route documented in
-//     api-design.md (only an Admin-triggered reset-password flow) — this page
-//     doesn't offer one.
+//   - Password changes use the authenticated self-service endpoint in the auth
+//     module; the shared dialog is also used by Patient and Admin settings.
 
 interface TherapistSettingsPageProps {
   onLogout: () => void;
@@ -362,6 +362,7 @@ export function TherapistSettingsPage({ onLogout, onNavigate }: TherapistSetting
                     >
                       <Pencil size={14} /> แก้ไขโปรไฟล์
                     </button>
+                    <ChangePasswordDialog token={token} />
                   </>
                 )}
               </div>

@@ -136,6 +136,33 @@ export async function register(
   };
 }
 
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  validatePassword(newPassword);
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { passwordHash: true }
+  });
+  if (!user) {
+    throw new UnauthenticatedError("Your account could not be found. Please log in again.");
+  }
+
+  const passwordMatches = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!passwordMatches) {
+    throw new UnauthenticatedError("Current password is incorrect.");
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash, updatedAt: new Date(), updatedBy: userId }
+  });
+}
+
 /**
  * Login.
  *

@@ -143,12 +143,13 @@ export async function submitExerciseResultHandler(req: Request, res: Response, n
     };
     const aiMetrics = parseJsonObject(req.body?.aiMetrics);
     const performanceData = parseJsonObject(req.body?.performanceData);
+    const videoIncludesOverlay = req.body?.videoIncludesOverlay === "true";
 
     const submission = await sessionService.submitExerciseResult(
       callerId,
       scheduledExerciseId,
       req.file,
-      { aiScore, aiFeedback, aiMetrics, performanceData },
+      { aiScore, aiFeedback, aiMetrics, performanceData, videoIncludesOverlay },
       req.user?.role === "admin"
     );
     res.status(201).json(submission);

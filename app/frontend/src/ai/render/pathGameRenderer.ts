@@ -1,6 +1,7 @@
 import { GamePath, PathGameSnapshot, PathPoint } from '../../types/ai';
 import { PATH_CANVAS_HEIGHT, PATH_CANVAS_WIDTH, pointAtLength } from '../pathGame/pathGenerator';
 import { PATH_START_RADIUS_PX } from '../evaluators/pathDragFSM';
+import type { PathGameViewport } from '../pathGame/pathGameViewport';
 
 /**
  * วาดเกม "ลากวัตถุจริงตามเส้นทาง" ทับภาพกล้อง — ผู้เรียกวาดภาพวิดีโอ/skeleton มือเองก่อนแล้วเรียกฟังก์ชันนี้ทีหลัง
@@ -98,35 +99,16 @@ function drawEndpoint(
   ctx.restore();
 }
 
-function drawBanner(ctx: CanvasRenderingContext2D, lines: string[], color: string): void {
-  ctx.save();
-  const w = 400;
-  const h = 26 + lines.length * 24;
-  const x = (PATH_CANVAS_WIDTH - w) / 2;
-  const y = PATH_CANVAS_HEIGHT - h - 14;
-  ctx.fillStyle = 'rgba(0,0,0,0.65)';
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x, y, w, h);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  lines.forEach((line, i) => {
-    ctx.font = i === 0 ? 'bold 16px sans-serif' : '13px sans-serif';
-    ctx.fillStyle = i === 0 ? color : '#fff';
-    ctx.fillText(line, PATH_CANVAS_WIDTH / 2, y + 22 + i * 24);
-  });
-  ctx.restore();
-}
-
 export interface DrawPathGameOptions {
   /** ตำแหน่งจุดถือวัตถุ (พิกเซล canvas มิเรอร์แล้ว) ที่จะวาด marker — null ถ้าไม่ต้องวาด */
   gripPoint: PathPoint | null;
   /** เวลาปัจจุบัน ms ใช้ทำแอนิเมชันกะพริบจุดเริ่ม */
   nowMs: number;
+  /** 4:3 game board fitted inside the camera's visible object-fit: cover area. */
+  viewport?: PathGameViewport;
 }
 
-/** วาดเกมทั้งหมดตามสถานะ snapshot (ทาง ความคืบหน้า จุดเริ่ม/จบ แถบเวลา marker จุดถือ และแบนเนอร์สถานะ) */
+/** วาดเฉพาะองค์ประกอบเกมที่ต้องซ้อนบนภาพกล้อง; HUD แสดงผลด้วย React */
 export function drawPathGame(
   ctx: CanvasRenderingContext2D,
   snapshot: PathGameSnapshot,
@@ -137,7 +119,12 @@ export function drawPathGame(
   const canvas = ctx.canvas;
 
   ctx.save();
-  ctx.scale(canvas.width / PATH_CANVAS_WIDTH, canvas.height / PATH_CANVAS_HEIGHT);
+  if (options.viewport) {
+    ctx.translate(options.viewport.left, options.viewport.top);
+    ctx.scale(options.viewport.scale, options.viewport.scale);
+  } else {
+    ctx.scale(canvas.width / PATH_CANVAS_WIDTH, canvas.height / PATH_CANVAS_HEIGHT);
+  }
 
   const roundOver = snapshot.phase === 'roundEnd' || snapshot.phase === 'gameOver';
   drawPathCorridor(ctx, path, roundOver ? 0.5 : 1);
@@ -178,51 +165,6 @@ export function drawPathGame(
     ctx.lineWidth = 3;
     ctx.stroke();
     ctx.restore();
-  }
-
-  // HUD บน: รอบ + แถบเวลา (แสดงแถบเวลาเมื่อเริ่มจับเวลาแล้ว)
-  ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(0, 0, PATH_CANVAS_WIDTH, 34);
-  ctx.font = 'bold 15px sans-serif';
-  ctx.fillStyle = '#fff';
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  ctx.fillText(`รอบ ${snapshot.roundNumber}/${snapshot.totalRounds}`, 12, 17);
-  ctx.textAlign = 'right';
-  ctx.fillText(
-    snapshot.phase === 'dragging' ? `เหลือ ${Math.ceil(snapshot.timeRemainingSec)} วิ` : `เวลา ${snapshot.timeLimitSec} วิ`,
-    PATH_CANVAS_WIDTH - 12,
-    17
-  );
-  const barX = 110;
-  const barW = PATH_CANVAS_WIDTH - 110 - 120;
-  ctx.fillStyle = 'rgba(255,255,255,0.2)';
-  ctx.fillRect(barX, 12, barW, 10);
-  const ratio = snapshot.phase === 'dragging' ? snapshot.timeRemainingRatio : 1;
-  ctx.fillStyle = ratio > 0.5 ? '#00e676' : ratio > 0.2 ? '#ffca28' : '#ff5252';
-  ctx.fillRect(barX, 12, barW * Math.max(0, Math.min(1, ratio)), 10);
-  ctx.restore();
-
-  // แบนเนอร์สถานะ
-  if (snapshot.phase === 'ready') {
-    drawBanner(
-      ctx,
-      ['นำวัตถุที่ถืออยู่ไปวางที่วง "เริ่ม" ค้างไว้', 'แล้วเวลาจะเริ่มนับ — ถือวัตถุไว้แล้วลากตามทางสีฟ้า'],
-      COLOR_START
-    );
-  } else if (snapshot.phase === 'dragging' && !snapshot.holding) {
-    drawBanner(ctx, ['วัตถุหลุดจากมือ', 'หยิบวัตถุกลับขึ้นมา (กำมือที่วัตถุ) แล้วลากต่อได้เลย'], COLOR_OFF_PATH);
-  } else if (roundOver && snapshot.lastResult) {
-    const r = snapshot.lastResult;
-    drawBanner(
-      ctx,
-      [
-        r.skipped ? 'ข้ามรอบนี้' : r.completed ? 'ถึงปลายทางแล้ว!' : 'หมดเวลา',
-        r.accuracyMeasured ? `ความแม่นยำของมือ ${r.accuracyScore}` : 'ยังไม่ได้ลากในรอบนี้',
-      ],
-      r.completed ? COLOR_START : COLOR_END
-    );
   }
 
   ctx.restore();

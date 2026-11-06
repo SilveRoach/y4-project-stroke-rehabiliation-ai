@@ -689,7 +689,6 @@ export function PatientHistoryPage({ onLogout, onNavigate }: PatientHistoryPageP
             <section className="ph-result-section">
               <h3>ผลการประเมินจาก AI</h3>
               <p className="ph-result-score">คะแนน AI: <strong>{resultExercise.result.aiScore ?? "—"}</strong></p>
-              <p>{resultExercise.result.aiFeedback || "ยังไม่มีคำแนะนำจาก AI"}</p>
             </section>
 
             <section className="ph-result-section">

@@ -50,10 +50,12 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
   // Clicked calendar day (index into calendarPlan.days); null = the current
   // program day — the same tap-to-inspect interaction as the Progress page.
   const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
-  // Home's calendar defaults to a compact week strip (redesigned for mobile
-  // density) with the pre-existing full month grid still reachable via toggle,
-  // rather than always showing the month grid up front.
-  const [calendarView, setCalendarView] = useState<"week" | "month">("week");
+  // Use the compact strip on mobile and the full month grid on desktop. The
+  // existing toggle remains available, and switching breakpoints preserves the
+  // viewed month and selected day.
+  const [calendarView, setCalendarView] = useState<"week" | "month">(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches ? "month" : "week"
+  );
   // Therapist notes on each exercise row are collapsed by default on the
   // redesigned row and expand in place on tap, instead of always rendering a
   // third line of text (or a separate duplicate "Next exercise" card).
@@ -64,6 +66,15 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
   // calendar, exercise list) down to just that plan, same as before this
   // selector existed for single-plan patients.
   const [selectedPlanId, setSelectedPlanId] = useState<"all" | string>("all");
+
+  useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 900px)");
+    const syncCalendarView = (event: MediaQueryListEvent) => {
+      setCalendarView(event.matches ? "month" : "week");
+    };
+    desktopQuery.addEventListener("change", syncCalendarView);
+    return () => desktopQuery.removeEventListener("change", syncCalendarView);
+  }, []);
 
   useEffect(() => {
     if (!token || !user) { setLoading(false); setError("กรุณาเข้าสู่ระบบอีกครั้งเพื่อดูตารางการฝึกฟื้นฟู"); return; }
@@ -117,12 +128,16 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
   }, [visiblePlans]);
   const todayIso = useMemo(() => {
     const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  }, []);
+    return today?.todayDate ??
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }, [today?.todayDate]);
   // Per-date completion status (completed/missing/none) for the same visible
   // plans the dot-presence set above already tracks — drives the strip's
   // green/red/dark-gray fill, distinct from exerciseDates' plain yes/no.
-  const dateStatusMap = useMemo(() => buildExerciseDateStatusMap(visiblePlans), [visiblePlans]);
+  const dateStatusMap = useMemo(
+    () => buildExerciseDateStatusMap(visiblePlans, todayIso),
+    [visiblePlans, todayIso]
+  );
   // Reshape the visible plans into the PatientRehabPlan shape the Progress page's
   // month calendar consumes — same adapter (buildScheduleCalendarPlan) the
   // Progress page uses, so the Today page's month view renders identically.
@@ -247,20 +262,85 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
         </div>
       </header>
       <div className="today-grid">
-        <div className="pt-hero-block">
-          <section className="today-main-panel hero-progress-card">
-            <div className="pt-hero-left">
-              <ProgressRing value={completionPercent} label={`${completionPercent}%`} size={46} />
-              <div className="pt-hero-copy"><strong>เสร็จแล้ว {completedCount}/{totalCount}</strong><span>การฝึกฟื้นฟูวันนี้</span></div>
-            </div>
-            <button className="primary-button pt-continue-btn" onClick={() => onOpenInstruction(nextExercise)} disabled={!nextExercise}>
-              {nextExercise ? "ทำต่อ" : totalCount > 0 ? "เสร็จสิ้น" : "ไม่มีการฝึก"} <Play size={13} fill="currentColor" />
-            </button>
+        <div className="pt-desktop-main-column">
+          <div className="pt-hero-block">
+            <section className="today-main-panel hero-progress-card">
+              <div className="pt-hero-left">
+                <ProgressRing value={completionPercent} label={`${completionPercent}%`} size={46} />
+                <div className="pt-hero-copy"><strong>เสร็จแล้ว {completedCount}/{totalCount}</strong><span>การฝึกฟื้นฟูวันนี้</span></div>
+              </div>
+              <button className="primary-button pt-continue-btn" onClick={() => onOpenInstruction(nextExercise)} disabled={!nextExercise}>
+                {nextExercise ? "ทำต่อ" : totalCount > 0 ? "เสร็จสิ้น" : "ไม่มีการฝึก"} <Play size={13} fill="currentColor" />
+              </button>
+            </section>
+            <div className="linear-progress" aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></div>
+          </div>
+
+          <section className="today-main-panel exercise-panel">
+            <div className="pt-exercises-heading"><h2>ท่าฝึกวันนี้</h2><span className="pt-count-badge">{totalCount}</span></div>
+            {activePlans.length > 1 && (
+              // Same dropdown switcher as the Progress page's (pp-plan-switcher):
+              // a single full-width select instead of the old chip row that could
+              // wrap/overflow on phones. "All Plans" stays the default and merges
+              // every active plan's exercises into one list below.
+              <select
+                className="pp-plan-switcher"
+                value={selectedPlanId}
+                onChange={(event) => setSelectedPlanId(event.target.value)}
+                aria-label="เลือกแผนการฟื้นฟู"
+              >
+                <option value="all">ทุกแผน</option>
+                {activePlans.map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {allPlans.length === 0 ? <p className="pd-empty-note">คุณยังไม่มีแผนการฟื้นฟูที่ใช้งานอยู่</p> : totalCount === 0 ? <p className="pd-empty-note">ไม่มีการฝึกในวันที่กำหนดของแผนนี้</p> : <div className="exercise-list" aria-label="ท่าฝึกวันนี้">{exerciseGroups.map((group) => <Fragment key={group.planId}>
+              {showGroupLabels && <p className="pt-exercise-group-label">{group.planName}</p>}
+              {group.exercises.map((exercise) => {
+                const Icon = trackingIcon[exercise.movementTracking];
+                const isDone = exercise.status === "completed";
+                const noteExpanded = expandedNoteIds.has(exercise.id);
+                return <button className="exercise-card" key={exercise.id} onClick={() => onOpenInstruction(exercise)} type="button">
+                  <span className={`exercise-icon ${isDone ? "done" : `tracking-${exercise.movementTracking}`}`} aria-hidden="true">{isDone ? <CheckCircle2 size={22} /> : <Icon size={22} />}</span>
+                  <span className="exercise-card-body">
+                    <span className="exercise-card-title-row">
+                      {/* Exercise name only — version ("v1") removed for a cleaner
+                          mobile row; long names truncate with an ellipsis (see
+                          .exercise-card-title-row strong). */}
+                      <strong>{exercise.exerciseName}</strong>
+                      {exercise.therapistInstruction && <span
+                        className="exercise-note-icon-btn"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={noteExpanded ? "ซ่อนคำแนะนำนักกายภาพบำบัด" : "แสดงคำแนะนำนักกายภาพบำบัด"}
+                        onClick={(event) => { event.stopPropagation(); toggleNote(exercise.id); }}
+                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.stopPropagation(); event.preventDefault(); toggleNote(exercise.id); } }}
+                      ><MessageSquare size={13} /></span>}
+                    </span>
+                    <small>
+                      {exercise.targetValueLabel}
+                      {exercise.difficultyLevel && (
+                        <span className={`difficulty-badge exercise-difficulty ${exerciseDifficultyClass[exercise.difficultyLevel]}`}>
+                          {exerciseDifficultyLabel[exercise.difficultyLevel]}
+                        </span>
+                      )}
+                    </small>
+                    {exercise.therapistInstruction && noteExpanded && <small className="exercise-note-text">{exercise.therapistInstruction}</small>}
+                  </span>
+                  <span className={`exercise-status-checkbox${isDone ? " done" : ""}`} aria-hidden="true">
+                    {isDone && <Check size={14} strokeWidth={3} />}
+                  </span>
+                </button>;
+              })}
+            </Fragment>)}</div>}
           </section>
-          <div className="linear-progress" aria-hidden="true"><span style={{ width: `${completionPercent}%` }} /></div>
         </div>
 
-        <section className="summary-card pt-calendar-card">
+        <div className="pt-desktop-side-column">
+          <section className="summary-card pt-calendar-card">
           {calendarView === "week" ? <>
             <div className="week-strip-heading"><p className="eyebrow">กำลังจะถึง</p><button type="button" className="text-action" onClick={() => setCalendarView("month")}>ดูรายเดือน</button></div>
             <div className="week-strip" ref={weekStripRef} onScroll={handleStripScroll}>{stripCells.map((cell) => {
@@ -316,7 +396,7 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
                   hasPlanDay && cell.otherMonth ? "adjacent" : "",
                   !hasPlanDay ? (cell.otherMonth ? "other" : cell.outside ? "outside" : "empty") : "",
                   cell.dayIndex !== null ? "clickable" : "",
-                  cell.dayIndex !== null && cell.dayIndex === (selectedDayIndex ?? currentDayIndex(calendarPlan.days)) ? "selected" : ""
+                  cell.dayIndex !== null && cell.dayIndex === (selectedDayIndex ?? currentDayIndex(calendarPlan.days, todayIso)) ? "selected" : ""
                 ].join(" ").trim();
                 return (
                   <button
@@ -354,85 +434,16 @@ export function PatientTodayPage({ onLogout, onNavigate, onOpenInstruction }: Pa
             </div>
             <button type="button" className="text-action" onClick={() => setCalendarView("week")}>กลับไปมุมมองรายสัปดาห์</button>
           </>}
-        </section>
-
-        <section className="today-main-panel exercise-panel">
-          <div className="pt-exercises-heading"><h2>ท่าฝึกวันนี้</h2><span className="pt-count-badge">{totalCount}</span></div>
-          {activePlans.length > 1 && (
-            // Same dropdown switcher as the Progress page's (pp-plan-switcher):
-            // a single full-width select instead of the old chip row that could
-            // wrap/overflow on phones. "All Plans" stays the default and merges
-            // every active plan's exercises into one list below.
-            <select
-              className="pp-plan-switcher"
-              value={selectedPlanId}
-              onChange={(event) => setSelectedPlanId(event.target.value)}
-              aria-label="เลือกแผนการฟื้นฟู"
-            >
-              <option value="all">ทุกแผน</option>
-              {activePlans.map((plan) => (
-                <option key={plan.id} value={plan.id}>
-                  {plan.name}
-                </option>
-              ))}
-            </select>
-          )}
-          {allPlans.length === 0 ? <p className="pd-empty-note">คุณยังไม่มีแผนการฟื้นฟูที่ใช้งานอยู่</p> : totalCount === 0 ? <p className="pd-empty-note">ไม่มีการฝึกในวันที่กำหนดของแผนนี้</p> : <div className="exercise-list" aria-label="ท่าฝึกวันนี้">{exerciseGroups.map((group) => <Fragment key={group.planId}>
-            {showGroupLabels && <p className="pt-exercise-group-label">{group.planName}</p>}
-            {group.exercises.map((exercise) => {
-              const Icon = trackingIcon[exercise.movementTracking];
-              const isDone = exercise.status === "completed";
-              const noteExpanded = expandedNoteIds.has(exercise.id);
-              return <button className="exercise-card" key={exercise.id} onClick={() => onOpenInstruction(exercise)} type="button">
-                <span className={`exercise-icon ${isDone ? "done" : `tracking-${exercise.movementTracking}`}`} aria-hidden="true">{isDone ? <CheckCircle2 size={22} /> : <Icon size={22} />}</span>
-                <span className="exercise-card-body">
-                  <span className="exercise-card-title-row">
-                    {/* Exercise name only — version ("v1") removed for a cleaner
-                        mobile row; long names truncate with an ellipsis (see
-                        .exercise-card-title-row strong). */}
-                    <strong>{exercise.exerciseName}</strong>
-                    {exercise.therapistInstruction && <span
-                      className="exercise-note-icon-btn"
-                      role="button"
-                      tabIndex={0}
-                      aria-label={noteExpanded ? "ซ่อนคำแนะนำนักกายภาพบำบัด" : "แสดงคำแนะนำนักกายภาพบำบัด"}
-                      onClick={(event) => { event.stopPropagation(); toggleNote(exercise.id); }}
-                      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.stopPropagation(); event.preventDefault(); toggleNote(exercise.id); } }}
-                    ><MessageSquare size={13} /></span>}
-                  </span>
-                  <small>
-                    {exercise.targetValueLabel}
-                    {/* Difficulty tag right after the reps/target text — driven by
-                        the exercise's real difficultyLevel from
-                        GET /patients/:id/today, no hardcoded values. */}
-                    {exercise.difficultyLevel && (
-                      <span className={`difficulty-badge exercise-difficulty ${exerciseDifficultyClass[exercise.difficultyLevel]}`}>
-                        {exerciseDifficultyLabel[exercise.difficultyLevel]}
-                      </span>
-                    )}
-                  </small>
-                  {exercise.therapistInstruction && noteExpanded && <small className="exercise-note-text">{exercise.therapistInstruction}</small>}
-                </span>
-                {/* Rounded-square completion checkbox (not a radio/selection
-                    control): green tick when done, neutral empty square
-                    otherwise — driven by the same session status as the rest of
-                    the row. */}
-                <span className={`exercise-status-checkbox${isDone ? " done" : ""}`} aria-hidden="true">
-                  {isDone && <Check size={14} strokeWidth={3} />}
-                </span>
-              </button>;
-            })}
-          </Fragment>)}</div>}
-        </section>
-
-        <div className="pt-stats-grid">
-          <div className="summary-card pt-stat-card">
-            <span className="pt-stat-icon avg"><Heart size={18} /></span>
-            <div className="pt-stat-body"><span className="pt-stat-label">คะแนนเฉลี่ย</span><strong>{avgScore ?? "—"}{avgScore !== null && avgScore !== undefined ? "%" : ""} <TrendingUp size={14} className="pt-stat-trend" /></strong></div>
-          </div>
-          <div className="summary-card pt-stat-card">
-            <span className="pt-stat-icon sessions"><CalendarCheck size={18} /></span>
-            <div className="pt-stat-body"><span className="pt-stat-label">จำนวนครั้งที่ฝึก</span><strong>{sessions} <small>เดือนนี้</small></strong></div>
+          </section>
+          <div className="pt-stats-grid">
+            <div className="summary-card pt-stat-card">
+              <span className="pt-stat-icon avg"><Heart size={18} /></span>
+              <div className="pt-stat-body"><span className="pt-stat-label">คะแนนเฉลี่ย</span><strong>{avgScore ?? "—"}{avgScore !== null && avgScore !== undefined ? "%" : ""} <TrendingUp size={14} className="pt-stat-trend" /></strong></div>
+            </div>
+            <div className="summary-card pt-stat-card">
+              <span className="pt-stat-icon sessions"><CalendarCheck size={18} /></span>
+              <div className="pt-stat-body"><span className="pt-stat-label">จำนวนครั้งที่ฝึก</span><strong>{sessions} <small>เดือนนี้</small></strong></div>
+            </div>
           </div>
         </div>
       </div>

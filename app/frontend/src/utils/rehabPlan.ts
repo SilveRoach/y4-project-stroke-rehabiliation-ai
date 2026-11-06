@@ -11,14 +11,14 @@ export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // "Today" is matching today's calendar date if present; otherwise whichever day is
 // actively in_progress; if none is, the next pending day; if every day is resolved, the last day.
-export function currentDayIndex(days: ScheduleDay[]): number {
+export function currentDayIndex(days: ScheduleDay[], todayStr?: string): number {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
-  const todayStr = `${year}-${month}-${day}`;
+  const currentDate = todayStr ?? `${year}-${month}-${day}`;
 
-  const todayMatch = days.findIndex((d) => d.dateLabel === todayStr);
+  const todayMatch = days.findIndex((d) => d.dateLabel === currentDate);
   if (todayMatch !== -1) return todayMatch;
 
   const inProgress = days.findIndex((d) => d.status === "in_progress");

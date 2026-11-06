@@ -8,23 +8,23 @@
 //   3 Therapist accounts
 //   5 Patient accounts (each assigned to a therapist), with multiple active
 //     rehabilitation plans each — 2 patients with 2 plans, 1 patient with
-//     3 plans, and 2 patients with 1 plan. Every plan has schedule days with
-//     exercises up to today (completed/skipped history) plus 3-5 more days of
-//     assigned exercise scheduled ahead, and exercise performance results for
-//     completed days (some AI-only, some PT-reviewed) — enough data for the
+//     3 plans, and 2 patients with 1 plan. Every plan has 30 consecutive
+//     schedule days with exercises through today and 3-5 more days scheduled
+//     ahead, plus performance results for completed days (some AI-only, some PT-reviewed) — enough data for the
 //     Therapist Dashboard, Patient Progress view, and Session Result Review
 //     page to all show real, non-empty data.
-//   4 Exercise Library items
+//   9 Exercise Library items (5 AI pose + 4 virtual_grip)
 //
 // Run with:
 //   npm run prisma:seed:full
 //
-// Idempotent — every account is keyed by its unique username/phone number and
-// is skipped if it already exists; anything downstream of a skipped account
-// is skipped too, so re-running never duplicates plans or results.
+// Idempotent — accounts and plans are matched by username/phone number and
+// plan name. Reruns reconcile plan dates and fill missing schedule data without
+// duplicating days, exercises, or performance results.
 
 import bcrypt from "bcrypt";
 import { PrismaClient } from "@prisma/client";
+import { ensureAiPoseExercises } from "./seed-ai-exercises";
 
 const prisma = new PrismaClient();
 
@@ -170,32 +170,53 @@ async function seedTherapists(
 
 const exerciseDefs = [
   {
-    name: "ยืดกล้ามเนื้อไหล่ขึ้นตึง (Shoulder Flexion Stretch)",
-    description: "ยกไหล่ช้า ๆ อย่างมีการควบคุม เพื่อฟื้นฟูช่วงการเคลื่อนไหวของข้อไหล่",
-    movementTracking: "pose" as const,
+    name: "ฝึกกำมือและแรงบีบ (Grip Strength Trainer - Ball Grip)",
+    description: "ฝึกบีบและค้างไว้แบบเพิ่มระดับขั้น โดยใช้เซนเซอร์กำมือเสมือน โหมดบีบลูกบอล",
+    movementTracking: "virtual_grip" as const,
     difficultyLevel: "easy" as const,
-    baseCriteria: { targetAngleDeg: 90, repetitions: 10 }
+    baseCriteria: {
+      virtualGripGameType: "ball-grip",
+      targetGripStrength: 15,
+      holdSeconds: 5,
+      repetitions: 8
+    }
   },
   {
-    name: "ฝึกกำมือและแรงบีบ (Grip Strength Trainer)",
-    description: "ฝึกบีบและค้างไว้แบบเพิ่มระดับขั้น โดยใช้เซนเซอร์กำมือเสมือน",
+    name: "ลากเส้นตามเป้า (Path Drag Trainer)",
+    description: "ฝึกลากนิ้วตามเส้นทางที่กำหนดบนหน้าจอ เพื่อฝึกความแม่นยำและการควบคุมมือ",
     movementTracking: "virtual_grip" as const,
     difficultyLevel: "medium" as const,
-    baseCriteria: { targetGripStrength: 15, holdSeconds: 5, repetitions: 8 }
+    baseCriteria: {
+      virtualGripGameType: "path-drag",
+      targetPathLength: 200,
+      maxDeviation: 15,
+      repetitions: 5
+    }
   },
   {
-    name: "งอศอกกับดัมเบลเบา (Weighted Elbow Curl)",
-    description: "ฝึกงอศอกแบบบิเซปส์ด้วยดัมเบลเบา ติดตามการเคลื่อนไหวด้วย Pose Estimation",
-    movementTracking: "pose" as const,
-    difficultyLevel: "medium" as const,
-    baseCriteria: { targetAngleDeg: 120, repetitions: 12 }
-  },
-  {
-    name: "ยกเข่ายืนเหยียบตรง (Assisted Standing March)",
-    description: "ฝึกยกเข่าขึ้นตึงกับที่โดยมีที่ยืนพิง เพื่อฟื้นฟูความมั่นคงในการเดินและการทรงตัว",
-    movementTracking: "pose" as const,
+    name: "รับของตกลงถ้วย (Falling Cup Game)",
+    description: "ฝึกกำมือจับของที่ตกจากด้านบนลงในถ้วย เพื่อฝึกประสานสัมผัสมือและตา",
+    movementTracking: "virtual_grip" as const,
     difficultyLevel: "hard" as const,
-    baseCriteria: { holdSeconds: 30, repetitions: 6 }
+    baseCriteria: {
+      virtualGripGameType: "falling-cup",
+      totalObjects: 10,
+      catchTarget: 7,
+      fallSpeed: 0.15
+    }
+  },
+  {
+    name: "บีบลูกบอลเร็ว (Rapid Ball Grip Challenge)",
+    description: "ฝึกบีบมืออย่างรวดเร็วซ้ำ ๆ หลายรอบ เพื่อฝึกความทนทานของกล้ามเนื้อมือ",
+    movementTracking: "virtual_grip" as const,
+    difficultyLevel: "medium" as const,
+    baseCriteria: {
+      virtualGripGameType: "ball-grip",
+      targetGripStrength: 12,
+      holdSeconds: 3,
+      repetitions: 15,
+      roundTimeLimitSeconds: 6
+    }
   }
 ] as const;
 
@@ -248,16 +269,17 @@ interface PlanDef {
   planDescription: string;
   // Fraction of past days "skipped", to vary compliance badges on the dashboard.
   skipRate: number;
-  // Days before today the plan starts (0 = start today).
-  startOffset: number;
-  // 3-5 more days of assigned exercise scheduled after today.
+  // Keep the 25-day program ending 7 days after today.
   futureDays: 3 | 4 | 5;
 }
+
+const SEEDED_PLAN_DURATION_DAYS = 25;
 
 interface PatientDef {
   firstName: string;
   lastName: string;
   phoneNumber: string;
+  email: string;
   gender: "male" | "female";
   dateOfBirth: Date;
   heightCm: number;
@@ -276,6 +298,7 @@ const patientDefs: PatientDef[] = [
     firstName: "สมชาย",
     lastName: "บุญมี",
     phoneNumber: "0810000001",
+    email: "somchai.patient@example.com",
     gender: "male",
     dateOfBirth: new Date("1965-03-12"),
     heightCm: 172,
@@ -288,14 +311,12 @@ const patientDefs: PatientDef[] = [
         planName: "ฟื้นฟูแขนส่วนบนหลังเส้นเลือดสมองตีบ",
         planDescription: "โปรแกรมเน้นฝึกข้อไหล่และการกำมือ หลังภาวะสมองขาดเลือดด้านซ้าย (left MCA infarct)",
         skipRate: 0.3,
-        startOffset: -14,
         futureDays: 4
       },
       {
         planName: "เสริมความแข็งแรงไหล่ระยะต่อเนื่อง",
         planDescription: "โปรแกรมต่อยอดจากแผนหลัก เน้นเพิ่มช่วงการเคลื่อนไหวของข้อไหล่และความทนทานของกล้ามเนื้อ",
         skipRate: 0.3,
-        startOffset: -6,
         futureDays: 3
       }
     ]
@@ -304,6 +325,7 @@ const patientDefs: PatientDef[] = [
     firstName: "มาลี",
     lastName: "สิริกิติ",
     phoneNumber: "0810000002",
+    email: "malee.patient@example.com",
     gender: "female",
     dateOfBirth: new Date("1972-07-22"),
     heightCm: 158,
@@ -316,14 +338,12 @@ const patientDefs: PatientDef[] = [
         planName: "ฟื้นฟูการเดินและการทรงตัว",
         planDescription: "ฝึกยกเข่ายืนเหยียบตรงและเสริมความมั่นคง หลังเส้นเลือดสมองด้านขวา",
         skipRate: 0.05,
-        startOffset: -14,
         futureDays: 5
       },
       {
         planName: "ฝึกความอึดในการเดินระยะสั้น",
         planDescription: "โปรแกรมฝึกเดินระยะสั้นซ้ำ ๆ เพื่อเพิ่มความอึดและลดความเหนื่อยง่ายหลังฟื้นฟูระยะแรก",
         skipRate: 0.05,
-        startOffset: -4,
         futureDays: 3
       }
     ]
@@ -332,6 +352,7 @@ const patientDefs: PatientDef[] = [
     firstName: "นฤมล",
     lastName: "พวงทอง",
     phoneNumber: "0810000003",
+    email: "narumon.patient@example.com",
     gender: "female",
     dateOfBirth: new Date("1980-11-05"),
     heightCm: 163,
@@ -344,7 +365,6 @@ const patientDefs: PatientDef[] = [
         planName: "โปรแกรมฝึกการใช้แขนให้กลับมาทำงาน",
         planDescription: "ฝึกงอศอกและยกไหล่แบบเพิ่มระดับขั้น เพื่อฟื้นฟูกล้ามเนื้ออ่อนแรงครึ่งซีก (hemiparesis)",
         skipRate: 0.15,
-        startOffset: -14,
         futureDays: 4
       }
     ]
@@ -353,6 +373,7 @@ const patientDefs: PatientDef[] = [
     firstName: "กิตติพงษ์",
     lastName: "ชัยพร",
     phoneNumber: "0810000004",
+    email: "kittipong.patient@example.com",
     gender: "male",
     dateOfBirth: new Date("1958-01-30"),
     heightCm: 168,
@@ -365,21 +386,18 @@ const patientDefs: PatientDef[] = [
         planName: "ฟื้นฟูแรงกำมือและการเคลื่อนไหวละเอียด",
         planDescription: "ฝึกด้วยเซนเซอร์กำมือเสมือน เพื่อฟื้นแรงมือหลังเส้นเลือดสมองตีบ",
         skipRate: 0.2,
-        startOffset: -14,
         futureDays: 5
       },
       {
         planName: "ฝึกการทรงตัวขณะยืน",
         planDescription: "ฝึกยืนทรงตัวและยกเข่าต่อเนื่อง เพื่อลดความเสี่ยงตกหลังภาวะสมองขาดเลือด",
         skipRate: 0.2,
-        startOffset: -8,
         futureDays: 4
       },
       {
         planName: "ยืดเหยียดกล้ามเนื้อทั้งตัวรายวัน",
         planDescription: "โปรแกรมยืดเหยียดเบา ๆ ทุกวัน เพื่อลดความตึงของกล้ามเนื้อ (spasticity) ด้านขวา",
         skipRate: 0.2,
-        startOffset: -3,
         futureDays: 3
       }
     ]
@@ -388,6 +406,7 @@ const patientDefs: PatientDef[] = [
     firstName: "ประเสริฐ",
     lastName: "ดวงแก้ว",
     phoneNumber: "0810000005",
+    email: "prasert.patient@example.com",
     gender: "male",
     dateOfBirth: new Date("1969-09-18"),
     heightCm: 175,
@@ -400,7 +419,6 @@ const patientDefs: PatientDef[] = [
         planName: "ฟื้นฟูการทรงตัวและความอึด",
         planDescription: "โปรแกรมผสม ระหว่างการฝึกเดินกับการรักษาความแข็งแรงของแขนส่วนบน",
         skipRate: 0.4,
-        startOffset: -14,
         futureDays: 3
       }
     ]
@@ -420,163 +438,239 @@ async function seedPatientsAndPlans(
       where: { username: def.phoneNumber }
     });
 
-    if (existingPatientUser) {
-      console.log(`Seed: patient "${def.firstName} ${def.lastName}" already exists, skipping.`);
-      continue;
-    }
-
     // Assign to the therapist whose patientFirstNames list contains this
     // patient; fall back to the first therapist if no explicit mapping.
     const owner =
       [...therapists.values()].find((t) => t.def.patientFirstNames.includes(def.firstName)) ??
       [...therapists.values()][0];
 
-    const patientUser = await prisma.user.create({
-      data: {
-        role: "patient",
-        username: def.phoneNumber,
-        phoneNumber: def.phoneNumber,
-        passwordHash: patientPasswordHash,
-        status: "active",
-        firstName: def.firstName,
-        lastName: def.lastName,
-        createdBy: adminId,
-        patient: {
-          create: {
-            gender: def.gender,
-            dateOfBirth: def.dateOfBirth,
-            heightCm: def.heightCm,
-            weightKg: def.weightKg,
-            address: def.address,
-            emergencyContactName: def.emergencyContactName,
-            emergencyContactPhone: def.emergencyContactPhone
+    const patientUser = existingPatientUser
+      ? await prisma.user.update({
+          where: { id: existingPatientUser.id },
+          data: { email: def.email }
+        })
+      : await prisma.user.create({
+        data: {
+          role: "patient",
+          username: def.phoneNumber,
+          phoneNumber: def.phoneNumber,
+          email: def.email,
+          passwordHash: patientPasswordHash,
+          status: "active",
+          firstName: def.firstName,
+          lastName: def.lastName,
+          createdBy: adminId,
+          patient: {
+            create: {
+              gender: def.gender,
+              dateOfBirth: def.dateOfBirth,
+              heightCm: def.heightCm,
+              weightKg: def.weightKg,
+              address: def.address,
+              emergencyContactName: def.emergencyContactName,
+              emergencyContactPhone: def.emergencyContactPhone
+            }
           }
         }
-      }
-    });
+      });
 
-    await prisma.patientTherapistAssignment.create({
-      data: {
-        patientId: patientUser.id,
-        therapistId: owner.userId,
-        status: "active",
-        assignedBy: adminId
-      }
+    const activeAssignment = await prisma.patientTherapistAssignment.findFirst({
+      where: { patientId: patientUser.id, status: "active" }
     });
+    if (!activeAssignment) {
+      await prisma.patientTherapistAssignment.create({
+        data: {
+          patientId: patientUser.id,
+          therapistId: owner.userId,
+          status: "active",
+          assignedBy: adminId
+        }
+      });
+    }
 
     // Multiple plans per patient (plan index also varies the pseudo-random
     // roll so overlapping plans don't get identical compliance patterns).
     for (const [planIndex, planDef] of def.plans.entries()) {
-      const plan = await prisma.patientRehabilitationPlan.create({
-        data: {
-          patientId: patientUser.id,
-          therapistId: owner.userId,
-          name: planDef.planName,
-          description: planDef.planDescription,
-          // Start of the plan's first schedule day; end covers today plus the
-          // 3-5 scheduled days ahead of it.
-          startDate: dayOffset(planDef.startOffset),
-          endDate: dayOffset(planDef.futureDays),
-          status: "active",
-          createdBy: owner.userId
-        }
+      // Seed covers 25 days ago → today+7 (33 days total). Negative offsets
+      // are in the past (some skipped, some completed); positive offsets are
+      // upcoming days ahead of the plan.
+      const startDate = dayOffset(-25); // 25 days ago
+      const endDate = dayOffset(7); // Today + 7
+      const existingPlan = await prisma.patientRehabilitationPlan.findFirst({
+        where: { patientId: patientUser.id, name: planDef.planName }
       });
-
-    // One schedule day per day of the plan. Exercises run up to today
-    // (offset 0) with `futureDays` more pending days scheduled after it.
-    // Deterministic pseudo-random roll (seeded off plan index, day offset and
-    // skipRate) so compliance numbers look like real usage.
-    for (let offset = planDef.startOffset; offset <= planDef.futureDays; offset += 1) {
-      const scheduledDate = dayOffset(offset);
-      const roll = Math.abs(Math.sin(offset * 12.9898 + planIndex * 40.233 + planDef.skipRate * 78.233)) % 1;
-
-      let dayStatus: "completed" | "skipped" | "in_progress" | "pending";
-      if (offset < 0) {
-        dayStatus = roll < planDef.skipRate ? "skipped" : "completed";
-      } else if (offset === 0) {
-        dayStatus = roll < planDef.skipRate ? "pending" : "in_progress";
-      } else {
-        dayStatus = "pending";
+      // Clear existing schedule data before rebuilding (idempotent + clean rebuild)
+      if (existingPlan) {
+        const existingScheduleDays = await prisma.rehabilitationScheduleDay.findMany({
+          where: { rehabilitationPlanId: existingPlan.id }
+        });
+        await prisma.rehabilitationScheduleDay.deleteMany({
+          where: { rehabilitationPlanId: existingPlan.id }
+        });
+        await prisma.scheduledExercise.deleteMany({
+          where: { scheduleDayId: { in: existingScheduleDays.map(d => d.id) } }
+        });
       }
+      const plan = existingPlan
+        ? await prisma.patientRehabilitationPlan.update({
+            where: { id: existingPlan.id },
+            data: {
+              description: planDef.planDescription,
+              startDate,
+              endDate,
+              updatedAt: new Date(),
+              updatedBy: owner.userId
+            }
+          })
+        : await prisma.patientRehabilitationPlan.create({
+            data: {
+              patientId: patientUser.id,
+              therapistId: owner.userId,
+              name: planDef.planName,
+              description: planDef.planDescription,
+              startDate,
+              endDate,
+              status: "active",
+              createdBy: owner.userId
+            }
+          });
 
-      const scheduleDay = await prisma.rehabilitationScheduleDay.create({
-        data: {
-          rehabilitationPlanId: plan.id,
-          scheduledDate,
-          status: dayStatus,
-          therapistNote:
-            dayStatus === "skipped" ? "ไม่มาฝึกในวันนี้ — ติดตามอีกครั้งในครั้งหน้า" : null,
-          createdBy: owner.userId
+      // Deterministic pseudo-random rolls keep the seeded compliance varied.
+      // Upserts let reruns expand an existing seeded plan without duplicating
+      // schedule days, exercises, or performance results.
+      for (let offset = -25; offset <= 7; offset += 1) {
+        const scheduledDate = dayOffset(offset);
+        const roll = Math.abs(Math.sin(offset * 12.9898 + planIndex * 40.233 + planDef.skipRate * 78.233)) % 1;
+
+        let dayStatus: "completed" | "skipped" | "in_progress" | "pending";
+        if (offset < 0) {
+          // Past days: skipped or completed based on the patient's skip rate.
+          // Additionally, force the last 2 days before today (offset -2, -1)
+          // to always be "skipped" so the recent history includes skipped days.
+          if (offset >= -2) {
+            dayStatus = "skipped";
+          } else {
+            dayStatus = roll < planDef.skipRate ? "skipped" : "completed";
+          }
+        } else {
+          // Today through today+7: all pending with exercises assigned.
+          dayStatus = "pending";
         }
-      });
 
-      // Pending days (today when not started, and the scheduled days ahead —
-      // e.g. today the 18th, 19th, 20th) still get their two exercises, so the
-      // patient's Today list shows upcoming assigned work. Only completed days
-      // additionally get performance results below.
-      for (let order = 1; order <= 2; order += 1) {
-        const exercise = exercises[(Math.abs(offset) + order) % exercises.length];
-
-        const scheduledExercise = await prisma.scheduledExercise.create({
-          data: {
-            scheduleDayId: scheduleDay.id,
-            exerciseLibraryId: exercise.id,
-            orderNumber: order,
-            targetType: order === 1 ? "repetitions" : "duration",
-            targetValue: order === 1 ? "10 ครั้ง" : "5 นาที",
-            therapistInstruction:
-              order === 1
-                ? "เคลื่อนไหวช้า ๆ อย่างมีการควบคุม"
-                : "หยุดพักทันทีหากปวดเกิน 4/10",
+        const scheduleDay = await prisma.rehabilitationScheduleDay.upsert({
+          where: {
+            rehabilitationPlanId_scheduledDate: {
+              rehabilitationPlanId: plan.id,
+              scheduledDate
+            }
+          },
+          update: {},
+          create: {
+            rehabilitationPlanId: plan.id,
+            scheduledDate,
             status: dayStatus,
+            therapistNote: null,
             createdBy: owner.userId
           }
         });
 
-        if (dayStatus !== "completed") continue;
+        // Pending days still receive exercises so the patient has upcoming work.
+        // Completed days also receive a performance result for demo reporting.
+        for (let order = 1; order <= 2; order += 1) {
+          const exercise = exercises[(Math.abs(offset) + order) % exercises.length];
 
-        const aiScore = Math.round(65 + roll * 30); // 65-95
-        // Every 3rd completed attempt is left un-reviewed to populate the
-        // dashboard's "Pending Reviews" stat with something real.
-        const isReviewed = Math.abs(offset) % 3 !== 0;
+          const scheduledExercise = await prisma.scheduledExercise.upsert({
+            where: {
+              scheduleDayId_orderNumber: {
+                scheduleDayId: scheduleDay.id,
+                orderNumber: order
+              }
+            },
+            update: {
+              targetType: "repetitions",
+              targetValue: "10 ครั้ง"
+            },
+            create: {
+              scheduleDayId: scheduleDay.id,
+              exerciseLibraryId: exercise.id,
+              orderNumber: order,
+              targetType: "repetitions",
+              targetValue: "10 ครั้ง",
+              therapistInstruction:
+                order === 1
+                  ? "เคลื่อนไหวช้า ๆ อย่างมีการควบคุม"
+                  : "หยุดพักทันทีหากปวดเกิน 4/10",
+              status: scheduleDay.status,
+              createdBy: owner.userId
+            }
+          });
 
-        await prisma.exercisePerformanceResult.create({
-          data: {
-            scheduledExerciseId: scheduledExercise.id,
-            attemptNumber: 1,
-            completedAt: scheduledDate,
-            aiScore: aiScore + (order - 1),
-            aiFeedback:
-              order === 1
-                ? "ช่วงการเคลื่อนไหวและท่าทางอยู่ในเกณฑ์เป้าหมายในการนับส่วนใหญ่"
-                : "จังหวะการเคลื่อนไหวสม่ำเสมอ แต่ท่าเอียงเล็กน้อยในการนับช่วงท้าย",
-            aiMetrics:
-              order === 1
-                ? { averageAngleDeg: aiScore, repetitionsCompleted: 10 }
-                : { averageHoldSeconds: 4.6, repetitionsCompleted: 8 },
-            aiEvaluatedAt: scheduledDate,
-            ...(isReviewed
-              ? {
-                  ptScore: Math.min(100, aiScore + 3),
-                  ptFeedback: "ยืนยันผลคะแนนจาก AI — ฝึกได้ดีในครั้งนี้",
-                  ptEvaluatedBy: owner.userId,
-                  ptEvaluatedAt: scheduledDate,
-                  finalScore: Math.min(100, aiScore + 3),
-                  evaluationSource: "pt" as const
-                }
-              : {
-                  finalScore: aiScore,
-                  evaluationSource: "ai" as const
-                })
-          }
-        });
+          // Results with scores are only for days up to yesterday (past days).
+          // Today and future days (offset >= 0) get exercises but no scored results.
+          // Skipped past days have no score either.
+          if (offset >= 0 || scheduleDay.status === "skipped") continue;
+
+          const existingResult = await prisma.exercisePerformanceResult.findUnique({
+            where: {
+              scheduledExerciseId_attemptNumber: {
+                scheduledExerciseId: scheduledExercise.id,
+                attemptNumber: 1
+              }
+            }
+          });
+          if (existingResult) continue;
+
+          // Score grows naturally from low (25 days ago) to medium in the
+          // middle, then to medium-high/high near the end of the plan.
+          // 33-day span: offset -25 → +7.
+          const totalDays = 33;
+          const normalizedProgress = (offset + 25) / (totalDays - 1); // 0 → 1
+          const baseScore = 48 + Math.pow(normalizedProgress, 1.5) * 38; // ~48 → ~86
+          // Small deterministic fluctuation (±3) so consecutive days aren't
+          // identical, while keeping the overall upward trend.
+          const fluctuation = ((Math.sin(offset * 3.7 + planIndex * 5.1) % 1) * 2 - 1) * 3;
+          const aiScore = Math.min(86, Math.round(baseScore + fluctuation));
+          // Every 3rd completed attempt is left un-reviewed to populate the
+          // dashboard's "Pending Reviews" stat with something real.
+          const isReviewed = Math.abs(offset) % 3 !== 0;
+
+          await prisma.exercisePerformanceResult.create({
+            data: {
+              scheduledExerciseId: scheduledExercise.id,
+              attemptNumber: 1,
+              completedAt: scheduledDate,
+              aiScore: aiScore + (order - 1),
+              aiFeedback:
+                order === 1
+                  ? "ช่วงการเคลื่อนไหวและท่าทางอยู่ในเกณฑ์เป้าหมายในการนับส่วนใหญ่"
+                  : "จังหวะการเคลื่อนไหวสม่ำเสมอ แต่ท่าเอียงเล็กน้อยในการนับช่วงท้าย",
+              aiMetrics:
+                order === 1
+                  ? { averageAngleDeg: aiScore, repetitionsCompleted: 10 }
+                  : { averageHoldSeconds: 4.6, repetitionsCompleted: 8 },
+              aiEvaluatedAt: scheduledDate,
+              ...(isReviewed
+                ? {
+                    ptScore: Math.min(100, aiScore + 3),
+                    ptFeedback: "ยืนยันผลคะแนนจาก AI — ฝึกได้ดีในครั้งนี้",
+                    ptEvaluatedBy: owner.userId,
+                    ptEvaluatedAt: scheduledDate,
+                    finalScore: Math.min(100, aiScore + 3),
+                    evaluationSource: "pt" as const
+                  }
+                : {
+                    finalScore: aiScore,
+                    evaluationSource: "ai" as const
+                  })
+            }
+          });
+        }
       }
-    }
 
-    console.log(
-      `Seed:   plan "${planDef.planName}" — days ${planDef.startOffset}→${planDef.futureDays} ` +
-        `(exercises up to today + ${planDef.futureDays} more scheduled day(s)).`
-    );
+      console.log(
+        `Seed:   plan "${planDef.planName}" — 33 days (25 days ago→today+7, ` +
+        `${planDef.futureDays} upcoming day(s)).`
+      );
     }
 
     console.log(
@@ -589,11 +683,8 @@ async function seedPatientsAndPlans(
 
 // =====================================================================
 
-// Backfill for already-seeded data: patients are skipped on re-run, so plans
-// from an earlier run keep their original schedule (which left pending days
-// empty). This ensures today and the next two days (18/19/20 on a Sep 18 run)
-// carry assigned exercises for EVERY active plan — creating any missing
-// schedule day, and adding exercises to existing days that have none.
+// Backfill any active plans outside the seeded patient set so today through
+// today+7 all carry exercises, without duplicating existing assignments.
 async function backfillUpcomingExerciseDays(
   exercises: Array<Awaited<ReturnType<typeof prisma.exerciseLibrary.create>>>
 ): Promise<void> {
@@ -606,7 +697,7 @@ async function backfillUpcomingExerciseDays(
   let exercisesAdded = 0;
 
   for (const plan of plans) {
-    for (const offset of [0, 1, 2]) {
+    for (const offset of [0, 1, 2, 3, 4, 5, 6, 7]) {
       const scheduledDate = dayOffset(offset);
       // เทียบเป็นวันที่แบบ UTC (YYYY-MM-DD) ทั้งสองฝั่ง เพราะ scheduled_date เป็น @db.Date — เดิมใช้ toDateString()
       // (เวลาท้องถิ่น) เทียบกับค่าที่อ่านกลับจาก DB (UTC) ทำให้เลื่อนไปหนึ่งวันในเขตเวลาไทย จึงหาแถวเดิมไม่เจอ
@@ -633,6 +724,11 @@ async function backfillUpcomingExerciseDays(
         }));
       if (!existingDay) daysCreated += 1;
 
+      await prisma.scheduledExercise.updateMany({
+        where: { scheduleDayId: scheduleDay.id, targetType: "duration" },
+        data: { targetType: "repetitions", targetValue: "10 ครั้ง" }
+      });
+
       // วันที่มีท่าอยู่แล้ว (ไม่ว่าจะเพิ่งเจอหรือเพิ่งสร้างจาก upsert ที่ชนแถวเดิม) ไม่ต้องเพิ่มซ้ำ
       if (existingDay && existingDay.scheduledExercises.length > 0) continue;
       if (!existingDay) {
@@ -647,8 +743,8 @@ async function backfillUpcomingExerciseDays(
             scheduleDayId: scheduleDay.id,
             exerciseLibraryId: exercise.id,
             orderNumber: order,
-            targetType: order === 1 ? "repetitions" : "duration",
-            targetValue: order === 1 ? "10 ครั้ง" : "5 นาที",
+            targetType: "repetitions",
+            targetValue: "10 ครั้ง",
             therapistInstruction:
               order === 1
                 ? "เคลื่อนไหวช้า ๆ อย่างมีการควบคุม"
@@ -664,7 +760,7 @@ async function backfillUpcomingExerciseDays(
 
   console.log(
     `Seed: backfilled upcoming exercises — ${daysCreated} schedule day(s) created, ` +
-      `${exercisesAdded} exercise(s) added (today + next 2 days, all active plans).`
+      `${exercisesAdded} exercise(s) added (today → today+7, all active plans).`
   );
 }
 
@@ -676,7 +772,9 @@ async function main(): Promise<void> {
   // real therapist in the demo dataset.
   const arisa = therapists.get("อริสา");
   if (!arisa) throw new Error("Seed: therapist_arisa not found — cannot seed exercise library.");
-  const exercises = await seedExerciseLibrary(arisa.userId);
+  const gripExercises = await seedExerciseLibrary(arisa.userId);
+  const poseExercises = await ensureAiPoseExercises(prisma, arisa.userId);
+  const exercises = [...poseExercises, ...gripExercises];
   await seedPatientsAndPlans(adminId, therapists, exercises);
   await backfillUpcomingExerciseDays(exercises);
   console.log("Seed: full demo dataset complete.");
@@ -696,8 +794,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-
-
-
-
-

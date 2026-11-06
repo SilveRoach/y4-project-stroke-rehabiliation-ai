@@ -94,6 +94,8 @@ function AppShell() {
   // Patient name for a review opened from the cross-patient Sessions log (where
   // no detailPatient is loaded). null when opened from Patient Detail.
   const [reviewPatientName, setReviewPatientName] = useState<string | null>(null);
+  const [reviewPatientId, setReviewPatientId] = useState<string | null>(null);
+  const [reviewReturnView, setReviewReturnView] = useState<View>("therapist-sessions");
   // Plan currently open in Program Editor (PT_EXERCISE_PATH_MOCKUP_PLAN.md §4.4).
   // PatientDetailPage still owns its own plans[] as local state (unchanged) —
   // pendingPlanUpdate is how Program Editor's Save hands one edited plan back down
@@ -146,10 +148,11 @@ function AppShell() {
       setActiveExercise({
         id: exercise.id,
         name: exercise.exerciseName,
+        description: exercise.description,
         trackingType: exercise.movementTracking === "none" ? "both" : exercise.movementTracking,
         targetLabel: exercise.targetValueLabel,
         status: exercise.status === "completed" ? "done" : exercise.status === "in_progress" ? "in_progress" : "not_started",
-        feedback: exercise.therapistInstruction ?? "ปฏิบัติตามคำแนะนำที่นักกายภาพบำบัดกำหนด",
+        feedback: exercise.therapistInstruction ?? "",
         progressLabel: exercise.targetValueLabel,
         durationMinutes: 0,
         sets: 0,
@@ -246,7 +249,7 @@ function AppShell() {
     URL.revokeObjectURL(videoBlobUrl);
     setPendingAttempt(null);
     setView("today");
-    showToast("Exercise result uploaded successfully · บันทึกผลการฝึกเรียบร้อยแล้ว");
+    showToast("บันทึกผลการฝึกเรียบร้อยแล้ว");
   };
 
   // §6.3 — Retry: discard this take (no attempt number consumed) and go back into
@@ -272,11 +275,18 @@ function AppShell() {
     setView("patient-detail");
   };
 
-  const openSessionReview = (session: SessionHistoryEntry, patientName?: string, focusExerciseId?: string) => {
+  const openSessionReview = (
+    session: SessionHistoryEntry,
+    focusExerciseId?: string,
+    patientName?: string,
+    patientId?: string
+  ) => {
     setReviewSession(session);
+    setReviewReturnView(patientName || patientId ? "therapist-sessions" : "patient-detail");
     // Sessions opened from the cross-patient log aren't tied to a
     // detailPatient — remember the log's own patient name for the review page.
     setReviewPatientName(patientName ?? null);
+    setReviewPatientId(patientId ?? detailPatient?.id ?? null);
     // When opened from an exercise card's per-exercise "Review" action, the
     // review page should switch straight to that exercise (null = no focus).
     setReviewFocusExerciseId(focusExerciseId ?? null);
@@ -557,7 +567,7 @@ function AppShell() {
           }}
           onNavigate={handleTherapistNavigate}
           onReviewSession={(session) =>
-            openSessionReview(session, session.patientName, session.scheduledExerciseId)
+            openSessionReview(session, session.scheduledExerciseId, session.patientName, session.patientId)
           }
         />
       )}
@@ -617,8 +627,10 @@ function AppShell() {
             dayLabel: reviewSession.dayLabel,
             exercises: []
           }}
+          patientId={reviewPatientId ?? detailPatient?.id ?? ""}
+          patientProfile={reviewReturnView === "patient-detail" ? detailPatient : null}
           focusExerciseId={reviewFocusExerciseId ?? undefined}
-          onBack={() => setView(detailPatient ? "patient-detail" : "therapist-sessions")}
+          onBack={() => setView(reviewReturnView)}
           onLogout={() => {
             logout();
             setView("login");

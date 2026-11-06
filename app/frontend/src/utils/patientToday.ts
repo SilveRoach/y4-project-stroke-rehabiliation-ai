@@ -86,10 +86,11 @@ export function shimScheduledExerciseToPatientExercise(exercise: ScheduledExerci
   return {
     id: exercise.id,
     name: exercise.exerciseName,
+    description: exercise.description,
     trackingType: trackingTypeFallback[exercise.movementTracking],
     targetLabel: exercise.targetValueLabel,
     status: exercise.status === "completed" ? "done" : exercise.status === "in_progress" ? "in_progress" : "not_started",
-    feedback: exercise.therapistInstruction ?? "Follow the on-screen guidance and keep your movements steady.",
+    feedback: exercise.therapistInstruction ?? "",
     progressLabel: exercise.status === "completed" ? "1 of 1" : "0 of 1",
     durationMinutes: 10,
     sets: 1,
@@ -188,9 +189,10 @@ function isoAfter(iso: string, days: number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function buildExerciseDateStatusMap(plans: PatientTodayPlan[]): Map<string, DayCellStatus> {
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+export function buildExerciseDateStatusMap(
+  plans: PatientTodayPlan[],
+  todayIso: string
+): Map<string, DayCellStatus> {
   const statusMap = new Map<string, DayCellStatus>();
   const outrank = (current: DayCellStatus | undefined, next: DayCellStatus): DayCellStatus => {
     if (current === "completed" || next === "completed") return "completed";

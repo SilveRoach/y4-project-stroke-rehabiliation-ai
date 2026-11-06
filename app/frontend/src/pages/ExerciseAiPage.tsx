@@ -9,7 +9,7 @@
 // Layout mirrors the import's two-column workspace; styling stays on this
 // project's color scheme (creation-section-card / CSS variables).
 
-import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Hand, History, Loader2, Minus, Pause, Play, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, CheckCircle2, Dumbbell, Film, Hand, History, Loader2, Minus, Pause, Play, Plus, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 import { TherapistSidebar } from "../components/TherapistSidebar";
@@ -32,7 +32,7 @@ import { scanVideoPoseFrames } from "../ai/poseScoring/videoPoseScanner";
 import { extractConfiguredAngle } from "../ai/poseScoring/angleExtraction";
 import { inferTechniqueFlags, techniqueFramesFromLandmarks } from "../ai/poseScoring/exerciseTechniqueFlags";
 import type { ExerciseFSMConfig, FrameFeature, AngleDefinition, PoseReferencePublic } from "../ai/poseScoring/poseScoringTypes";
-import { ApiError, archiveExercise, createExercise, createExerciseVersion, getFileContent, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
+import { ApiError, archiveExercise, createExercise, createExerciseVersion, duplicateExercise, getFileContent, publishExercise, updateExerciseDraft, uploadFile } from "../services/api";
 import type { ExerciseBaseCriteria, ExerciseLibraryDifficulty, ExerciseLibraryItem, ExerciseTrackingType, HandTrackingGameType, PatientExercise } from "../types";
 import { PatientSessionPage } from "./PatientSessionPage";
 import type { SessionTestConfig } from "./PatientSessionPage";
@@ -58,6 +58,17 @@ interface ExerciseAiPageProps {
   // `isArchived` gate already turns every history row into an audit view.
   isVersionView?: boolean;
 }
+
+const PATH_DRAG_TARGET_OPTIONS = [
+  { value: 'bottle', label: 'ขวด (Bottle)' },
+  { value: 'cup', label: 'แก้ว (Cup)' },
+  { value: 'sports ball', label: 'ลูกบอล (Sports ball)' },
+  { value: 'book', label: 'หนังสือ (Book)' },
+  { value: 'cell phone', label: 'โทรศัพท์มือถือ (Cell phone)' },
+  { value: 'remote', label: 'รีโมต (Remote)' },
+  { value: 'teddy bear', label: 'ตุ๊กตาหมี (Teddy bear)' },
+  { value: 'toothbrush', label: 'แปรงสีฟัน (Toothbrush)' }
+] as const;
 
 type Difficulty = Extract<ExerciseLibraryDifficulty, "easy" | "medium" | "hard">;
 
@@ -281,7 +292,21 @@ export function ExerciseAiPage({
   const [difficulty, setDifficulty] = useState<Difficulty>(exercise?.difficultyLevel ?? "medium");
   const [repetitions, setRepetitions] = useState(exercise?.baseCriteria.repetitions?.toString() ?? "10");
   const [holdSeconds, setHoldSeconds] = useState(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
-  const [targetGripStrength, setTargetGripStrength] = useState(exercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+  const [ballGripRoundTimeSeconds, setBallGripRoundTimeSeconds] = useState(
+    exercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8"
+  );
+  const [fallingCupFallSpeed, setFallingCupFallSpeed] = useState(
+    exercise?.baseCriteria.fallingCupFallSpeed?.toString() ?? "0.10"
+  );
+  const [fallingCupSpawnIntervalSeconds, setFallingCupSpawnIntervalSeconds] = useState(
+    exercise?.baseCriteria.fallingCupSpawnIntervalSeconds?.toString() ?? "5"
+  );
+  const [pathDragTargetLabel, setPathDragTargetLabel] = useState(
+    exercise?.baseCriteria.pathDragTargetLabel ?? ""
+  );
+  const [pathDragRoundTimeSeconds, setPathDragRoundTimeSeconds] = useState(
+    exercise?.baseCriteria.pathDragRoundTimeSeconds?.toString() ?? "30"
+  );
   const [virtualGripGameType, setVirtualGripGameType] = useState<HandTrackingGameType | null>(exercise?.baseCriteria?.virtualGripGameType ?? null);
 
   // Demo-clip scanning state. Only ONE clip can scan at a time (the scanner
@@ -359,6 +384,9 @@ export function ExerciseAiPage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedExerciseName, setSavedExerciseName] = useState<string | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState<"publish" | "archive" | null>(null);
+  const [duplicateBusy, setDuplicateBusy] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<"save" | "duplicate" | null>(null);
 
   // "Test exercise" run — mounts PatientSessionPage with the criteria
   // currently on screen while THIS component stays mounted (so scanned clips,
@@ -449,7 +477,11 @@ export function ExerciseAiPage({
     setDifficulty(exercise?.difficultyLevel ?? "medium");
     setRepetitions(exercise?.baseCriteria.repetitions?.toString() ?? "10");
     setHoldSeconds(exercise?.baseCriteria.holdSeconds?.toString() ?? "5");
-    setTargetGripStrength(exercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+    setBallGripRoundTimeSeconds(exercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8");
+    setFallingCupFallSpeed(exercise?.baseCriteria.fallingCupFallSpeed?.toString() ?? "0.10");
+    setFallingCupSpawnIntervalSeconds(exercise?.baseCriteria.fallingCupSpawnIntervalSeconds?.toString() ?? "5");
+    setPathDragTargetLabel(exercise?.baseCriteria.pathDragTargetLabel ?? "");
+    setPathDragRoundTimeSeconds(exercise?.baseCriteria.pathDragRoundTimeSeconds?.toString() ?? "30");
     setVirtualGripGameType(exercise?.baseCriteria?.virtualGripGameType ?? null);
     setSavedExerciseName(null);
   }, [exercise, initialName, initialTracking]);
@@ -464,7 +496,11 @@ export function ExerciseAiPage({
     setDifficulty(targetExercise?.difficultyLevel ?? "medium");
     setRepetitions(targetExercise?.baseCriteria.repetitions?.toString() ?? "10");
     setHoldSeconds(targetExercise?.baseCriteria.holdSeconds?.toString() ?? "5");
-    setTargetGripStrength(targetExercise?.baseCriteria.targetGripStrength?.toString() ?? "50");
+    setBallGripRoundTimeSeconds(targetExercise?.baseCriteria.ballGripRoundTimeSeconds?.toString() ?? "8");
+    setFallingCupFallSpeed(targetExercise?.baseCriteria.fallingCupFallSpeed?.toString() ?? "0.10");
+    setFallingCupSpawnIntervalSeconds(targetExercise?.baseCriteria.fallingCupSpawnIntervalSeconds?.toString() ?? "5");
+    setPathDragTargetLabel(targetExercise?.baseCriteria.pathDragTargetLabel ?? "");
+    setPathDragRoundTimeSeconds(targetExercise?.baseCriteria.pathDragRoundTimeSeconds?.toString() ?? "30");
     setVirtualGripGameType(targetExercise?.baseCriteria?.virtualGripGameType ?? null);
     setBaseClip(null);
     setCalibration(null);
@@ -908,15 +944,40 @@ export function ExerciseAiPage({
   //     (name/description/difficulty) and merges poseReference into its base
   //     criteria: PATCH in place when it is still a draft, or a new draft
   //     version when it is active (BR-6 — active versions are immutable).
-  const handleSave = async () => {
-    if (!token || !isOwner || isArchived) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (!token || !isOwner || isArchived) return false;
+    if (
+      movementTracking === "virtual_grip" &&
+      virtualGripGameType === "ball-grip" &&
+      (!Number.isInteger(Number(ballGripRoundTimeSeconds)) || Number(ballGripRoundTimeSeconds) < 1)
+    ) {
+      setSaveError("กำหนดเวลาในแต่ละรอบอย่างน้อย 1 วินาที");
+      return false;
+    }
+    if (
+      movementTracking === "virtual_grip" &&
+      virtualGripGameType === "falling-cup" &&
+      (!Number.isFinite(Number(fallingCupFallSpeed)) || Number(fallingCupFallSpeed) < 0.05 || Number(fallingCupFallSpeed) > 0.2 ||
+        !Number.isFinite(Number(fallingCupSpawnIntervalSeconds)) || Number(fallingCupSpawnIntervalSeconds) < 2 || Number(fallingCupSpawnIntervalSeconds) > 10)
+    ) {
+      setSaveError("ความเร็วตกต้องอยู่ระหว่าง 0.05–0.20 และช่วงเวลาปล่อยวัตถุต้องอยู่ระหว่าง 2–10 วินาที");
+      return false;
+    }
+    if (
+      movementTracking === "virtual_grip" && virtualGripGameType === "path-drag" &&
+      (!pathDragTargetLabel || !Number.isInteger(Number(pathDragRoundTimeSeconds)) ||
+        Number(pathDragRoundTimeSeconds) < 5 || Number(pathDragRoundTimeSeconds) > 120)
+    ) {
+      setSaveError("เลือกวัตถุและกำหนดเวลาในแต่ละรอบระหว่าง 5–120 วินาทีสำหรับเกมลากตามเส้นทาง");
+      return false;
+    }
     if (isPoseExercise && !hasValidMovementLandmarks) {
       setSaveError(
         timelineFrames.length < 3
           ? "ข้อมูลโครงกระดูกต้องมีอย่างน้อย 3 เฟรมเพื่อกำหนดจุดตรวจสอบทั้งสามจุด"
           : "กำหนดจุดตรวจสอบท่าเริ่มต้น จุดสูงสุด และการกลับสู่ท่าเริ่มต้นตามลำดับก่อนบันทึก"
       );
-      return;
+      return false;
     }
     const poseReference =
       (calibration
@@ -941,7 +1002,7 @@ export function ExerciseAiPage({
             : undefined) ?? undefined;
     if (isPoseExercise && !poseReference) {
       setSaveError("สแกนวิดีโอสาธิตเพื่อสร้างข้อมูลอ้างอิงท่าทางก่อนบันทึก");
-      return;
+      return false;
     }
     setSaveBusy(true);
     setSaveError(null);
@@ -973,23 +1034,27 @@ export function ExerciseAiPage({
               }
             : movementTracking === "virtual_grip"
               ? {
-                  targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined,
                   repetitions: repetitions ? Number(repetitions) : undefined,
-                  holdSeconds: holdSeconds ? Number(holdSeconds) : undefined,
-                  virtualGripGameType: virtualGripGameType ?? undefined
+                  virtualGripGameType: virtualGripGameType ?? undefined,
+                  ...(virtualGripGameType === "ball-grip"
+                    ? { ballGripRoundTimeSeconds: Number(ballGripRoundTimeSeconds) }
+                    : virtualGripGameType === "falling-cup"
+                      ? {
+                          fallingCupFallSpeed: Number(fallingCupFallSpeed),
+                          fallingCupSpawnIntervalSeconds: Number(fallingCupSpawnIntervalSeconds)
+                        }
+                      : virtualGripGameType === "path-drag"
+                        ? { pathDragTargetLabel, pathDragRoundTimeSeconds: Number(pathDragRoundTimeSeconds) }
+                      : {})
                 }
               : { repetitions: repetitions ? Number(repetitions) : undefined },
           demoVideoFileId: uploadedClipId ?? targetExercise.demoVideoFileId ?? null
         };
-        if (targetExercise.status === "draft") {
-          await updateExerciseDraft(token, targetExercise.id, payload);
-          targetExercise.baseCriteria = payload.baseCriteria;
-          setSavedExerciseName(targetExercise.name);
-        } else {
-          const { exercise: created } = await createExerciseVersion(token, targetExercise.id, payload);
-          setSavedExerciseName(`${created.name} (new draft v${created.versionNumber})`);
-        }
-        return;
+        // Always update the exercise in place — no new version created regardless of status
+        await updateExerciseDraft(token, targetExercise.id, payload);
+        targetExercise.baseCriteria = payload.baseCriteria;
+        setSavedExerciseName(targetExercise.name);
+        return true;
       }
 
       if (isPoseExercise && !uploadedClipId) {
@@ -1004,20 +1069,37 @@ export function ExerciseAiPage({
           ? { repetitions: repetitions ? Number(repetitions) : undefined, holdSeconds: holdSeconds ? Number(holdSeconds) : undefined, targetAngleDeg: targetRom, poseReference }
           : movementTracking === "virtual_grip"
             ? {
-                targetGripStrength: targetGripStrength ? Number(targetGripStrength) : undefined,
                 repetitions: repetitions ? Number(repetitions) : undefined,
-                holdSeconds: holdSeconds ? Number(holdSeconds) : undefined,
                 virtualGripGameType: virtualGripGameType ?? undefined,
+                ...(virtualGripGameType === "ball-grip"
+                  ? { ballGripRoundTimeSeconds: Number(ballGripRoundTimeSeconds) }
+                  : virtualGripGameType === "falling-cup"
+                    ? {
+                        fallingCupFallSpeed: Number(fallingCupFallSpeed),
+                        fallingCupSpawnIntervalSeconds: Number(fallingCupSpawnIntervalSeconds)
+                      }
+                    : virtualGripGameType === "path-drag"
+                      ? { pathDragTargetLabel, pathDragRoundTimeSeconds: Number(pathDragRoundTimeSeconds) }
+                    : {})
               }
             : { repetitions: repetitions ? Number(repetitions) : undefined },
         demoVideoFileId: uploadedClipId
       });
       setSavedExerciseName(exerciseName.trim());
       onCreated(exerciseName.trim());
+      return true;
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
+      return false;
     } finally {
       setSaveBusy(false);
+    }
+  };
+
+  const handleConfirmSave = async () => {
+    const success = await handleSave();
+    if (success) {
+      setConfirmAction(null);
     }
   };
 
@@ -1033,6 +1115,30 @@ export function ExerciseAiPage({
       setSaveError(err instanceof ApiError ? err.message : action === "publish" ? "เผยแพร่ท่าบริหารไม่สำเร็จ" : "เก็บท่าบริหารเข้าคลังไม่สำเร็จ");
     } finally {
       setLifecycleBusy(null);
+    }
+  };
+
+  const handleDuplicate = async (): Promise<boolean> => {
+    if (!targetExercise || !token) return false;
+    setDuplicateBusy(true);
+    setDuplicateError(null);
+    try {
+      const res = await duplicateExercise(token, targetExercise.id);
+      const newName = res.exercise?.name || `${targetExercise.name} (copy)`;
+      onCreated(newName);
+      return true;
+    } catch (err) {
+      setDuplicateError(err instanceof ApiError ? err.message : "สร้างสำเนาไม่สำเร็จ กรุณาลองอีกครั้ง");
+      return false;
+    } finally {
+      setDuplicateBusy(false);
+    }
+  };
+
+  const handleConfirmDuplicate = async () => {
+    const success = await handleDuplicate();
+    if (success) {
+      setConfirmAction(null);
     }
   };
 
@@ -1170,7 +1276,32 @@ export function ExerciseAiPage({
         difficulty: difficulty === "easy" ? "Easy" : difficulty === "medium" ? "Moderate" : "Hard",
         virtualGripGameType: movementTracking === "virtual_grip" ? (virtualGripGameType ?? undefined) : undefined
       },
-      testConfig: { poseReference, exerciseLibraryId: targetExercise?.id ?? null, demoVideoUrl, virtualGripGameType: movementTracking === "virtual_grip" ? virtualGripGameType : null },
+      testConfig: {
+        poseReference,
+        exerciseLibraryId: targetExercise?.id ?? null,
+        demoVideoUrl,
+        virtualGripGameType: movementTracking === "virtual_grip" ? virtualGripGameType : null,
+        ballGripRoundTimeSeconds:
+          movementTracking === "virtual_grip" && virtualGripGameType === "ball-grip"
+            ? Number(ballGripRoundTimeSeconds)
+            : undefined,
+        fallingCupFallSpeed:
+          movementTracking === "virtual_grip" && virtualGripGameType === "falling-cup"
+            ? Number(fallingCupFallSpeed)
+            : undefined,
+        fallingCupSpawnIntervalSeconds:
+          movementTracking === "virtual_grip" && virtualGripGameType === "falling-cup"
+            ? Number(fallingCupSpawnIntervalSeconds)
+            : undefined,
+        pathDragTargetLabel:
+          movementTracking === "virtual_grip" && virtualGripGameType === "path-drag"
+            ? pathDragTargetLabel
+            : undefined,
+        pathDragRoundTimeSeconds:
+          movementTracking === "virtual_grip" && virtualGripGameType === "path-drag"
+            ? Number(pathDragRoundTimeSeconds)
+            : undefined
+      },
       ownsDemoVideoUrl: Boolean(baseClip)
     });
     setTestPaused(false);
@@ -1274,8 +1405,20 @@ export function ExerciseAiPage({
             <div className="ai-banner ai-banner-success">
               <CheckCircle2 size={20} />
               <div>
-                <strong>สร้างท่าบริหารสำเร็จ</strong>
-                <div>บันทึก “{savedExerciseName}” เป็นฉบับร่างแล้ว สามารถเผยแพร่ได้จากคลังท่าบริหาร</div>
+                <strong>
+                  {targetExercise
+                    ? "บันทึกการเปลี่ยนแปลงสำเร็จ"
+                    : movementTracking === "virtual_grip"
+                      ? "สร้างเกมฝึกสำเร็จ"
+                      : "สร้างท่าบริหารสำเร็จ"}
+                </strong>
+                <div>
+                  {targetExercise
+                    ? `บันทึกการเปลี่ยนแปลงของ “${savedExerciseName}” แล้ว`
+                    : movementTracking === "virtual_grip"
+                      ? `บันทึกการตั้งค่าเกม “${savedExerciseName}” เป็นฉบับร่างแล้ว สามารถเผยแพร่ได้จากคลังท่าบริหาร`
+                      : `บันทึก “${savedExerciseName}” เป็นฉบับร่างแล้ว สามารถเผยแพร่ได้จากคลังท่าบริหาร`}
+                </div>
               </div>
             </div>
           )}
@@ -1291,8 +1434,7 @@ export function ExerciseAiPage({
               <History size={16} />
               <div>
                 <strong>
-                  ประวัติเวอร์ชัน · v{targetExercise.versionNumber}
-                  {targetExercise.versions.length > 1 ? ` จาก ${targetExercise.versions.length}` : ""} · {targetExercise.name}
+                  ประวัติเวอร์ชัน · {targetExercise.name}
                 </strong>
                 <div>
                   สร้างเมื่อ {targetExercise.createdAtLabel} โดย {targetExercise.createdByName || "นักกายภาพบำบัด"} ·{" "}
@@ -1305,7 +1447,7 @@ export function ExerciseAiPage({
           {targetExercise && (
             <div className={`ai-lifecycle-bar ${targetExercise.status}`}>
               <div>
-                <strong>{targetExercise.name} · v{targetExercise.versionNumber}</strong>
+                <strong>{targetExercise.name}</strong>
                 <span>{targetExercise.status === "active" ? "กำลังใช้งาน — การบันทึกการแก้ไขจะสร้างฉบับร่างเวอร์ชันใหม่" : targetExercise.status === "draft" ? "ฉบับร่าง — การเปลี่ยนแปลงจะบันทึกในเวอร์ชันนี้" : "เก็บถาวร — เวอร์ชันนี้ดูได้อย่างเดียว"}</span>
               </div>
               {isOwner && !isArchived && (
@@ -1831,11 +1973,11 @@ export function ExerciseAiPage({
                   {targetExercise ? (
                     <>
                       <strong>
-                        กำลังแก้ไข: {targetExercise.name} · v{targetExercise.versionNumber}
+                        กำลังแก้ไข: {targetExercise.name}
                       </strong>
                       <span>
                         {targetExercise.status === "active"
-                          ? `บันทึกแล้วจะสร้างฉบับร่าง v${targetExercise.versionNumber + 1} โดยฉบับที่ใช้งานอยู่จะไม่เปลี่ยนแปลง`
+                          ? `บันทึกการเปลี่ยนแปลงลงในฉบับร่างนี้`
                           : targetExercise.status === "archived"
                             ? "เวอร์ชันเก็บถาวรเปิดดูได้อย่างเดียว"
                             : "บันทึกการเปลี่ยนแปลงลงในฉบับร่างนี้"}
@@ -1941,59 +2083,273 @@ export function ExerciseAiPage({
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={handleSave}
-                    disabled={!canSave || saveBusy}
+                    onClick={() => {
+                      setSaveError(null);
+                      setConfirmAction("save");
+                    }}
+                    disabled={!canSave || saveBusy || duplicateBusy}
                   >
                     {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
-                    {targetExercise?.status === "active"
-                      ? `บันทึกเป็นฉบับร่าง v${targetExercise.versionNumber + 1}`
-                      : targetExercise
-                        ? "บันทึกการเปลี่ยนแปลง"
-                        : "สร้างท่าบริหาร"}
+                    {targetExercise
+                      ? "บันทึกการเปลี่ยนแปลง"
+                      : "สร้างท่าบริหาร"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button ai-duplicate-button"
+                    onClick={() => {
+                      setDuplicateError(null);
+                      setConfirmAction("duplicate");
+                    }}
+                    disabled={!targetExercise || duplicateBusy || saveBusy || (!isOwner && Boolean(targetExercise))}
+                    title={
+                      !isOwner && Boolean(targetExercise)
+                        ? "เฉพาะผู้สร้างเท่านั้นที่สร้างสำเนาได้"
+                        : targetExercise
+                          ? "สร้างสำเนาของท่าบริหารนี้"
+                          : "เลือกหรือบันทึกท่าบริหารก่อนสร้างใหม่จากนี้"
+                    }
+                  >
+                    {duplicateBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+                    สร้างใหม่จากนี้
                   </button>
                 </div>
 
                 {saveError && <p className="ai-error">{saveError}</p>}
+                {duplicateError && <p className="ai-error">{duplicateError}</p>}
                 {savedExerciseName && (
                   <p className="ai-success">
-                    <CheckCircle2 size={16} /> สร้าง “{savedExerciseName}” เป็นฉบับร่างแล้ว — เผยแพร่ได้จากคลังท่าบริหาร
+                    <CheckCircle2 size={16} /> บันทึก “{savedExerciseName}” สำเร็จ
                   </p>
                 )}
               </section>
 
-              <section className="creation-section-card ai-manual-criteria-card ai-card-full">
+              <section className="creation-section-card ai-manual-criteria-card">
                 <div className="ai-card-step-tag">
-                  ขั้นตอนที่ {isHandTrackingExercise ? 3 : 2} · เกณฑ์ท่าบริหาร
+                  ขั้นตอนที่ {isHandTrackingExercise ? 3 : 2} · {movementTracking === "virtual_grip" ? "การตั้งค่าเกม" : "เกณฑ์ท่าบริหาร"}
                 </div>
                 <div className="creation-section-header">
                   {movementTracking === "virtual_grip" ? <Hand size={20} /> : <Dumbbell size={20} />}
                   <div>
-                    <strong>{movementTracking === "virtual_grip" ? "เกณฑ์การวัดแรงบีบมือ" : "เกณฑ์ท่าบริหาร"}</strong>
-                    <p className="library-card-sub">กำหนดเกณฑ์ที่จะใช้เมื่อมอบหมายกิจกรรมนี้ให้ผู้ป่วย</p>
+                    <strong>{movementTracking === "virtual_grip" ? "การตั้งค่าเกมติดตามมือ" : "เกณฑ์ท่าบริหาร"}</strong>
+                    <p className="library-card-sub">{movementTracking === "virtual_grip" ? "กำหนดรูปแบบและความยากของเกมก่อนมอบหมายกิจกรรมนี้ให้ผู้ป่วย" : "กำหนดเกณฑ์ที่จะใช้เมื่อมอบหมายกิจกรรมนี้ให้ผู้ป่วย"}</p>
                   </div>
                 </div>
-                {movementTracking === "virtual_grip" && (
-                  <label className="ai-field">แรงบีบมือเป้าหมาย
-                    <input className="ai-input" type="number" min="0" value={targetGripStrength} onChange={(event) => setTargetGripStrength(event.target.value)} disabled={isArchived || !isOwner} />
+                {movementTracking === "virtual_grip" && virtualGripGameType === "ball-grip" && (
+                  <label className="ai-field">เวลาในแต่ละรอบ (วินาที)
+                    <input
+                      className="ai-input"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={ballGripRoundTimeSeconds}
+                      onChange={(event) => setBallGripRoundTimeSeconds(event.target.value)}
+                      disabled={isArchived || !isOwner}
+                    />
                   </label>
                 )}
-                {movementTracking === "virtual_grip" && (
-                  <label className="ai-field">ระยะเวลาค้างไว้ (วินาที)
-                    <input className="ai-input" type="number" min="0" value={holdSeconds} onChange={(event) => setHoldSeconds(event.target.value)} disabled={isArchived || !isOwner} />
-                  </label>
+                {movementTracking === "virtual_grip" && virtualGripGameType === "falling-cup" && (
+                  <>
+                    <label className="ai-field">ความเร็วการตก (0.05–0.20)
+                      <input
+                        className="ai-input"
+                        type="number"
+                        min="0.05"
+                        max="0.20"
+                        step="0.01"
+                        value={fallingCupFallSpeed}
+                        onChange={(event) => setFallingCupFallSpeed(event.target.value)}
+                        disabled={isArchived || !isOwner}
+                      />
+                    </label>
+                    <label className="ai-field">ช่วงเวลาปล่อยวัตถุ (วินาที)
+                      <input
+                        className="ai-input"
+                        type="number"
+                        min="2"
+                        max="10"
+                        step="0.5"
+                        value={fallingCupSpawnIntervalSeconds}
+                        onChange={(event) => setFallingCupSpawnIntervalSeconds(event.target.value)}
+                        disabled={isArchived || !isOwner}
+                      />
+                    </label>
+                  </>
+                )}
+                {movementTracking === "virtual_grip" && virtualGripGameType === "path-drag" && (
+                  <>
+                    <label className="ai-field">วัตถุที่ให้ AI ตรวจจับ
+                      <select
+                        className="ai-input"
+                        value={pathDragTargetLabel}
+                        onChange={(event) => setPathDragTargetLabel(event.target.value)}
+                        disabled={isArchived || !isOwner}
+                      >
+                        <option value="">— เลือกวัตถุ —</option>
+                        {PATH_DRAG_TARGET_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <span className="library-card-sub">AI จะตรวจจับและติดตามเฉพาะวัตถุที่เลือก</span>
+                    </label>
+                    <label className="ai-field">เวลาในแต่ละรอบ (วินาที)
+                      <input
+                        className="ai-input"
+                        type="number"
+                        min="5"
+                        max="120"
+                        step="1"
+                        value={pathDragRoundTimeSeconds}
+                        onChange={(event) => setPathDragRoundTimeSeconds(event.target.value)}
+                        disabled={isArchived || !isOwner}
+                      />
+                    </label>
+                  </>
                 )}
                 <div className="ai-save-actions">
-                  <button type="button" className="primary-button" onClick={handleSave} disabled={!canSave || saveBusy}>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => {
+                      setSaveError(null);
+                      setConfirmAction("save");
+                    }}
+                    disabled={!canSave || saveBusy || duplicateBusy}
+                  >
                     {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
-                    {targetExercise?.status === "active" ? `บันทึกเป็นฉบับร่าง v${targetExercise.versionNumber + 1}` : targetExercise ? "บันทึกการเปลี่ยนแปลง" : "สร้างฉบับร่าง"}
+                    {targetExercise ? "บันทึกการเปลี่ยนแปลง" : "สร้างฉบับร่าง"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button ai-duplicate-button"
+                    onClick={() => {
+                      setDuplicateError(null);
+                      setConfirmAction("duplicate");
+                    }}
+                    disabled={!targetExercise || duplicateBusy || saveBusy || (!isOwner && Boolean(targetExercise))}
+                    title={
+                      !isOwner && Boolean(targetExercise)
+                        ? "เฉพาะผู้สร้างเท่านั้นที่สร้างสำเนาได้"
+                        : targetExercise
+                          ? "สร้างสำเนาของท่าบริหารนี้"
+                          : "เลือกหรือบันทึกท่าบริหารก่อนสร้างใหม่จากนี้"
+                    }
+                  >
+                    {duplicateBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+                    สร้างใหม่จากนี้
                   </button>
                 </div>
                 {saveError && <p className="ai-error">{saveError}</p>}
+                {duplicateError && <p className="ai-error">{duplicateError}</p>}
               </section>
 
           </div>
         </main>
       </div>
+
+      {confirmAction && (
+        <div
+          className="therapist-panel-scrim"
+          onClick={() => {
+            if (!saveBusy && !duplicateBusy) {
+              setConfirmAction(null);
+            }
+          }}
+        >
+          <div
+            className="pd-modal pd-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="exercise-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="therapist-detail-header">
+              <strong id="exercise-confirm-title">
+                {confirmAction === "save"
+                  ? targetExercise
+                    ? "ยืนยันการบันทึกการเปลี่ยนแปลง"
+                    : "ยืนยันการสร้างท่าบริหาร"
+                  : "ยืนยันการสร้างใหม่จากนี้"}
+              </strong>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setConfirmAction(null)}
+                disabled={saveBusy || duplicateBusy}
+                aria-label="ปิด"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="pd-confirm-message">
+              {confirmAction === "save" ? (
+                targetExercise ? (
+                  <>
+                    ต้องการบันทึกการเปลี่ยนแปลงของท่าบริหาร <strong>{exerciseName.trim() || targetExercise.name}</strong> หรือไม่?
+                  </>
+                ) : (
+                  <>
+                    ต้องการสร้างท่าบริหาร <strong>{exerciseName.trim() || "ท่าบริหารใหม่"}</strong> เป็นฉบับร่างใหม่หรือไม่?
+                  </>
+                )
+              ) : (
+                <>
+                  ต้องการสร้างท่าบริหารใหม่โดยคัดลอกข้อมูลจาก <strong>{targetExercise?.name}</strong> หรือไม่?
+                  ระบบจะสร้างเป็นท่าบริหารฉบับร่างใหม่ในคลังท่าบริหาร
+                </>
+              )}
+            </p>
+
+            {confirmAction === "save" && saveError && (
+              <p className="ai-error" style={{ margin: "0 0 12px" }}>
+                {saveError}
+              </p>
+            )}
+            {confirmAction === "duplicate" && duplicateError && (
+              <p className="ai-error" style={{ margin: "0 0 12px" }}>
+                {duplicateError}
+              </p>
+            )}
+
+            <div className="pd-confirm-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setConfirmAction(null)}
+                disabled={saveBusy || duplicateBusy}
+              >
+                ยกเลิก
+              </button>
+              {confirmAction === "save" ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleConfirmSave}
+                  disabled={saveBusy}
+                >
+                  {saveBusy ? <Loader2 size={16} className="spin-icon" /> : <Save size={16} />}
+                  {saveBusy
+                    ? "กำลังบันทึก…"
+                    : targetExercise
+                      ? "ยืนยันและบันทึก"
+                      : "ยืนยันและสร้าง"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleConfirmDuplicate}
+                  disabled={duplicateBusy}
+                >
+                  {duplicateBusy ? <Loader2 size={16} className="spin-icon" /> : <Plus size={16} />}
+                  {duplicateBusy ? "กำลังสร้างสำเนา…" : "ยืนยันและสร้างใหม่"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

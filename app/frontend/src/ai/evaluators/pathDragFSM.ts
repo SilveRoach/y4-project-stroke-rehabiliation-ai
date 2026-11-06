@@ -10,7 +10,7 @@ import {
 import { generatePath, nextMixedKind, projectOntoPath, Rng } from '../pathGame/pathGenerator';
 import { computePathRoundResult, pathSampleQuality } from '../scoring/pathGameScoreEngine';
 
-/** รัศมีโซนจุดเริ่มต้น (พิกเซลบน canvas 640 กว้าง) — ถือวัตถุเข้ามาในโซนนี้ถึงจะเริ่มจับเวลา */
+/** รัศมีโซนจุดเริ่มต้น (พิกเซลบน canvas 640 กว้าง) — ต้องเริ่มลากจากจุดนี้ */
 export const PATH_START_RADIUS_PX = 36;
 
 /** ต้องลากไปถึงสัดส่วนนี้ของความยาวเส้นถึงถือว่า "ถึงปลายทาง" — ไม่ใช่ 1.0 เพราะจุดกึ่งกลางฝ่ามือสั่นเล็กน้อยตอนปลายเส้น */
@@ -51,8 +51,8 @@ function dist(a: PathPoint, b: PathPoint): number {
 /**
  * ควบคุมกติกาเกม "ลากวัตถุจริงตามเส้นทาง" — pure state machine ไม่ยุ่งกับ canvas/กล้อง (วาดผ่าน ai/render/pathGameRenderer.ts)
  *
- * วงจรต่อรอบ: 'ready' (แสดงเส้นทางใหม่ ผู้ป่วยหยิบวัตถุมาวางที่จุดเริ่ม ยังไม่จับเวลา) → 'dragging' (ถือวัตถุอยู่ในโซนเริ่มต้น
- * เริ่มจับเวลา ลากไปตามทางจนถึงปลายทางหรือหมดเวลา) → 'roundEnd' (พักแสดงผลรอบ PATH_INTERMISSION_MS) → รอบถัดไป 'ready'
+ * วงจรต่อรอบ: 'ready' (แสดงเส้นทางใหม่และเริ่มนับเวลาทันที รอผู้ป่วยหยิบวัตถุมาวางที่จุดเริ่ม) → 'dragging'
+ * (ลากไปตามทางจนถึงปลายทางหรือหมดเวลา) → 'roundEnd' (พักแสดงผลรอบ PATH_INTERMISSION_MS) → รอบถัดไป 'ready'
  * จนครบ totalRounds → 'gameOver' ทุกรอบสร้างเส้นทางใหม่ (สุ่มรูปร่างใหม่) และสลับทิศซ้าย↔ขวา เพื่อให้จุดเริ่มของรอบถัดไป
  * อยู่ใกล้จุดที่ผู้ป่วยวางวัตถุไว้ตอนจบรอบก่อน (ไม่ต้องหอบวัตถุข้ามจอ)
  *
@@ -71,7 +71,7 @@ export class PathDragFSM {
   private lastMixedKind: PathSegmentKind | null = null;
 
   // สถานะรอบปัจจุบัน
-  private dragStartMs = 0;
+  private roundStartMs: number | null = null;
   private lastTs = 0;
   private progressS = 0;
   private qualityWeightedMs = 0;
@@ -118,7 +118,7 @@ export class PathDragFSM {
     this.roundNumber = roundNumber;
     this.path = this.makePath(roundNumber);
     this.phase = 'ready';
-    this.dragStartMs = 0;
+    this.roundStartMs = null;
     this.lastTs = 0;
     this.progressS = 0;
     this.qualityWeightedMs = 0;
@@ -138,7 +138,7 @@ export class PathDragFSM {
   }
 
   private endRound(timestampMs: number, completed: boolean, skipped: boolean): PathRoundResult {
-    const elapsedSec = this.phase === 'dragging' ? Math.max(0, (timestampMs - this.dragStartMs) / 1000) : 0;
+    const elapsedSec = this.roundStartMs === null ? 0 : Math.max(0, (timestampMs - this.roundStartMs) / 1000);
     const timeUsedSec = Math.min(elapsedSec, this.config.roundTimeSec);
     const progressRatio = this.path.totalLength > 0 ? this.progressS / this.path.totalLength : 0;
     const result = computePathRoundResult({
@@ -177,15 +177,22 @@ export class PathDragFSM {
       return null;
     }
 
+    if (this.roundStartMs === null) {
+      this.roundStartMs = ts;
+      this.lastTs = ts;
+    }
+
     if (this.phase === 'ready') {
       this.lastTs = ts;
       this.holding = holdingNow;
       this.currentDistance = holdingNow && handPoint ? projectOntoPath(this.path, handPoint).distance : null;
       if (holdingNow && handPoint && dist(handPoint, this.path.points[0]) <= PATH_START_RADIUS_PX) {
         this.phase = 'dragging';
-        this.dragStartMs = ts;
         this.notHoldingSinceMs = null;
         this.dropCounted = false;
+      }
+      if (ts - this.roundStartMs >= this.config.roundTimeSec * 1000) {
+        return this.endRound(ts, false, false);
       }
       return null;
     }
@@ -234,17 +241,21 @@ export class PathDragFSM {
     if (this.progressS >= this.path.totalLength * FINISH_PROGRESS_RATIO) {
       return this.endRound(ts, true, false);
     }
-    if (ts - this.dragStartMs >= this.config.roundTimeSec * 1000) {
+    if (this.roundStartMs !== null && ts - this.roundStartMs >= this.config.roundTimeSec * 1000) {
       return this.endRound(ts, false, false);
     }
     return null;
   }
 
   snapshot(): PathGameSnapshot {
-    const dragging = this.phase === 'dragging';
-    const elapsedMs = dragging ? Math.max(0, this.lastTs - this.dragStartMs) : 0;
+    const timerRunning = this.phase === 'ready' || this.phase === 'dragging';
+    const elapsedMs = timerRunning && this.roundStartMs !== null
+      ? Math.max(0, this.lastTs - this.roundStartMs)
+      : 0;
     const limitMs = this.config.roundTimeSec * 1000;
-    const timeRemainingSec = dragging ? Math.max(0, (limitMs - elapsedMs) / 1000) : this.config.roundTimeSec;
+    const timeRemainingSec = timerRunning
+      ? Math.max(0, (limitMs - elapsedMs) / 1000)
+      : this.config.roundTimeSec;
     const onPath = this.currentDistance === null ? null : this.currentDistance <= this.path.halfWidth;
     return {
       phase: this.phase,

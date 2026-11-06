@@ -33,6 +33,7 @@ export interface PatientExercise {
   id: string;
   name: string;
   nameTh?: string;
+  description?: string | null;
   trackingType: TrackingType;
   targetLabel: string;
   status: ExerciseStatus;
@@ -321,6 +322,15 @@ export interface ExerciseBaseCriteria {
   targetGripStrength?: number;
   repetitions?: number;
   holdSeconds?: number;
+  ballGripRoundTimeSeconds?: number;
+  /** Falling Cup's normal falling speed, in screen heights per second. */
+  fallingCupFallSpeed?: number;
+  /** Falling Cup's interval between object spawns, in seconds. */
+  fallingCupSpawnIntervalSeconds?: number;
+  /** COCO category the therapist selected for Path Drag object detection. */
+  pathDragTargetLabel?: string;
+  /** Path Drag time limit for each round, in seconds. */
+  pathDragRoundTimeSeconds?: number;
   /**
    * AI pose-reference authored in the AI workspace (CreateExerciseView flow):
    * angle definitions + FSM rep criteria + master/wrong-form feature samples
@@ -510,6 +520,7 @@ export interface ScheduledExercise {
   id: string;
   exerciseLibraryId: string; // points at an ExerciseLibraryItem.id
   exerciseName: string; // denormalized for display without a lookup
+  description?: string | null;
   versionLabel?: string; // e.g. "v3", mirrors ExerciseLibraryItem.versionNumber
   movementTracking: ExerciseTrackingType; // reuse existing enum, drives the row icon
   orderNumber: number;
@@ -656,6 +667,7 @@ export interface ExercisePerformanceAttempt {
   // assumption already applied to MedicalHistoryRecord.details and
   // ExerciseLibraryItem.baseCriteria (UI_MOCKUP_PLAN_NEWDB.md ยง4).
   aiMetrics?: Array<{ label: string; value: string }>;
+  videoIncludesOverlay?: boolean;
   aiEvaluatedAtLabel?: string;
 
   ptScore?: number;

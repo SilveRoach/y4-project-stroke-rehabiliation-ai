@@ -21,12 +21,10 @@
 //
 //   npm run prisma:seed:ai-exercises     (from app/backend)
 
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient, type ExerciseLibrary } from "@prisma/client";
 import fs from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
-
-const prisma = new PrismaClient();
 
 const SEED_DATA_DIR = path.resolve(__dirname, "seed-data");
 // Same default as src/config/env.ts. Stored paths stay RELATIVE ("media/…") so
@@ -76,10 +74,10 @@ const DEFS: AiExerciseDef[] = [
   }
 ];
 
-async function findTherapist() {
+async function findTherapist(db: PrismaClient) {
   const therapist =
-    (await prisma.user.findUnique({ where: { username: "therapist_arisa" } })) ??
-    (await prisma.user.findFirst({ where: { role: "therapist" } }));
+    (await db.user.findUnique({ where: { username: "therapist_arisa" } })) ??
+    (await db.user.findFirst({ where: { role: "therapist" } }));
   if (!therapist) {
     throw new Error('No therapist user found — run "npm run prisma:seed" first.');
   }
@@ -87,20 +85,20 @@ async function findTherapist() {
 }
 
 /** Copies a seed demo clip into the media dir and registers a files row (once per clip). */
-async function ensureDemoVideo(key: string, uploadedBy: string): Promise<string | null> {
+async function ensureDemoVideo(db: PrismaClient, key: string, uploadedBy: string): Promise<string | null> {
   const source = path.join(SEED_DATA_DIR, "demo-videos", `${key}.mp4`);
   if (!fs.existsSync(source)) return null;
 
   // Size is part of the name so replacing a clip in seed-data registers a NEW
   // file row (and the exercise is re-pointed to it) instead of reusing the old one.
   const originalName = `${key}-demo-${fs.statSync(source).size}.mp4`;
-  const existing = await prisma.file.findFirst({ where: { originalName, uploadedBy } });
+  const existing = await db.file.findFirst({ where: { originalName, uploadedBy } });
   if (existing && fs.existsSync(path.resolve(existing.storagePath))) return existing.id;
 
   fs.mkdirSync(MEDIA_DIR, { recursive: true });
   const storedName = `${randomUUID()}.mp4`;
   fs.copyFileSync(source, path.join(MEDIA_DIR, storedName));
-  const row = await prisma.file.create({
+  const row = await db.file.create({
     data: {
       fileType: "video",
       originalName,
@@ -114,41 +112,46 @@ async function ensureDemoVideo(key: string, uploadedBy: string): Promise<string 
   return row.id;
 }
 
-async function main() {
-  const therapist = await findTherapist();
-
+export async function ensureAiPoseExercises(db: PrismaClient, createdBy: string): Promise<ExerciseLibrary[]> {
+  const exercises: ExerciseLibrary[] = [];
   for (const def of DEFS) {
     const reference = JSON.parse(
       fs.readFileSync(path.join(SEED_DATA_DIR, "pose-references", `${def.key}.json`), "utf8")
-    ) as Record<string, unknown>;
+    ) as Prisma.InputJsonObject;
     // Authoring metadata that is not part of the scored reference.
+    const targetRom = reference.targetRom;
     const { exerciseId: _exerciseId, name: _name, difficulty, ...poseReference } = reference;
     void _exerciseId;
     void _name;
+    if (typeof targetRom !== "number") {
+      throw new Error(`Seed: "${def.name}" pose reference is missing a numeric targetRom.`);
+    }
 
     const baseCriteria = {
       repetitions: def.repetitions,
-      targetAngleDeg: poseReference.targetRom as number,
+      targetAngleDeg: targetRom,
       poseReference
     };
     const difficultyLevel = difficulty === "easy" || difficulty === "hard" ? difficulty : "medium";
-    const demoVideoFileId = await ensureDemoVideo(def.key, therapist.id);
+    const demoVideoFileId = await ensureDemoVideo(db, def.key, createdBy);
 
-    const existing = await prisma.exerciseLibrary.findFirst({ where: { name: def.name, versionNumber: 1 } });
+    const existing = await db.exerciseLibrary.findFirst({ where: { name: def.name, versionNumber: 1 } });
     if (existing) {
-      await prisma.exerciseLibrary.update({
+      const exercise = await db.exerciseLibrary.update({
         where: { id: existing.id },
         data: {
           description: def.description,
           difficultyLevel,
           baseCriteria,
           status: "active",
+          createdBy,
           ...(demoVideoFileId ? { demoVideoFileId } : {})
         }
       });
       console.log(`Seed: refreshed "${def.name}".`);
+      exercises.push(exercise);
     } else {
-      await prisma.exerciseLibrary.create({
+      const exercise = await db.exerciseLibrary.create({
         data: {
           versionNumber: 1,
           name: def.name,
@@ -158,17 +161,30 @@ async function main() {
           baseCriteria,
           demoVideoFileId,
           status: "active",
-          createdBy: therapist.id
+          createdBy
         }
       });
+      exercises.push(exercise);
       console.log(`Seed: created "${def.name}"${demoVideoFileId ? " (with demo video)" : ""}.`);
     }
   }
+  return exercises;
 }
 
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  })
-  .finally(() => prisma.$disconnect());
+async function main() {
+  const db = new PrismaClient();
+  try {
+    const therapist = await findTherapist(db);
+    await ensureAiPoseExercises(db, therapist.id);
+  } finally {
+    await db.$disconnect();
+  }
+}
+
+if (require.main === module) {
+  main()
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    })
+}

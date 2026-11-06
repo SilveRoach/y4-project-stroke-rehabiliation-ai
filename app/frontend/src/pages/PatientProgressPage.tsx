@@ -550,18 +550,13 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
   const viewIndex = selectedDayIndex !== null && plan.days[selectedDayIndex] ? selectedDayIndex : todayIndex;
   const viewDay = plan.days[viewIndex] ?? { status: "pending" as HeatmapDayStatus, exercises: [] };
 
-  // Next 2-3 pending days that already have exercises pre-scheduled by a PT
-  const comingUp = plan.days
-    .map((day, index) => ({ day, index }))
-    .filter(({ day, index }) => index > todayIndex && day.status === "pending" && day.exercises.length > 0)
-    .slice(0, 3);
-
   return (
     <>
       {plan.description && (
         <p className="pp-plan-description">{plan.description}</p>
       )}
 
+      <div className="pp-calendar-exercise-grid">
       <div className="summary-card">
         <div className="pd-calendar-header">
           <button
@@ -686,30 +681,8 @@ function PlanSection({ plan }: { plan: PatientRehabPlan }) {
           </div>
         )}
       </div>
-
-      <div className="summary-card">
-        <p className="eyebrow">กำลังจะถึง</p>
-        {comingUp.length === 0 ? (
-          <p className="pd-empty-note">ยังไม่มีวันถัดไปที่มีท่าบริหารกำหนดไว้</p>
-        ) : (
-          <div className="pd-session-list">
-            {comingUp.map(({ day, index }) => (
-              <div className="pd-session-row" key={index}>
-                <div className="pp-history-row-label">
-                  <strong>{dayDateLabel(plan, index)}</strong>
-                  <small>
-                    {day.exercises.length} ท่าบริหาร &middot;{" "}
-                    {day.exercises.map((exercise) => exercise.exerciseName).join(", ")}
-                  </small>
-                </div>
-                <div className="pd-session-actions">
-                  <span className="badge-pill poor">{heatmapLabels[day.status]}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
+
     </>
   );
 }

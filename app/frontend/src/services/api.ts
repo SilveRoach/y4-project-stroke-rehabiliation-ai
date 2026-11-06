@@ -116,6 +116,17 @@ export function logout(token: string): Promise<void> {
   });
 }
 
+export function changeUserPassword(
+  token: string,
+  payload: { currentPassword: string; newPassword: string }
+): Promise<void> {
+  return apiRequest<void>("/auth/change-password", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token },
+    body: JSON.stringify(payload)
+  });
+}
+
 export interface CreateUserPayload {
   role: "therapist" | "admin" | "patient";
   // For Therapist/Admin, a chosen login username. For Patient, the login
@@ -612,6 +623,7 @@ export interface PatientTodayExercise {
   id: string;
   exerciseLibraryId: string;
   exerciseName: string;
+  description?: string | null;
   versionLabel: string;
   movementTracking: ExerciseTrackingType;
   difficultyLevel: ExerciseLibraryDifficulty;
@@ -649,6 +661,7 @@ export interface PatientTodayPlan {
 
 export interface PatientTodayData {
   patient: { id: string; displayName: string; avatarInitials: string; profilePictureFileId?: string | null };
+  todayDate: string;
   activePlans: { id: string; name: string }[];
   plans: PatientTodayPlan[];
   stats: { averageScore: number | null; completedSessions: number };
@@ -798,6 +811,7 @@ export interface ScheduleDayReviewData {
       completedAtIso: string | null;
       aiEvaluatedAtIso: string | null;
       aiMetrics: Array<{ label: string; value: string }> | null;
+      videoIncludesOverlay: boolean;
       currentScore: number | null;
       currentScoreSource: "ai" | "pt" | "manual" | null;
       therapistReviewed: boolean;
@@ -826,6 +840,7 @@ export async function submitExerciseResult(
   payload: {
     aiScore?: number;
     aiFeedback?: string;
+    videoIncludesOverlay?: boolean;
     /** label -> value chips (shown in the review page), e.g. { "จำนวนครั้งที่ทำ": "8/10" }. */
     aiMetrics?: Record<string, string>;
     /** Structured per-session numbers: repsCompleted, targetReps, repScores. */
@@ -840,6 +855,7 @@ export async function submitExerciseResult(
   body.append("file", video, fileName);
   if (payload.aiScore !== undefined) body.append("aiScore", String(payload.aiScore));
   if (payload.aiFeedback !== undefined) body.append("aiFeedback", payload.aiFeedback);
+  if (payload.videoIncludesOverlay !== undefined) body.append("videoIncludesOverlay", String(payload.videoIncludesOverlay));
   if (payload.aiMetrics !== undefined) body.append("aiMetrics", JSON.stringify(payload.aiMetrics));
   if (payload.performanceData !== undefined) body.append("performanceData", JSON.stringify(payload.performanceData));
 
@@ -1130,6 +1146,18 @@ export function createScheduledExercise(
   });
 }
 
+// POST /exercises/:id/duplicate — clone an exercise into a new family root (v1, draft).
+export function duplicateExercise(
+  token: string,
+  exerciseId: string
+): Promise<{ exercise: any }> {
+  return apiRequest<{ exercise: any }>(`/exercises/${exerciseId}/duplicate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+// PATCH /exercises/:id
 export function patchScheduledExercise(
   token: string,
   exerciseId: string,

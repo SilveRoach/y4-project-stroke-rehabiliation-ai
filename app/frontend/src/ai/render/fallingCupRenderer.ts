@@ -19,6 +19,8 @@ export interface DrawFallingCupOptions {
   dimOutsideBand?: boolean;
   /** วาดเฉพาะถ้วย+โซนมือ ไม่วาดของ (หน้าตั้งค่า/ก่อนเริ่มเกม) */
   hideObjects?: boolean;
+  /** Scale the cup's visual size and catch opening together. */
+  cupScale?: number;
 }
 
 function drawObject(ctx: CanvasRenderingContext2D, o: FallingObject, held: boolean, width: number, height: number, radius: number) {
@@ -73,12 +75,12 @@ export function drawFallingCupGame(
   height: number,
   options: DrawFallingCupOptions = {}
 ): void {
-  const { bandWarning = false, dimOutsideBand = false, hideObjects = false } = options;
+  const { bandWarning = false, dimOutsideBand = false, hideObjects = false, cupScale = 1 } = options;
   const objectRadius = 0.045 * height;
   const bandTopPx = snapshot.band.top * height;
   const bandBottomPx = snapshot.band.bottom * height;
   const cupCx = snapshot.cup.x * width;
-  const mouthHalfPx = snapshot.cup.mouthHalfWidth * height;
+  const mouthHalfPx = snapshot.cup.mouthHalfWidth * height * cupScale;
   const rimYPx = snapshot.cup.rimY * height;
 
   ctx.save();
@@ -104,12 +106,6 @@ export function drawFallingCupGame(
   ctx.lineTo(width, bandBottomPx);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.font = `bold 13px sans-serif`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = bandColor;
-  ctx.fillText('โซนมือ — ให้มืออยู่ในกรอบนี้', 10, bandTopPx + 6);
-
   // 3) ช่องทางปล่อยเหนือถ้วย: คอลัมน์โปร่งแสงจากล่างโซนมือถึงปากถ้วย บอกว่าปล่อยตรงไหนจะลงถ้วย
   ctx.fillStyle = 'rgba(41,182,246,0.12)';
   ctx.fillRect(cupCx - mouthHalfPx, bandBottomPx, mouthHalfPx * 2, rimYPx - bandBottomPx);
@@ -125,7 +121,7 @@ export function drawFallingCupGame(
   ctx.setLineDash([]);
 
   // 4) ถ้วย (สี่เหลี่ยมคางหมู ปากกว้าง ก้นแคบ) + จำนวนที่ใส่ได้ตรงกลาง
-  const cupHeight = 0.14 * height;
+  const cupHeight = 0.14 * height * cupScale;
   const bottomHalf = mouthHalfPx * 0.72;
   ctx.beginPath();
   ctx.moveTo(cupCx - mouthHalfPx, rimYPx);
@@ -135,10 +131,10 @@ export function drawFallingCupGame(
   ctx.closePath();
   ctx.fillStyle = CUP_BODY;
   ctx.fill();
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 6 * cupScale;
   ctx.strokeStyle = CUP_EDGE;
   ctx.stroke();
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 3 * cupScale;
   ctx.strokeStyle = CUP_ACCENT;
   ctx.stroke();
   ctx.font = `bold ${Math.round(cupHeight * 0.5)}px sans-serif`;

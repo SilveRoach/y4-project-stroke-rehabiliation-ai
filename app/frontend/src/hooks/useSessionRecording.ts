@@ -1,6 +1,5 @@
-// Session video recording (CAMERA_TRACKING_MOCKUP_PLAN.md §6.2). Wraps
-// MediaRecorder around the SAME MediaStream hooks/useCamera.ts already opened —
-// no second getUserMedia call — producing one Blob for the whole attempt (not
+// Session video recording (CAMERA_TRACKING_MOCKUP_PLAN.md §6.2). Records the
+// composed webcam + tracking/game canvas stream for one whole attempt (not
 // per-rep), matching exercise_performance_results' one-reference_video-per-attempt
 // granularity (docs/04-design/newdb.txt).
 //
@@ -51,7 +50,7 @@ export function useSessionRecording(stream: MediaStream | null): UseSessionRecor
   const [status, setStatus] = useState<RecordingStatus>("idle");
   const [result, setResult] = useState<RecordingResult | null>(null);
 
-  const isSupported = typeof MediaRecorder !== "undefined";
+  const isSupported = typeof MediaRecorder !== "undefined" && stream !== null;
 
   const start = useCallback(() => {
     if (!stream || !isSupported || recorderRef.current) {

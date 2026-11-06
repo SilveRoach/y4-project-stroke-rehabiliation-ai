@@ -3,10 +3,8 @@
  * ของที่ปล่อยจะตกลงไปในถ้วยเอง ได้ 1 แต้มต่อชิ้นที่ลงถ้วย ของที่ตกพื้น/ตกนอกถ้วยได้ 0 แต้ม จำนวนของตายตัว (totalObjects)
  * เล่นจนของชิ้นสุดท้ายถูกตัดสิน (ลงถ้วยหรือตกพื้น) แล้วจบเกม
  *
- * กติกา "โซนมือ" (ไอเดียเพิ่มเติม): มือต้องอยู่ในช่วงความสูงกลางจอ (bandTop..bandBottom ตามสัดส่วนความสูง canvas)
- * เท่านั้นเกมถึงเดิน — มือหลุดจอ (เกิน lostGraceMs) หรือสูง/ต่ำเกินช่วง → เกม PAUSE ทั้งหมด (ของหยุดตก ตัวจับเวลาหยุด ไม่รับ
- * สัญญาณจับ/ปล่อย) รอจนมือกลับเข้าโซนต่อเนื่อง resumeDwellMs แล้วเล่นต่อจากจุดเดิม ไม่เสียแต้มเพราะท่าผิด/มือหลุดกล้อง
- * เกมเริ่มต้นในสถานะ PAUSE เหมือนกัน (รอมือเข้าโซนก่อนปล่อยของชิ้นแรก)
+ * กติกา "โซนมือ" (ไอเดียเพิ่มเติม): เกมเริ่มต้นในสถานะ PAUSE เพื่อรอมือเข้าโซนก่อนปล่อยของชิ้นแรก
+ * หลังเริ่มเกมแล้ว หากไม่พบมือหรือมืออยู่นอกโซน ของจะยังตกต่อและเกมไม่หยุด; เมื่อพบมือยังเล่นได้ตามปกติ
  *
  * ทำงานเป็น pure state machine ไม่ยุ่งกับ canvas/กล้อง (วาดที่ ai/render/fallingCupRenderer.ts) พิกัดทั้งหมดเป็น normalized
  * 0..1 "มิเรอร์แล้ว" (พื้นที่เดียวกับที่วาดบนจอ) ส่วนรัศมี/ระยะ/ความเร็วเป็นสัดส่วนของ "ความสูง" canvas — ระยะแกน x คูณ
@@ -52,7 +50,7 @@ export interface FallingCupConfig {
   bandTop: number;
   /** ขอบล่างของโซนมือ (normalized y) */
   bandBottom: number;
-  /** ยอมให้ไม่พบมือต่อเนื่องได้นานแค่ไหนก่อนถือว่ามือหลุด (ms) — กันเฟรมที่ตรวจมือสะดุดชั่วครู่ ไม่ให้เกมสะดุดตาม */
+  /** ระยะเวลาที่ใช้ตำแหน่งมือล่าสุดแทน เมื่อการตรวจมือสะดุดชั่วครู่ (ms) */
   lostGraceMs: number;
   /** มือต้องอยู่ในโซนต่อเนื่องนานเท่านี้ (ms) ถึงจะกลับมาเล่นต่อ — กันกระพริบตอนมืออยู่ใกล้ขอบโซน */
   resumeDwellMs: number;
@@ -71,10 +69,10 @@ export const DEFAULT_FALLING_CUP_CONFIG: FallingCupConfig = {
   objectRadius: 0.045,
   grabRadius: 0.11,
   cupX: 0.5,
-  cupRimY: 0.82,
+  cupRimY: 0.72,
   cupMouthHalfWidth: 0.15,
-  bandTop: 0.25,
-  bandBottom: 0.75,
+  bandTop: 0.15,
+  bandBottom: 0.65,
   lostGraceMs: 300,
   resumeDwellMs: 600,
   minSpawnDistanceFromCup: 0.2,
@@ -156,6 +154,7 @@ export function classifyHandZone(
 export class FallingCupGameFSM {
   private readonly cfg: FallingCupConfig;
   private readonly rng: () => number;
+  private readonly baseCupMouthHalfWidth: number;
 
   private status: FallingCupStatus = 'paused';
   private pauseReason: FallingCupPauseReason = 'no-hand';
@@ -187,12 +186,19 @@ export class FallingCupGameFSM {
   constructor(config: Partial<FallingCupConfig> = {}, rng: () => number = Math.random) {
     this.cfg = { ...DEFAULT_FALLING_CUP_CONFIG, ...config };
     this.rng = rng;
+    this.baseCupMouthHalfWidth = this.cfg.cupMouthHalfWidth;
     this.nextSpawnAtMs = this.cfg.firstSpawnDelaySec * 1000;
   }
 
   setAspect(aspect: number): void {
     if (Number.isFinite(aspect) && aspect > 0) {
       this.cfg.aspect = aspect;
+    }
+  }
+
+  setCupScale(scale: number): void {
+    if (Number.isFinite(scale) && scale > 0) {
+      this.cfg.cupMouthHalfWidth = this.baseCupMouthHalfWidth * scale;
     }
   }
 
@@ -220,14 +226,7 @@ export class FallingCupGameFSM {
     if (zone === 'ok') this.okDwellMs += dt;
     else this.okDwellMs = 0;
 
-    if (this.status === 'playing') {
-      if (zone !== 'ok') {
-        this.status = 'paused';
-        this.pauseReason = zone;
-        this.okDwellMs = 0;
-        this.pauseCount += 1;
-      }
-    } else {
+    if (this.status === 'paused') {
       if (zone !== 'ok') this.pauseReason = zone;
       if (zone === 'ok' && this.okDwellMs >= this.cfg.resumeDwellMs) {
         this.status = 'playing';
@@ -240,8 +239,6 @@ export class FallingCupGameFSM {
       if (this.started) this.pausedMs += dt;
       return [];
     }
-    if (!hand) return []; // ไม่น่าถึงจุดนี้ (zone ok แปลว่ามีมือ) กันไว้เฉยๆ
-
     this.activeMs += dt;
     const resolved: FallingCupObjectResult[] = [];
 
@@ -252,35 +249,41 @@ export class FallingCupGameFSM {
     }
 
     // --- จับ / ปล่อย ---
-    if (input.gripState === 'open') this.armed = true;
-    if (this.heldId !== null) {
+    if (!hand && this.heldId !== null) {
       const held = this.objects.find((o) => o.id === this.heldId);
-      if (!held) {
-        this.heldId = null;
-      } else if (input.gripState === 'open') {
-        held.state = 'dropping'; // ปล่อยแล้วตกลงไปต่อ (ถ้าอยู่เหนือถ้วยจะลงถ้วยเอง ดูด้านล่าง)
-        this.heldId = null;
-      } else {
-        held.x = hand.x;
-        held.y = hand.y;
-      }
-    } else if (this.armed && input.gripState === 'closed') {
-      let best: FallingObject | null = null;
-      let bestDist = this.cfg.grabRadius;
-      for (const o of this.objects) {
-        if (o.state !== 'falling' && o.state !== 'dropping') continue;
-        const d = this.distance(o.x, o.y, hand.x, hand.y);
-        if (d <= bestDist) {
-          best = o;
-          bestDist = d;
+      if (held) held.state = 'dropping';
+      this.heldId = null;
+    } else if (hand) {
+      if (input.gripState === 'open') this.armed = true;
+      if (this.heldId !== null) {
+        const held = this.objects.find((o) => o.id === this.heldId);
+        if (!held) {
+          this.heldId = null;
+        } else if (input.gripState === 'open') {
+          held.state = 'dropping'; // ปล่อยแล้วตกลงไปต่อ (ถ้าอยู่เหนือถ้วยจะลงถ้วยเอง ดูด้านล่าง)
+          this.heldId = null;
+        } else {
+          held.x = hand.x;
+          held.y = hand.y;
         }
-      }
-      if (best) {
-        best.state = 'held';
-        best.x = hand.x;
-        best.y = hand.y;
-        this.heldId = best.id;
-        this.armed = false;
+      } else if (this.armed && input.gripState === 'closed' && zone === 'ok') {
+        let best: FallingObject | null = null;
+        let bestDist = this.cfg.grabRadius;
+        for (const o of this.objects) {
+          if (o.state !== 'falling' && o.state !== 'dropping') continue;
+          const d = this.distance(o.x, o.y, hand.x, hand.y);
+          if (d <= bestDist) {
+            best = o;
+            bestDist = d;
+          }
+        }
+        if (best) {
+          best.state = 'held';
+          best.x = hand.x;
+          best.y = hand.y;
+          this.heldId = best.id;
+          this.armed = false;
+        }
       }
     }
 

@@ -43,6 +43,7 @@ export const DEFAULT_BALL_GRIP_CONFIG: BallGripFsmConfig = {
 export interface BallGripSnapshot {
   /** Mirrored normalized video coordinates (multiply by canvas width/height). */
   ball: { x: number; y: number };
+  ballColor: string;
   target: { x: number; y: number; radius: number };
   phase: "seeking" | "dragging";
   /** 1 = round just started, 0 = out of time. */
@@ -84,10 +85,17 @@ function randomInRange(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
+const BALL_COLORS = ["#ff7043", "#42a5f5", "#ab47bc", "#26a69a", "#ffca28", "#ec407a"];
+
+function randomBallColor(): string {
+  return BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)];
+}
+
 export class VirtualBallGripFSM {
   private phase: Phase = "seeking";
   private repCounter = 0;
   private ball: Point;
+  private ballColor = randomBallColor();
   private target: Point;
 
   private frame: BallGripVisibleFrame = { x0: 0, y0: 0, x1: 1, y1: 1 };
@@ -140,6 +148,7 @@ export class VirtualBallGripFSM {
     this.timeRemainingRatio = 1;
     this.clearDrag();
     this.ball = this.spawnPoint();
+    this.ballColor = randomBallColor();
     this.target = this.spawnTargetAwayFrom(this.ball);
   }
 
@@ -163,6 +172,7 @@ export class VirtualBallGripFSM {
   snapshot(): BallGripSnapshot {
     return {
       ball: this.ball,
+      ballColor: this.ballColor,
       target: { ...this.target, radius: this.config.targetRadius },
       phase: this.phase,
       timeRemainingRatio: this.timeRemainingRatio
@@ -263,6 +273,7 @@ export class VirtualBallGripFSM {
 
     // Next round: new spawns, clock restarts on the next frame.
     this.ball = this.spawnPoint();
+    this.ballColor = randomBallColor();
     this.target = this.spawnTargetAwayFrom(this.ball);
     this.phase = "seeking";
     this.roundStartMs = null;

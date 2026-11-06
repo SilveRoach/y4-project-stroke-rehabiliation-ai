@@ -21,9 +21,9 @@ export interface UseCameraResult {
   status: CameraStatus;
   errorMessage: string | null;
   retry: () => void;
-  // §6.2 (CAMERA_TRACKING_MOCKUP_PLAN.md) — the raw MediaStream once status is
-  // "streaming", so hooks/useSessionRecording.ts can wrap MediaRecorder around the
-  // exact same stream instead of opening a second getUserMedia call.
+  // The raw camera MediaStream, shared by the preview and live tracking. The
+  // session recorder captures their composed canvas stream; it does not open a
+  // second camera request.
   stream: MediaStream | null;
 }
 
